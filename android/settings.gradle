@@ -1,6 +1,25 @@
-pluginManagement { includeBuild("../node_modules/@react-native/gradle-plugin") }
-plugins { id("com.facebook.react.settings") }
-extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
+// Configura o gerenciamento de plugins
+pluginManagement {
+    repositories {
+        mavenCentral()
+        google()
+        gradlePluginPortal()
+    }
+    includeBuild("../node_modules/@react-native/gradle-plugin")
+}
+
+// Adiciona os plugins necessários
+plugins {
+    id("com.facebook.react.settings")
+}
+
+// Configurações específicas do React Native
+extensions.configure<com.facebook.react.ReactSettingsExtension> { ex ->
+    ex.autolinkLibrariesFromCommand()
+}
+
+// Nome do projeto raiz
 rootProject.name = 'A1'
+
+// Inclui o módulo principal do aplicativo
 include ':app'
-includeBuild('../node_modules/@react-native/gradle-plugin')

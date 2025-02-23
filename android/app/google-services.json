@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "801346968665",
+    "project_id": "alert-2733a",
+    "storage_bucket": "alert-2733a.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:801346968665:android:89536a8434240d80e72548",
+        "android_client_info": {
+          "package_name": "com.company.alert"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCgHFcSD_o0N3JE5x_IaO1MO9yJX2WSZOI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
