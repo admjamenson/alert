@@ -1,0 +1,21 @@
+{
+  "name": "alert-backend",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "build:iso3166": "node scripts/build-iso3166.js",
+    "build:epidemic-registry": "node scripts/build-epidemic-registry.js",
+    "verify:epidemic": "node scripts/verify-epidemic-data.js",
+    "doctor:billing": "node scripts/check-billing-infra.js",
+    "test:billing": "node src/billing/runBillingChecks.js"
+  },
+  "dependencies": {
+    "@msgpack/msgpack": "^3.1.3",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "firebase-admin": "^12.6.0",
+    "stripe": "^18.1.0"
+  }
+}
