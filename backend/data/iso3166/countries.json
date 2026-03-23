@@ -1,0 +1,2252 @@
+[
+  {
+    "country": "AD",
+    "name_en": "Andorra",
+    "name_local": "Andorra",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "AE",
+    "name_en": "United Arab Emirates",
+    "name_local": "United Arab Emirates",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "AF",
+    "name_en": "Afghanistan",
+    "name_local": "Afghanistan",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "AG",
+    "name_en": "Antigua and Barbuda",
+    "name_local": "Antigua and Barbuda",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "AI",
+    "name_en": "Anguilla",
+    "name_local": "Anguilla",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "AL",
+    "name_en": "Albania",
+    "name_local": "Albania",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "AM",
+    "name_en": "Armenia",
+    "name_local": "Armenia",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "AO",
+    "name_en": "Angola",
+    "name_local": "Angola",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "AQ",
+    "name_en": "Antarctica",
+    "name_local": "Antarctica",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "AR",
+    "name_en": "Argentina",
+    "name_local": "Argentina",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "AS",
+    "name_en": "American Samoa",
+    "name_local": "American Samoa",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "AT",
+    "name_en": "Austria",
+    "name_local": "Austria",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "AU",
+    "name_en": "Australia",
+    "name_local": "Australia",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "AW",
+    "name_en": "Aruba",
+    "name_local": "Aruba",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "AX",
+    "name_en": "Åland Islands",
+    "name_local": "Åland Islands",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "AZ",
+    "name_en": "Azerbaijan",
+    "name_local": "Azerbaijan",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "BA",
+    "name_en": "Bosnia and Herzegovina",
+    "name_local": "Bosnia and Herzegovina",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "BB",
+    "name_en": "Barbados",
+    "name_local": "Barbados",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "BD",
+    "name_en": "Bangladesh",
+    "name_local": "Bangladesh",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "BE",
+    "name_en": "Belgium",
+    "name_local": "Belgium",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "BF",
+    "name_en": "Burkina Faso",
+    "name_local": "Burkina Faso",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "BG",
+    "name_en": "Bulgaria",
+    "name_local": "Bulgaria",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "BH",
+    "name_en": "Bahrain",
+    "name_local": "Bahrain",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "BI",
+    "name_en": "Burundi",
+    "name_local": "Burundi",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "BJ",
+    "name_en": "Benin",
+    "name_local": "Benin",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "BL",
+    "name_en": "Saint Barthélemy",
+    "name_local": "Saint Barthélemy",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "BM",
+    "name_en": "Bermuda",
+    "name_local": "Bermuda",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "BN",
+    "name_en": "Brunei",
+    "name_local": "Brunei",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "BO",
+    "name_en": "Bolivia",
+    "name_local": "Bolivia",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "BQ",
+    "name_en": "Caribbean Netherlands",
+    "name_local": "Caribbean Netherlands",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "BR",
+    "name_en": "Brazil",
+    "name_local": "Brazil",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "BS",
+    "name_en": "Bahamas",
+    "name_local": "Bahamas",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "BT",
+    "name_en": "Bhutan",
+    "name_local": "Bhutan",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "BV",
+    "name_en": "Bouvet Island",
+    "name_local": "Bouvet Island",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "BW",
+    "name_en": "Botswana",
+    "name_local": "Botswana",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "BY",
+    "name_en": "Belarus",
+    "name_local": "Belarus",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "BZ",
+    "name_en": "Belize",
+    "name_local": "Belize",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "CA",
+    "name_en": "Canada",
+    "name_local": "Canada",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "CC",
+    "name_en": "Cocos (Keeling) Islands",
+    "name_local": "Cocos (Keeling) Islands",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "CD",
+    "name_en": "DR Congo",
+    "name_local": "DR Congo",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "CF",
+    "name_en": "Central African Republic",
+    "name_local": "Central African Republic",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "CG",
+    "name_en": "Republic of the Congo",
+    "name_local": "Republic of the Congo",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "CH",
+    "name_en": "Switzerland",
+    "name_local": "Switzerland",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "CI",
+    "name_en": "Ivory Coast",
+    "name_local": "Ivory Coast",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "CK",
+    "name_en": "Cook Islands",
+    "name_local": "Cook Islands",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "CL",
+    "name_en": "Chile",
+    "name_local": "Chile",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "CM",
+    "name_en": "Cameroon",
+    "name_local": "Cameroon",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "CN",
+    "name_en": "China",
+    "name_local": "China",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "CO",
+    "name_en": "Colombia",
+    "name_local": "Colombia",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "CR",
+    "name_en": "Costa Rica",
+    "name_local": "Costa Rica",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "CU",
+    "name_en": "Cuba",
+    "name_local": "Cuba",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "CV",
+    "name_en": "Cape Verde",
+    "name_local": "Cape Verde",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "CW",
+    "name_en": "Curaçao",
+    "name_local": "Curaçao",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "CX",
+    "name_en": "Christmas Island",
+    "name_local": "Christmas Island",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "CY",
+    "name_en": "Cyprus",
+    "name_local": "Cyprus",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "CZ",
+    "name_en": "Czechia",
+    "name_local": "Czechia",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "DE",
+    "name_en": "Germany",
+    "name_local": "Germany",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "DJ",
+    "name_en": "Djibouti",
+    "name_local": "Djibouti",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "DK",
+    "name_en": "Denmark",
+    "name_local": "Denmark",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "DM",
+    "name_en": "Dominica",
+    "name_local": "Dominica",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "DO",
+    "name_en": "Dominican Republic",
+    "name_local": "Dominican Republic",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "DZ",
+    "name_en": "Algeria",
+    "name_local": "Algeria",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "EC",
+    "name_en": "Ecuador",
+    "name_local": "Ecuador",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "EE",
+    "name_en": "Estonia",
+    "name_local": "Estonia",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "EG",
+    "name_en": "Egypt",
+    "name_local": "Egypt",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "EH",
+    "name_en": "Western Sahara",
+    "name_local": "Western Sahara",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "ER",
+    "name_en": "Eritrea",
+    "name_local": "Eritrea",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "ES",
+    "name_en": "Spain",
+    "name_local": "Spain",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "ET",
+    "name_en": "Ethiopia",
+    "name_local": "Ethiopia",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "FI",
+    "name_en": "Finland",
+    "name_local": "Finland",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "FJ",
+    "name_en": "Fiji",
+    "name_local": "Fiji",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "FK",
+    "name_en": "Falkland Islands",
+    "name_local": "Falkland Islands",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "FM",
+    "name_en": "Micronesia",
+    "name_local": "Micronesia",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "FO",
+    "name_en": "Faroe Islands",
+    "name_local": "Faroe Islands",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "FR",
+    "name_en": "France",
+    "name_local": "France",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "GA",
+    "name_en": "Gabon",
+    "name_local": "Gabon",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "GB",
+    "name_en": "United Kingdom",
+    "name_local": "United Kingdom",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "GD",
+    "name_en": "Grenada",
+    "name_local": "Grenada",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "GE",
+    "name_en": "Georgia",
+    "name_local": "Georgia",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "GF",
+    "name_en": "French Guiana",
+    "name_local": "French Guiana",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "GG",
+    "name_en": "Guernsey",
+    "name_local": "Guernsey",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "GH",
+    "name_en": "Ghana",
+    "name_local": "Ghana",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "GI",
+    "name_en": "Gibraltar",
+    "name_local": "Gibraltar",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "GL",
+    "name_en": "Greenland",
+    "name_local": "Greenland",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "GM",
+    "name_en": "Gambia",
+    "name_local": "Gambia",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "GN",
+    "name_en": "Guinea",
+    "name_local": "Guinea",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "GP",
+    "name_en": "Guadeloupe",
+    "name_local": "Guadeloupe",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "GQ",
+    "name_en": "Equatorial Guinea",
+    "name_local": "Equatorial Guinea",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "GR",
+    "name_en": "Greece",
+    "name_local": "Greece",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "GS",
+    "name_en": "South Georgia",
+    "name_local": "South Georgia",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "GT",
+    "name_en": "Guatemala",
+    "name_local": "Guatemala",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "GU",
+    "name_en": "Guam",
+    "name_local": "Guam",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "GW",
+    "name_en": "Guinea-Bissau",
+    "name_local": "Guinea-Bissau",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "GY",
+    "name_en": "Guyana",
+    "name_local": "Guyana",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "HK",
+    "name_en": "Hong Kong",
+    "name_local": "Hong Kong",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "HM",
+    "name_en": "Heard Island and McDonald Islands",
+    "name_local": "Heard Island and McDonald Islands",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "HN",
+    "name_en": "Honduras",
+    "name_local": "Honduras",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "HR",
+    "name_en": "Croatia",
+    "name_local": "Croatia",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "HT",
+    "name_en": "Haiti",
+    "name_local": "Haiti",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "HU",
+    "name_en": "Hungary",
+    "name_local": "Hungary",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "ID",
+    "name_en": "Indonesia",
+    "name_local": "Indonesia",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "IE",
+    "name_en": "Ireland",
+    "name_local": "Ireland",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "IL",
+    "name_en": "Israel",
+    "name_local": "Israel",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "IM",
+    "name_en": "Isle of Man",
+    "name_local": "Isle of Man",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "IN",
+    "name_en": "India",
+    "name_local": "India",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "IO",
+    "name_en": "British Indian Ocean Territory",
+    "name_local": "British Indian Ocean Territory",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "IQ",
+    "name_en": "Iraq",
+    "name_local": "Iraq",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "IR",
+    "name_en": "Iran",
+    "name_local": "Iran",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "IS",
+    "name_en": "Iceland",
+    "name_local": "Iceland",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "IT",
+    "name_en": "Italy",
+    "name_local": "Italy",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "JE",
+    "name_en": "Jersey",
+    "name_local": "Jersey",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "JM",
+    "name_en": "Jamaica",
+    "name_local": "Jamaica",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "JO",
+    "name_en": "Jordan",
+    "name_local": "Jordan",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "JP",
+    "name_en": "Japan",
+    "name_local": "Japan",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "KE",
+    "name_en": "Kenya",
+    "name_local": "Kenya",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "KG",
+    "name_en": "Kyrgyzstan",
+    "name_local": "Kyrgyzstan",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "KH",
+    "name_en": "Cambodia",
+    "name_local": "Cambodia",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "KI",
+    "name_en": "Kiribati",
+    "name_local": "Kiribati",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "KM",
+    "name_en": "Comoros",
+    "name_local": "Comoros",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "KN",
+    "name_en": "Saint Kitts and Nevis",
+    "name_local": "Saint Kitts and Nevis",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "KP",
+    "name_en": "North Korea",
+    "name_local": "North Korea",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "KR",
+    "name_en": "South Korea",
+    "name_local": "South Korea",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "KW",
+    "name_en": "Kuwait",
+    "name_local": "Kuwait",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "KY",
+    "name_en": "Cayman Islands",
+    "name_local": "Cayman Islands",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "KZ",
+    "name_en": "Kazakhstan",
+    "name_local": "Kazakhstan",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "LA",
+    "name_en": "Laos",
+    "name_local": "Laos",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "LB",
+    "name_en": "Lebanon",
+    "name_local": "Lebanon",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "LC",
+    "name_en": "Saint Lucia",
+    "name_local": "Saint Lucia",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "LI",
+    "name_en": "Liechtenstein",
+    "name_local": "Liechtenstein",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "LK",
+    "name_en": "Sri Lanka",
+    "name_local": "Sri Lanka",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "LR",
+    "name_en": "Liberia",
+    "name_local": "Liberia",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "LS",
+    "name_en": "Lesotho",
+    "name_local": "Lesotho",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "LT",
+    "name_en": "Lithuania",
+    "name_local": "Lithuania",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "LU",
+    "name_en": "Luxembourg",
+    "name_local": "Luxembourg",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "LV",
+    "name_en": "Latvia",
+    "name_local": "Latvia",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "LY",
+    "name_en": "Libya",
+    "name_local": "Libya",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "MA",
+    "name_en": "Morocco",
+    "name_local": "Morocco",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "MC",
+    "name_en": "Monaco",
+    "name_local": "Monaco",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "MD",
+    "name_en": "Moldova",
+    "name_local": "Moldova",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "ME",
+    "name_en": "Montenegro",
+    "name_local": "Montenegro",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "MF",
+    "name_en": "Saint Martin",
+    "name_local": "Saint Martin",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "MG",
+    "name_en": "Madagascar",
+    "name_local": "Madagascar",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "MH",
+    "name_en": "Marshall Islands",
+    "name_local": "Marshall Islands",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "MK",
+    "name_en": "Macedonia",
+    "name_local": "Macedonia",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "ML",
+    "name_en": "Mali",
+    "name_local": "Mali",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "MM",
+    "name_en": "Myanmar",
+    "name_local": "Myanmar",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "MN",
+    "name_en": "Mongolia",
+    "name_local": "Mongolia",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "MO",
+    "name_en": "Macau",
+    "name_local": "Macau",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "MP",
+    "name_en": "Northern Mariana Islands",
+    "name_local": "Northern Mariana Islands",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "MQ",
+    "name_en": "Martinique",
+    "name_local": "Martinique",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "MR",
+    "name_en": "Mauritania",
+    "name_local": "Mauritania",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "MS",
+    "name_en": "Montserrat",
+    "name_local": "Montserrat",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "MT",
+    "name_en": "Malta",
+    "name_local": "Malta",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "MU",
+    "name_en": "Mauritius",
+    "name_local": "Mauritius",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "MV",
+    "name_en": "Maldives",
+    "name_local": "Maldives",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "MW",
+    "name_en": "Malawi",
+    "name_local": "Malawi",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "MX",
+    "name_en": "Mexico",
+    "name_local": "Mexico",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "MY",
+    "name_en": "Malaysia",
+    "name_local": "Malaysia",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "MZ",
+    "name_en": "Mozambique",
+    "name_local": "Mozambique",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "NA",
+    "name_en": "Namibia",
+    "name_local": "Namibia",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "NC",
+    "name_en": "New Caledonia",
+    "name_local": "New Caledonia",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "NE",
+    "name_en": "Niger",
+    "name_local": "Niger",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "NF",
+    "name_en": "Norfolk Island",
+    "name_local": "Norfolk Island",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "NG",
+    "name_en": "Nigeria",
+    "name_local": "Nigeria",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "NI",
+    "name_en": "Nicaragua",
+    "name_local": "Nicaragua",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "NL",
+    "name_en": "Netherlands",
+    "name_local": "Netherlands",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "NO",
+    "name_en": "Norway",
+    "name_local": "Norway",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "NP",
+    "name_en": "Nepal",
+    "name_local": "Nepal",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "NR",
+    "name_en": "Nauru",
+    "name_local": "Nauru",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "NU",
+    "name_en": "Niue",
+    "name_local": "Niue",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "NZ",
+    "name_en": "New Zealand",
+    "name_local": "New Zealand",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "OM",
+    "name_en": "Oman",
+    "name_local": "Oman",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "PA",
+    "name_en": "Panama",
+    "name_local": "Panama",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "PE",
+    "name_en": "Peru",
+    "name_local": "Peru",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "PF",
+    "name_en": "French Polynesia",
+    "name_local": "French Polynesia",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "PG",
+    "name_en": "Papua New Guinea",
+    "name_local": "Papua New Guinea",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "PH",
+    "name_en": "Philippines",
+    "name_local": "Philippines",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "PK",
+    "name_en": "Pakistan",
+    "name_local": "Pakistan",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "PL",
+    "name_en": "Poland",
+    "name_local": "Poland",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "PM",
+    "name_en": "Saint Pierre and Miquelon",
+    "name_local": "Saint Pierre and Miquelon",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "PN",
+    "name_en": "Pitcairn Islands",
+    "name_local": "Pitcairn Islands",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "PR",
+    "name_en": "Puerto Rico",
+    "name_local": "Puerto Rico",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "PS",
+    "name_en": "Palestine",
+    "name_local": "Palestine",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "PT",
+    "name_en": "Portugal",
+    "name_local": "Portugal",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "PW",
+    "name_en": "Palau",
+    "name_local": "Palau",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "PY",
+    "name_en": "Paraguay",
+    "name_local": "Paraguay",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "QA",
+    "name_en": "Qatar",
+    "name_local": "Qatar",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "RE",
+    "name_en": "Réunion",
+    "name_local": "Réunion",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "RO",
+    "name_en": "Romania",
+    "name_local": "Romania",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "RS",
+    "name_en": "Serbia",
+    "name_local": "Serbia",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "RU",
+    "name_en": "Russia",
+    "name_local": "Russia",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "RW",
+    "name_en": "Rwanda",
+    "name_local": "Rwanda",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "SA",
+    "name_en": "Saudi Arabia",
+    "name_local": "Saudi Arabia",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "SB",
+    "name_en": "Solomon Islands",
+    "name_local": "Solomon Islands",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "SC",
+    "name_en": "Seychelles",
+    "name_local": "Seychelles",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "SD",
+    "name_en": "Sudan",
+    "name_local": "Sudan",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "SE",
+    "name_en": "Sweden",
+    "name_local": "Sweden",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "SG",
+    "name_en": "Singapore",
+    "name_local": "Singapore",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "SH",
+    "name_en": "Saint Helena, Ascension and Tristan da Cunha",
+    "name_local": "Saint Helena, Ascension and Tristan da Cunha",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "SI",
+    "name_en": "Slovenia",
+    "name_local": "Slovenia",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "SJ",
+    "name_en": "Svalbard and Jan Mayen",
+    "name_local": "Svalbard and Jan Mayen",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "SK",
+    "name_en": "Slovakia",
+    "name_local": "Slovakia",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "SL",
+    "name_en": "Sierra Leone",
+    "name_local": "Sierra Leone",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "SM",
+    "name_en": "San Marino",
+    "name_local": "San Marino",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "SN",
+    "name_en": "Senegal",
+    "name_local": "Senegal",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "SO",
+    "name_en": "Somalia",
+    "name_local": "Somalia",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "SR",
+    "name_en": "Suriname",
+    "name_local": "Suriname",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "SS",
+    "name_en": "South Sudan",
+    "name_local": "South Sudan",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "ST",
+    "name_en": "São Tomé and Príncipe",
+    "name_local": "São Tomé and Príncipe",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "SV",
+    "name_en": "El Salvador",
+    "name_local": "El Salvador",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "SX",
+    "name_en": "Sint Maarten",
+    "name_local": "Sint Maarten",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "SY",
+    "name_en": "Syria",
+    "name_local": "Syria",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "SZ",
+    "name_en": "Eswatini",
+    "name_local": "Eswatini",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "TC",
+    "name_en": "Turks and Caicos Islands",
+    "name_local": "Turks and Caicos Islands",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "TD",
+    "name_en": "Chad",
+    "name_local": "Chad",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "TF",
+    "name_en": "French Southern and Antarctic Lands",
+    "name_local": "French Southern and Antarctic Lands",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "TG",
+    "name_en": "Togo",
+    "name_local": "Togo",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "TH",
+    "name_en": "Thailand",
+    "name_local": "Thailand",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "TJ",
+    "name_en": "Tajikistan",
+    "name_local": "Tajikistan",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "TK",
+    "name_en": "Tokelau",
+    "name_local": "Tokelau",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "TL",
+    "name_en": "Timor-Leste",
+    "name_local": "Timor-Leste",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "TM",
+    "name_en": "Turkmenistan",
+    "name_local": "Turkmenistan",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "TN",
+    "name_en": "Tunisia",
+    "name_local": "Tunisia",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "TO",
+    "name_en": "Tonga",
+    "name_local": "Tonga",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "TR",
+    "name_en": "Turkey",
+    "name_local": "Turkey",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "TT",
+    "name_en": "Trinidad and Tobago",
+    "name_local": "Trinidad and Tobago",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "TV",
+    "name_en": "Tuvalu",
+    "name_local": "Tuvalu",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "TW",
+    "name_en": "Taiwan",
+    "name_local": "Taiwan",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "TZ",
+    "name_en": "Tanzania",
+    "name_local": "Tanzania",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "UA",
+    "name_en": "Ukraine",
+    "name_local": "Ukraine",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "UG",
+    "name_en": "Uganda",
+    "name_local": "Uganda",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "UM",
+    "name_en": "United States Minor Outlying Islands",
+    "name_local": "United States Minor Outlying Islands",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "US",
+    "name_en": "United States",
+    "name_local": "United States",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "UY",
+    "name_en": "Uruguay",
+    "name_local": "Uruguay",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "UZ",
+    "name_en": "Uzbekistan",
+    "name_local": "Uzbekistan",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "VA",
+    "name_en": "Vatican City",
+    "name_local": "Vatican City",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "VC",
+    "name_en": "Saint Vincent and the Grenadines",
+    "name_local": "Saint Vincent and the Grenadines",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "VE",
+    "name_en": "Venezuela",
+    "name_local": "Venezuela",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "VG",
+    "name_en": "British Virgin Islands",
+    "name_local": "British Virgin Islands",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "VI",
+    "name_en": "United States Virgin Islands",
+    "name_local": "United States Virgin Islands",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "VN",
+    "name_en": "Vietnam",
+    "name_local": "Vietnam",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "VU",
+    "name_en": "Vanuatu",
+    "name_local": "Vanuatu",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "WF",
+    "name_en": "Wallis and Futuna",
+    "name_local": "Wallis and Futuna",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "WS",
+    "name_en": "Samoa",
+    "name_local": "Samoa",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "XK",
+    "name_en": "Kosovo",
+    "name_local": "Kosovo",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "YE",
+    "name_en": "Yemen",
+    "name_local": "Yemen",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "YT",
+    "name_en": "Mayotte",
+    "name_local": "Mayotte",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "ZA",
+    "name_en": "South Africa",
+    "name_local": "South Africa",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "ZM",
+    "name_en": "Zambia",
+    "name_local": "Zambia",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  },
+  {
+    "country": "ZW",
+    "name_en": "Zimbabwe",
+    "name_local": "Zimbabwe",
+    "admin1_label_en": "State",
+    "admin2_label_en": "County",
+    "city_label_en": "City",
+    "notes": ""
+  }
+]

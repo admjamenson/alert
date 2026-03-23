@@ -1,0 +1,2311 @@
+{
+  "version": "epidemic-sources@1.0.0",
+  "generatedAt": "2026-02-10T14:21:11.114Z",
+  "countries": {
+    "AD": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "AE": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "AF": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "AG": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "AI": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "AL": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "AM": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "AO": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "AQ": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "AR": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "AS": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "AT": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "AU": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "AW": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "AX": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "AZ": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "BA": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "BB": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "BD": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "BE": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "BF": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "BG": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "BH": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "BI": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "BJ": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "BL": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "BM": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "BN": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "BO": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "BQ": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "BR": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [
+        {
+          "name": "Ministerio da Saude (e-SUS Notifica)",
+          "authorityLevel": "federal",
+          "type": "api",
+          "url": "https://notifica.saude.gov.br/",
+          "enabled": true
+        }
+      ],
+      "subnational": [
+        {
+          "name": "Ministerio da Saude (e-SUS Notifica)",
+          "authorityLevel": "federal",
+          "type": "api",
+          "url": "https://notifica.saude.gov.br/",
+          "enabled": true
+        }
+      ],
+      "municipal": [
+        {
+          "name": "Ministerio da Saude (e-SUS Notifica)",
+          "authorityLevel": "federal",
+          "type": "api",
+          "url": "https://notifica.saude.gov.br/",
+          "enabled": true
+        }
+      ]
+    },
+    "BS": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "BT": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "BV": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "BW": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "BY": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "BZ": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "CA": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "CC": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "CD": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "CF": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "CG": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "CH": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "CI": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "CK": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "CL": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "CM": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "CN": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "CO": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "CR": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "CU": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "CV": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "CW": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "CX": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "CY": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "CZ": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "DE": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "DJ": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "DK": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "DM": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "DO": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "DZ": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "EC": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "EE": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "EG": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "EH": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "ER": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "ES": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "ET": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "FI": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "FJ": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "FK": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "FM": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "FO": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "FR": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "GA": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "GB": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "GD": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "GE": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "GF": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "GG": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "GH": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "GI": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "GL": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "GM": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "GN": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "GP": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "GQ": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "GR": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "GS": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "GT": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "GU": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "GW": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "GY": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "HK": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "HM": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "HN": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "HR": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "HT": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "HU": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "ID": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "IE": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "IL": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "IM": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "IN": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "IO": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "IQ": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "IR": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "IS": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "IT": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "JE": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "JM": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "JO": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "JP": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "KE": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "KG": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "KH": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "KI": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "KM": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "KN": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "KP": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "KR": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "KW": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "KY": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "KZ": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "LA": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "LB": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "LC": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "LI": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "LK": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "LR": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "LS": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "LT": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "LU": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "LV": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "LY": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "MA": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "MC": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "MD": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "ME": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "MF": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "MG": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "MH": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "MK": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "ML": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "MM": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "MN": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "MO": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "MP": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "MQ": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "MR": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "MS": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "MT": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "MU": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "MV": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "MW": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "MX": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "MY": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "MZ": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "NA": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "NC": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "NE": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "NF": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "NG": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "NI": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "NL": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "NO": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "NP": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "NR": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "NU": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "NZ": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "OM": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "PA": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "PE": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "PF": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "PG": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "PH": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "PK": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "PL": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "PM": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "PN": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "PR": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "PS": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "PT": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "PW": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "PY": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "QA": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "RE": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "RO": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "RS": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "RU": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "RW": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "SA": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "SB": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "SC": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "SD": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "SE": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "SG": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "SH": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "SI": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "SJ": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "SK": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "SL": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "SM": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "SN": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "SO": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "SR": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "SS": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "ST": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "SV": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "SX": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "SY": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "SZ": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "TC": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "TD": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "TF": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "TG": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "TH": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "TJ": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "TK": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "TL": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "TM": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "TN": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "TO": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "TR": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "TT": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "TV": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "TW": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "TZ": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "UA": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "UG": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "UM": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "US": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [
+        {
+          "name": "Centers for Disease Control and Prevention",
+          "authorityLevel": "federal",
+          "type": "dashboard",
+          "url": "https://www.cdc.gov/",
+          "enabled": true
+        }
+      ],
+      "subnational": [
+        {
+          "name": "NY State Department of Health - Influenza cases by county",
+          "authorityLevel": "state",
+          "type": "dataset",
+          "url": "https://health.data.ny.gov/resource/jr8b-6gh6.json",
+          "enabled": true
+        },
+        {
+          "name": "California Department of Public Health - Respiratory Virus Dashboard",
+          "authorityLevel": "state",
+          "type": "dataset",
+          "url": "https://data.chhs.ca.gov/dataset/respiratory-virus-dashboard",
+          "enabled": true
+        }
+      ],
+      "municipal": [
+        {
+          "name": "NY State Department of Health - Influenza cases by county",
+          "authorityLevel": "municipal",
+          "type": "dataset",
+          "url": "https://health.data.ny.gov/resource/jr8b-6gh6.json",
+          "enabled": true
+        }
+      ]
+    },
+    "UY": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "UZ": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "VA": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "VC": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "VE": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "VG": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "VI": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "VN": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "VU": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "WF": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "WS": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "XK": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "YE": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "YT": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "ZA": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "ZM": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    },
+    "ZW": {
+      "baseline": {
+        "provider": "WHO",
+        "enabled": true
+      },
+      "national": [],
+      "subnational": [],
+      "municipal": []
+    }
+  }
+}
