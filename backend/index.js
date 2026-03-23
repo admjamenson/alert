@@ -1,11 +1,10 @@
 const express = require('express');
 const cors = require('cors');
 const admin = require('firebase-admin');
-const fs = require('fs');
-const path = require('path');
 const crypto = require('crypto');
 const zlib = require('zlib');
 const { decode: decodeMsgpack } = require('@msgpack/msgpack');
+const { createFirebaseState } = require('./src/bootstrap/firebaseAdmin');
 const {
   getMetaCountries,
   getEpidemicFeed,
@@ -41,26 +40,198 @@ app.use((req, res, next) => {
   );
 });
 
-const serviceAccountPath =
-  process.env.FIREBASE_SERVICE_ACCOUNT ||
-  path.join(__dirname, 'firebase-admin.json');
+const FIREBASE_OPTIONAL_ROUTE_PATTERNS = [
+  /^\/$/,
+  /^\/healthz$/,
+  /^\/api\/me\/entitlements$/,
+  /^\/api\/relay\/ping$/,
+  /^\/api\/relay\/metrics$/,
+  /^\/v1\/meta\/countries$/,
+  /^\/v1\/epidemic\/feed$/,
+  /^\/v1\/operational\/snapshot$/,
+  /^\/v1\/events$/,
+  /^\/v1\/health\/top$/,
+  /^\/v1\/providers\/status$/,
+  /^\/favicon\.ico$/,
+];
 
-if (!fs.existsSync(serviceAccountPath)) {
-  console.error(
-    'Firebase service account file not found. Set FIREBASE_SERVICE_ACCOUNT or place backend/firebase-admin.json.',
-  );
-  process.exit(1);
-}
+const STRIPE_BILLING_ROUTE_PATTERNS = [
+  /^\/billing\/auth-token$/,
+  /^\/billing\/config$/,
+  /^\/account\/billing\.json$/,
+  /^\/create-checkout-session$/,
+  /^\/create-payment-intent$/,
+  /^\/create-portal-session$/,
+  /^\/webhook$/,
+  /^\/webhooks\/stripe$/,
+  /^\/checkout$/,
+  /^\/success$/,
+  /^\/cancel$/,
+  /^\/account\/billing$/,
+];
 
-const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
+const APPLE_BILLING_ROUTE_PATTERNS = [
+  /^\/sync-apple-purchase$/,
+  /^\/restore-apple-purchases$/,
+  /^\/apple-entitlement\/.+/,
+];
+
+const APPLE_NOTIFICATIONS_ROUTE_PATTERNS = [/^\/app-store-notifications$/];
+
+const readPathname = req => String(req.path || req.originalUrl || '').split('?')[0];
+
+const matchesAnyPattern = (pathname, patterns) =>
+  patterns.some(pattern => pattern.test(pathname));
+
+const buildServiceUnavailablePayload = ({ code, message, reason }) => ({
+  error: code,
+  message,
+  meta: {
+    generatedAt: new Date().toISOString(),
+    failClosed: true,
+    reason: reason || null,
+  },
 });
 
-const db = admin.firestore();
-registerStripeBilling(app, { db });
-registerAppleBilling(app, db);
-registerAppStoreNotifications(app, db);
+const firebaseState = createFirebaseState({ admin });
+const db = firebaseState.db;
+
+const serviceAvailability = {
+  firebase: firebaseState.available,
+  stripeBilling: false,
+  appleBilling: false,
+  appStoreNotifications: false,
+};
+
+const registerServiceModule = (label, registerFn, availabilityKey, unavailableReason) => {
+  try {
+    registerFn();
+    serviceAvailability[availabilityKey] = true;
+    console.log(`[bootstrap/${label}] registered`);
+  } catch (error) {
+    serviceAvailability[availabilityKey] = false;
+    console.error(
+      `[bootstrap/${label}] unavailable: ${error.message}`,
+    );
+    if (!firebaseState.reason) {
+      firebaseState.reason = unavailableReason || `${label}_registration_failed`;
+    }
+  }
+};
+
+if (db) {
+  registerServiceModule(
+    'stripe-billing',
+    () => registerStripeBilling(app, { db }),
+    'stripeBilling',
+    'stripe_billing_registration_failed',
+  );
+  registerServiceModule(
+    'apple-billing',
+    () => registerAppleBilling(app, db),
+    'appleBilling',
+    'apple_billing_registration_failed',
+  );
+  registerServiceModule(
+    'app-store-notifications',
+    () => registerAppStoreNotifications(app, db),
+    'appStoreNotifications',
+    'app_store_notifications_registration_failed',
+  );
+} else {
+  console.warn(
+    `[bootstrap/firebase] Firebase-dependent modules were not registered because Firebase is unavailable (${firebaseState.reason}).`,
+  );
+}
+
+app.get('/', (_req, res) => {
+  return res.json({
+    ok: true,
+    service: 'alert-backend',
+    firebaseAvailable: serviceAvailability.firebase,
+    degraded: !serviceAvailability.firebase,
+    generatedAt: new Date().toISOString(),
+  });
+});
+
+app.get('/healthz', (_req, res) => {
+  return res.status(200).json({
+    ok: true,
+    service: 'alert-backend',
+    firebaseAvailable: serviceAvailability.firebase,
+    degraded: !serviceAvailability.firebase,
+    modules: {
+      stripeBilling: serviceAvailability.stripeBilling,
+      appleBilling: serviceAvailability.appleBilling,
+      appStoreNotifications: serviceAvailability.appStoreNotifications,
+    },
+    reason: firebaseState.reason,
+    generatedAt: new Date().toISOString(),
+  });
+});
+
+app.use((req, res, next) => {
+  const pathname = readPathname(req);
+
+  if (
+    !serviceAvailability.stripeBilling &&
+    matchesAnyPattern(pathname, STRIPE_BILLING_ROUTE_PATTERNS)
+  ) {
+    return res.status(503).json(
+      buildServiceUnavailablePayload({
+        code: 'stripe_billing_unavailable',
+        message:
+          'Stripe billing is temporarily unavailable on this service.',
+        reason: firebaseState.reason || 'stripe_billing_routes_unavailable',
+      }),
+    );
+  }
+
+  if (
+    !serviceAvailability.appleBilling &&
+    matchesAnyPattern(pathname, APPLE_BILLING_ROUTE_PATTERNS)
+  ) {
+    return res.status(503).json(
+      buildServiceUnavailablePayload({
+        code: 'apple_billing_unavailable',
+        message:
+          'Apple billing is temporarily unavailable on this service.',
+        reason: firebaseState.reason || 'apple_billing_routes_unavailable',
+      }),
+    );
+  }
+
+  if (
+    !serviceAvailability.appStoreNotifications &&
+    matchesAnyPattern(pathname, APPLE_NOTIFICATIONS_ROUTE_PATTERNS)
+  ) {
+    return res.status(503).json(
+      buildServiceUnavailablePayload({
+        code: 'app_store_notifications_unavailable',
+        message:
+          'App Store notifications are temporarily unavailable on this service.',
+        reason:
+          firebaseState.reason || 'app_store_notifications_routes_unavailable',
+      }),
+    );
+  }
+
+  if (
+    !serviceAvailability.firebase &&
+    !matchesAnyPattern(pathname, FIREBASE_OPTIONAL_ROUTE_PATTERNS)
+  ) {
+    return res.status(503).json(
+      buildServiceUnavailablePayload({
+        code: 'firebase_unavailable',
+        message:
+          'Firebase Admin is not configured for this service. Set FIREBASE_SERVICE_ACCOUNT to enable Firebase-dependent routes.',
+        reason: firebaseState.reason,
+      }),
+    );
+  }
+
+  return next();
+});
 
 const clampPercent = value => Math.max(0, Math.min(100, Number(value || 0)));
 const nowIso = () => new Date().toISOString();
@@ -316,6 +487,10 @@ const resolveIdentity = req => {
 };
 
 const fetchPremiumStatus = async userId => {
+  if (!db) {
+    return Boolean(PREMIUM_USERS.has(userId) || PREMIUM_DEFAULT);
+  }
+
   try {
     const entitlementDoc = await db
       .collection('entitlements')
@@ -2274,6 +2449,12 @@ app.get('/v1/providers/status', (_req, res) => {
 });
 
 const port = process.env.PORT || 5005;
-app.listen(port, () => {
-  console.log(`Alert backend running on ${port}`);
+const host = '0.0.0.0';
+const server = app.listen(port, host, () => {
+  console.log(`Alert backend running on ${host}:${port}`);
+});
+
+server.on('error', error => {
+  console.error('[bootstrap/server] failed to start listener', error);
+  process.exit(1);
 });
