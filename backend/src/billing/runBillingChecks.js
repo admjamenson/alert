@@ -99,6 +99,14 @@ const run = () => {
   envInvalidHost.APP_URL = 'https://billing.example.com';
   assert.throws(() => resolveBillingRuntimeConfig({}, envInvalidHost), /invalid_env_app_url_host/);
 
+  const envRenderHost = baseEnv();
+  envRenderHost.APP_URL = 'https://alert-vmpj.onrender.com';
+  assert.equal(normalizeAppUrl(envRenderHost), 'https://alert-vmpj.onrender.com');
+
+  const envRenderHostHttp = baseEnv();
+  envRenderHostHttp.APP_URL = 'http://alert-vmpj.onrender.com';
+  assert.throws(() => resolveBillingRuntimeConfig({}, envRenderHostHttp), /invalid_env_app_url/);
+
   const token = buildBillingAuthToken(
     {
       userId: 'alert-user-1',

@@ -6,6 +6,7 @@ const BILLING_ADDRESS_COLLECTION_VALUES = new Set(['auto', 'required']);
 const CANONICAL_BILLING_ORIGIN = 'https://api.alert.app';
 const LOCAL_BILLING_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 const LEGACY_BILLING_HOSTS = new Set(['api.alertpremium.com']);
+const RENDER_BILLING_HOST_SUFFIXES = ['onrender.com'];
 
 const normalizeCountryCode = value => {
   const normalized = String(value || '').trim().toUpperCase();
@@ -55,6 +56,19 @@ const normalizeAppUrl = (env = process.env) => {
   }
 
   if (LOCAL_BILLING_HOSTS.has(normalizedHost) || normalizedHost.endsWith('.local')) {
+    return `${parsed.origin}${normalizedPathname}`;
+  }
+
+  const isRenderHost = RENDER_BILLING_HOST_SUFFIXES.some(
+    suffix => normalizedHost === suffix || normalizedHost.endsWith(`.${suffix}`),
+  );
+  if (isRenderHost) {
+    if (parsed.protocol !== 'https:') {
+      const error = new Error('invalid_env_app_url');
+      error.statusCode = 500;
+      throw error;
+    }
+
     return `${parsed.origin}${normalizedPathname}`;
   }
 
