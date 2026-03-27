@@ -1,10 +1,9 @@
-# OSX
-#
+ # macOS
 .DS_Store
 
-# Xcode
-#
+# iOS / Xcode
 build/
+DerivedData/
 *.pbxuser
 !default.pbxuser
 *.mode1v3
@@ -13,59 +12,57 @@ build/
 !default.mode2v3
 *.perspectivev3
 !default.perspectivev3
-xcuserdata
 *.xccheckout
+*.xcuserstate
 *.moved-aside
-DerivedData
 *.hmap
 *.ipa
-*.xcuserstate
+xcuserdata/
 **/.xcode.env.local
 
-# Android/IntelliJ
-#
-build/
-.idea
-.gradle
+# CocoaPods / Ruby
+**/Pods/
+/vendor/bundle/
+
+# Android / IntelliJ / Gradle
+.idea/
+.gradle/
+.gradle-cache/
+.gradle-session/
 local.properties
 *.iml
 *.hprof
 .cxx/
+captures/
+.externalNativeBuild/
 *.keystore
 !debug.keystore
 
-# node.js
-#
+# Android build artifacts
+android/build/
+android/app/build/
+*.apk
+*.aab
+
+# Node.js
 node_modules/
-npm-debug.log
-yarn-error.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
-# fastlane
-#
-# It is recommended to not store the screenshots in the git repo. Instead, use fastlane to re-generate the
-# screenshots whenever they are needed.
-# For more information about the recommended setup visit:
-# https://docs.fastlane.tools/best-practices/source-control/
-
-**/fastlane/report.xml
-**/fastlane/Preview.html
-**/fastlane/screenshots
-**/fastlane/test_output
-
-# Bundle artifact
-*.jsbundle
-
-# Ruby / CocoaPods
-**/Pods/
-/vendor/bundle/
-
-# Temporary files created by Metro to check the health of the file watcher
+# Metro / React Native
 .metro-health-check*
+*.jsbundle
+android/app/src/main/assets/index.android.bundle
+android/app/src/main/res/drawable-*/node_modules_*
+android/app/src/main/res/drawable-*/src_assets_*
 
-# testing
-/coverage
+# Testing / coverage
+coverage/
+.nyc_output/
 
-# Yarn
+# Yarn modern
 .yarn/*
 !.yarn/patches
 !.yarn/plugins
@@ -73,6 +70,36 @@ yarn-error.log
 !.yarn/sdks
 !.yarn/versions
 
+# Environment / secrets
+.env
+.env.*
+!.env.example
 backend/firebase-admin.json
 
-backend/firebase-admin.json
+# Logs
+*.log
+
+# Temporary / misc
+tmp/
+temp/
+.tmp/
+.cache/
+# Gradle local criado indevidamente na raiz do repo
+/.gradle*/
+
+# Ambiente local
+.env
+.env.*
+!.env.example
+
+# Artefatos
+*.apk
+*.aab
+*.log
+
+# Test/cache/temp/artifacts locais
+.jest-cache/
+_tmp/
+artifacts/
+gradlehome/
+tmp_apk/

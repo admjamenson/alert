@@ -1,0 +1,398 @@
+import React, { useEffect, useState } from 'react';
+import {
+  StyleSheet,
+  View,
+  TouchableOpacity,
+  Image,
+  ScrollView,
+  StatusBar,
+  Dimensions,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
+import { PRIVACY_POLICY, TERMS_OF_SERVICE } from '../../constants/LegalText';
+import { ProfileService } from '../../services/ProfileService';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getDeviceLanguage, loadStoredLanguage, setStoredLanguage } from '../../i18n';
+import { useTheme } from '../../context/ThemeContext';
+import { AppModal } from '../../components/ui/AppModal';
+import { ThemeTokens } from '../../constants/ThemeTokens';
+import AppText from '../../components/ui/AppText';
+
+const WHITE = ThemeTokens.colors.light.background;
+const BLACK = ThemeTokens.colors.light.text;
+const GRAY = ThemeTokens.colors.light.textSecondary;
+const ALERT_RED = ThemeTokens.colors.light.primary;
+const ONBOARDING_KEY = '@Alert:OnboardingComplete';
+
+const WelcomeScreen = ({ navigation }: any) => {
+  const { t } = useTranslation();
+  const { colors } = useTheme();
+  const [modalVisible, setModalVisible] = useState(false);
+  const [modalContent, setModalContent] = useState<'privacy' | 'terms'>(
+    'privacy',
+  );
+  const [languageMode, setLanguageMode] = useState<'system' | 'pt' | 'en'>(
+    'system',
+  );
+  const { width } = Dimensions.get('window');
+
+  const deviceLang = getDeviceLanguage();
+  const deviceLangLabel =
+    deviceLang.toLowerCase().startsWith('pt')
+      ? t('settings_language_pt')
+      : t('settings_language_en');
+  const systemLangLabel = t('settings_language_system', { lang: deviceLangLabel });
+
+  const openModal = (type: 'privacy' | 'terms') => {
+    setModalContent(type);
+    setModalVisible(true);
+  };
+
+  useEffect(() => {
+    const checkProfile = async () => {
+      const profile = await ProfileService.getProfile();
+      const onboardingDone = await AsyncStorage.getItem(ONBOARDING_KEY);
+      if (profile?.name || onboardingDone === 'true') {
+        navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
+      }
+    };
+    void checkProfile();
+  }, [navigation]);
+
+  useEffect(() => {
+    const load = async () => {
+      const stored = await loadStoredLanguage();
+      const normalized = String(stored || '').toLowerCase();
+      if (normalized.startsWith('pt')) {
+        setLanguageMode('pt');
+      } else if (normalized.startsWith('en')) {
+        setLanguageMode('en');
+      } else {
+        setLanguageMode('system');
+      }
+    };
+    void load();
+  }, []);
+
+  const LanguageSelector = () => (
+    <View style={styles.languageBlock}>
+      <AppText variant="caption1" tone="secondary" style={styles.languageLabel}>
+        {t('welcome_language_label')}
+      </AppText>
+      <View style={styles.languageRow}>
+        <TouchableOpacity
+          style={[
+            styles.languageChip,
+            languageMode === 'system' && styles.languageChipActive,
+          ]}
+          onPress={() => {
+            setLanguageMode('system');
+            void setStoredLanguage('system');
+          }}
+        >
+          <AppText
+            variant="caption1"
+            style={[
+              styles.languageText,
+              languageMode === 'system' && styles.languageTextActive,
+            ]}
+          >
+            {systemLangLabel}
+          </AppText>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.languageChip,
+            languageMode === 'pt' && styles.languageChipActive,
+          ]}
+          onPress={() => {
+            setLanguageMode('pt');
+            void setStoredLanguage('pt');
+          }}
+        >
+          <AppText
+            variant="caption1"
+            style={[
+              styles.languageText,
+              languageMode === 'pt' && styles.languageTextActive,
+            ]}
+          >
+            {t('settings_language_pt')}
+          </AppText>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.languageChip,
+            languageMode === 'en' && styles.languageChipActive,
+          ]}
+          onPress={() => {
+            setLanguageMode('en');
+            void setStoredLanguage('en');
+          }}
+        >
+          <AppText
+            variant="caption1"
+            style={[
+              styles.languageText,
+              languageMode === 'en' && styles.languageTextActive,
+            ]}
+          >
+            {t('settings_language_en')}
+          </AppText>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" backgroundColor={WHITE} />
+
+      <ScrollView
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        style={{ flex: 1 }}
+      >
+        <View style={[styles.page, { width }]}>
+          <View style={styles.content}>
+            <View style={styles.imageContainer}>
+              <Image
+                source={require('../../assets/logo.png')}
+                style={styles.logoImage}
+                resizeMode="contain"
+              />
+            </View>
+
+            <View style={styles.textSection}>
+              <AppText variant="title1" tone="default" style={styles.title}>
+                {t('welcome_title')}
+              </AppText>
+              <LanguageSelector />
+
+              <View style={styles.termsContainer}>
+                <AppText variant="footnote" tone="secondary" style={styles.termsText}>
+                  {t('welcome_terms_prefix')}{' '}
+                  <AppText
+                    variant="footnote"
+                    tone="primary"
+                    weight="semibold"
+                    style={styles.link}
+                    onPress={() => openModal('privacy')}
+                  >
+                    {t('welcome_privacy')}
+                  </AppText>
+                  . {t('welcome_terms_suffix')}{' '}
+                  <AppText
+                    variant="footnote"
+                    tone="primary"
+                    weight="semibold"
+                    style={styles.link}
+                    onPress={() => openModal('terms')}
+                  >
+                    {t('welcome_terms')}
+                  </AppText>
+                  .
+                </AppText>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={styles.button}
+              onPress={async () => {
+                await AsyncStorage.setItem(ONBOARDING_KEY, 'true');
+                navigation.navigate('Login');
+              }}
+              activeOpacity={0.8}
+            >
+              <AppText variant="button" tone="inverse" style={styles.buttonText}>
+                {t('welcome_agree')}
+              </AppText>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={async () => {
+                await AsyncStorage.setItem(ONBOARDING_KEY, 'true');
+                navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
+              }}
+              activeOpacity={0.7}
+              style={styles.linkButton}
+            >
+              <AppText variant="body" tone="primary" weight="semibold" style={styles.link}>
+                {t('welcome_enter_now')}
+              </AppText>
+            </TouchableOpacity>
+
+            <AppText variant="caption1" tone="secondary" style={styles.swipeHint}>
+              {t('welcome_swipe_hint')}
+            </AppText>
+          </View>
+        </View>
+
+        <View style={[styles.page, { width }]}>
+          <View style={styles.content}>
+            <View style={styles.imageContainer}>
+              <Image
+                source={require('../../assets/logo.png')}
+                style={styles.logoImage}
+                resizeMode="contain"
+              />
+            </View>
+
+            <View style={styles.textSection}>
+              <AppText variant="title1" tone="default" style={styles.title}>
+                {t('welcome_ready_title')}
+              </AppText>
+              <AppText variant="body" tone="secondary" style={styles.subtitle}>
+                {t('welcome_ready_subtitle')}
+              </AppText>
+            </View>
+
+            <TouchableOpacity
+              style={styles.button}
+              onPress={async () => {
+                await AsyncStorage.setItem(ONBOARDING_KEY, 'true');
+                navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
+              }}
+              activeOpacity={0.8}
+            >
+              <AppText variant="button" tone="inverse" style={styles.buttonText}>
+                {t('welcome_enter_now')}
+              </AppText>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={async () => {
+                await AsyncStorage.setItem(ONBOARDING_KEY, 'true');
+                navigation.navigate('Login');
+              }}
+              activeOpacity={0.7}
+              style={styles.linkButton}
+            >
+              <AppText variant="body" tone="primary" weight="semibold" style={styles.link}>
+                {t('welcome_have_account')}
+              </AppText>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </ScrollView>
+
+      <AppModal
+        visible={modalVisible}
+        onClose={() => setModalVisible(false)}
+        title={modalContent === 'privacy' ? t('welcome_privacy') : t('welcome_terms')}
+      >
+        <ScrollView
+          style={styles.legalScroll}
+          contentContainerStyle={styles.modalScroll}
+          showsVerticalScrollIndicator={false}
+        >
+          <AppText variant="modalBody" tone="secondary" style={[styles.legalBodyText, { color: colors.textSecondary }]}>
+            {modalContent === 'privacy' ? PRIVACY_POLICY : TERMS_OF_SERVICE}
+          </AppText>
+        </ScrollView>
+
+        <TouchableOpacity
+          style={[styles.modalButton, { backgroundColor: colors.primary }]}
+          onPress={() => setModalVisible(false)}
+          activeOpacity={0.85}
+        >
+          <AppText variant="modalAction" tone="inverse" style={styles.modalButtonText}>
+            {t('close')}
+          </AppText>
+        </TouchableOpacity>
+      </AppModal>
+    </SafeAreaView>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: WHITE },
+  page: { flex: 1 },
+  content: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 30,
+    paddingVertical: 50,
+  },
+  imageContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  logoImage: { width: 220, height: 220 },
+  textSection: { alignItems: 'center', width: '100%', marginBottom: 20 },
+  title: {
+    color: BLACK,
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  termsContainer: { paddingHorizontal: 10, marginTop: 8 },
+  termsText: {
+    textAlign: 'center',
+    color: GRAY,
+  },
+  subtitle: {
+    textAlign: 'center',
+    color: GRAY,
+  },
+  link: {
+    color: ALERT_RED,
+  },
+  linkButton: { marginTop: 12 },
+  button: {
+    width: '100%',
+    backgroundColor: ALERT_RED,
+    paddingVertical: 16,
+    borderRadius: 30,
+    alignItems: 'center',
+    elevation: 3,
+    shadowColor: BLACK,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  buttonText: {
+    color: WHITE,
+  },
+  swipeHint: {
+    marginTop: 10,
+    color: GRAY,
+  },
+  legalScroll: { maxHeight: 520 },
+  modalScroll: { paddingVertical: ThemeTokens.spacing.md },
+  legalBodyText: {
+    color: GRAY,
+  },
+  modalButton: {
+    height: 46,
+    borderRadius: ThemeTokens.radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: ThemeTokens.spacing.md,
+  },
+  modalButtonText: {
+    color: '#FFF',
+  },
+  languageBlock: { alignItems: 'center' },
+  languageLabel: {
+    color: GRAY,
+    marginBottom: 8,
+  },
+  languageRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' },
+  languageChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.15)',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  languageChipActive: {
+    borderColor: ALERT_RED,
+    backgroundColor: 'rgba(230,28,36,0.08)',
+  },
+  languageText: {
+    color: BLACK,
+  },
+  languageTextActive: { color: ALERT_RED },
+});
+
+export default WelcomeScreen;
