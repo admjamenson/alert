@@ -64,7 +64,7 @@ Notes:
 - Do not merge or cut an Android release if the smoke check is red, missing artifacts, or did not run on the self-hosted runner.
 - When the workflow is temporarily unavailable, run `.\tools\run_android_smoke_release.cmd` locally and keep the fresh `artifacts/android-smoke-*` folder as release evidence.
 - In GitHub branch protection, mark `Android Release Smoke / smoke` as a required status check for the protected branch.
-- To automate that branch-protection update when the repository plan allows it, run `.\tools\run_set_github_required_smoke_check.cmd`.
+- To automate that branch-protection update, run `.\tools\run_set_github_required_smoke_check.cmd`; it also bootstraps branch protection on `main` when the repository allows required checks but protection is not enabled yet.
 - GitHub documents that protected branches and required status checks are available on public repositories with GitHub Free, and on private repositories only with GitHub Pro, Team, Enterprise Cloud, or Enterprise Server: https://docs.github.com/en/rest/branches/branch-protection
 
 ## Logs

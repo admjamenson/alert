@@ -2,7 +2,8 @@ param(
   [string]$Owner = 'admjamenson',
   [string]$Repo = 'alert',
   [string]$Branch = 'main',
-  [string]$RequiredContext = 'Android Release Smoke / smoke'
+  [string]$RequiredContext = 'Android Release Smoke / smoke',
+  [bool]$BootstrapProtection = $true
 )
 
 Set-StrictMode -Version Latest
@@ -83,15 +84,82 @@ function Invoke-GitHubJson {
   }
 }
 
+function Get-RequiredStatusChecksOrNull {
+  param([string]$Uri)
+
+  try {
+    return Invoke-RestMethod -Method Get -Headers $script:GitHubHeaders -Uri $Uri
+  } catch {
+    $statusCode = $_.Exception.Response.StatusCode.value__
+    $response = $_.ErrorDetails.Message
+
+    if ($statusCode -eq 404) {
+      return $null
+    }
+
+    if ($statusCode -eq 403 -and $response -match 'Upgrade to GitHub Pro or make this repository public') {
+      throw 'O GitHub bloqueou branch protection/status checks neste repositorio. Para continuar, o repo precisa ser publico ou a conta precisa ter GitHub Pro/Team/Enterprise.'
+    }
+
+    if ($response) {
+      throw "GitHub API GET $Uri falhou com ${statusCode}: $response"
+    }
+
+    throw
+  }
+}
+
+function Ensure-BranchProtection {
+  param(
+    [string]$Uri,
+    [string]$Context
+  )
+
+  $requiredStatusChecks = Get-RequiredStatusChecksOrNull -Uri "$Uri/required_status_checks"
+  if ($requiredStatusChecks) {
+    return $requiredStatusChecks
+  }
+
+  if (-not $BootstrapProtection) {
+    throw "A protecao de branch para '$Branch' nao esta habilitada ou nao foi encontrada."
+  }
+
+  Invoke-GitHubJson -Method 'Put' -Uri $Uri -Body @{
+    required_status_checks = @{
+      strict = $true
+      contexts = @($Context)
+    }
+    enforce_admins = $false
+    required_pull_request_reviews = $null
+    restrictions = $null
+    allow_force_pushes = $false
+    allow_deletions = $false
+    block_creations = $false
+    required_conversation_resolution = $false
+    lock_branch = $false
+    allow_fork_syncing = $false
+  } | Out-Null
+
+  return [pscustomobject]@{
+    strict = $true
+    contexts = @($Context)
+    bootstrapped = $true
+  }
+}
+
 $script:GitHubHeaders = Get-GitHubAuthHeaders
 $baseUrl = "https://api.github.com/repos/$Owner/$Repo/branches/$Branch/protection"
 $requiredStatusChecksUrl = "$baseUrl/required_status_checks"
 
-$requiredStatusChecks = Invoke-GitHubJson -Method 'Get' -Uri $requiredStatusChecksUrl
+$requiredStatusChecks = Ensure-BranchProtection -Uri $baseUrl -Context $RequiredContext
 $currentContexts = @($requiredStatusChecks.contexts)
 
 if ($currentContexts -contains $RequiredContext) {
-  Write-Host "O check '$RequiredContext' ja esta marcado como required em '$Branch'."
+  if ($requiredStatusChecks.PSObject.Properties.Name -contains 'bootstrapped' -and $requiredStatusChecks.bootstrapped) {
+    Write-Host "Branch protection criada em '$Branch' com o check requerido '$RequiredContext'."
+  } else {
+    Write-Host "O check '$RequiredContext' ja esta marcado como required em '$Branch'."
+  }
   exit 0
 }
 
