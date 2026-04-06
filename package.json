@@ -8,6 +8,7 @@
     "android:build:native": "cd android && gradlew.bat assembleRelease",
     "android:install:native": "cd android && gradlew.bat installRelease",
     "android:rebuild:native": "cd android && gradlew.bat clean assembleRelease installRelease",
+    "android:smoke:release": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/android-release-smoke.ps1",
     "ios": "react-native run-ios",
     "lint": "eslint .",
     "test": "jest",

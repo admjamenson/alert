@@ -1,0 +1,116 @@
+name: Android Release Smoke
+
+on:
+  pull_request:
+    paths:
+      - 'App.tsx'
+      - 'index.js'
+      - 'src/**'
+      - 'android/**'
+      - 'scripts/android-release-smoke.ps1'
+      - 'tools/run_android_smoke_release.cmd'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'babel.config.js'
+      - 'metro.config.js'
+      - 'react-native.config.js'
+  push:
+    branches:
+      - main
+      - 'release/**'
+    paths:
+      - 'App.tsx'
+      - 'index.js'
+      - 'src/**'
+      - 'android/**'
+      - 'scripts/android-release-smoke.ps1'
+      - 'tools/run_android_smoke_release.cmd'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'babel.config.js'
+      - 'metro.config.js'
+      - 'react-native.config.js'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-release-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: smoke
+    runs-on:
+      - self-hosted
+      - windows
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.18.2
+          cache: npm
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Run Android release smoke
+        shell: pwsh
+        run: ./scripts/android-release-smoke.ps1
+
+      - name: Locate smoke artifacts
+        if: always()
+        id: smoke_artifacts
+        shell: pwsh
+        run: |
+          $latest = Get-ChildItem artifacts -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like 'android-smoke-*' } |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+
+          if (-not $latest) {
+            throw 'Nenhum diretorio de artefato android-smoke-* foi gerado.'
+          }
+
+          "dir=$($latest.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "summary=$($latest.FullName)\summary.json" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-smoke-${{ github.run_number }}
+          path: ${{ steps.smoke_artifacts.outputs.dir }}
+          if-no-files-found: error
+
+      - name: Publish smoke summary
+        if: always()
+        shell: pwsh
+        run: |
+          $summaryPath = '${{ steps.smoke_artifacts.outputs.summary }}'
+          if (-not (Test-Path $summaryPath)) {
+            throw "Summary nao encontrado em $summaryPath"
+          }
+
+          $summary = Get-Content $summaryPath -Raw | ConvertFrom-Json
+
+          @"
+          ## Android Release Smoke
+          - Mode: $($summary.mode)
+          - Device: $($summary.deviceSerial)
+          - Bundle bytes: $($summary.bundleBytes)
+          - Screenshot bytes: $($summary.screenshotBytes)
+          - Artifacts: ${{ steps.smoke_artifacts.outputs.dir }}
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8

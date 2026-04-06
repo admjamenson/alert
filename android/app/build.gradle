@@ -2,6 +2,10 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 apply plugin: "com.google.gms.google-services"
+apply from: file("../../node_modules/react-native-vector-icons/fonts.gradle")
+
+def alertBundleDebugJs =
+    (project.findProperty("alertBundleDebugJs") ?: "true").toString().toBoolean()
 
 /**
  * This is the configuration block to customize your React Native Android app.
@@ -22,7 +26,10 @@ react {
     //   The list of variants to that are debuggable. For those we're going to
     //   skip the bundling of the JS bundle and the assets. By default is just 'debug'.
     //   If you add flavors like lite, prod, etc. you'll have to list your debuggableVariants.
-    // debuggableVariants = ["liteDebug", "prodDebug"]
+    // Keep a bundled JS fallback in debug device builds by default so field
+    // validation does not depend on a live Metro session. Opt out with
+    // -PalertBundleDebugJs=false when you explicitly want Metro-only debug.
+    debuggableVariants = alertBundleDebugJs ? [] : ["debug"]
 
     /* Bundling */
     // Force Metro bundle tasks to run in CI mode so release bundling does not
@@ -43,7 +50,7 @@ react {
     //
     //   A list of extra flags to pass to the 'bundle' commands.
     //   See https://github.com/react-native-community/cli/blob/main/docs/commands.md#bundle
-    // extraPackagerArgs = []
+    extraPackagerArgs = ["--max-workers", "1"]
 
     /* Hermes Commands */
     //   The hermes compiler command to run. By default it is 'hermesc'
@@ -79,6 +86,13 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
+    // Keep a universal APK for debug to avoid ABI-mismatch crashes on 32-bit devices.
+    splits {
+        abi {
+            enable false
+        }
+    }
+
     namespace "com.company.alert"
     defaultConfig {
         applicationId "com.company.alert"
@@ -86,6 +100,9 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0"
+        ndk {
+            abiFilters "armeabi-v7a", "arm64-v8a"
+        }
     }
     signingConfigs {
         debug {
@@ -107,6 +124,11 @@ android {
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
     }
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging true
+        }
+    }
 }
 
 dependencies {
@@ -118,4 +140,12 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+}
+
+// Ensure vector icon fonts are copied before Release lint model is generated.
+afterEvaluate {
+    tasks.matching { it.name in ["generateReleaseLintVitalReportModel", "lintVitalAnalyzeRelease"] }
+        .configureEach {
+            dependsOn("copyReactNativeVectorIconFonts")
+        }
 }

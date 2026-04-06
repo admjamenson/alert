@@ -37,6 +37,36 @@ Or rebuild and install in one Gradle pass:
 npm run android:rebuild:native
 ```
 
+## One-command smoke test
+
+To build, install, launch, capture `logcat`, dump the current UI tree, and save a fresh screenshot in `artifacts/`:
+
+```powershell
+npm run android:smoke:release
+```
+
+Or, on this Windows workspace without relying on `npm`:
+
+```powershell
+.\tools\run_android_smoke_release.cmd
+```
+
+Notes:
+
+- The script prefers the USB-connected device when more than one device is attached.
+- You can override the target device with `ALERT_ANDROID_SERIAL=<serial>`.
+- If `android-sdk/platform-tools` is missing in the workspace, the script syncs it from the `adb` already available on the host before running `installRelease`.
+
+## CI gate and release checklist
+
+- GitHub Actions now exposes the `Android Release Smoke / smoke` check in [.github/workflows/android-release-smoke.yml](../.github/workflows/android-release-smoke.yml).
+- The workflow is designed for a Windows self-hosted runner with an authorized Android device or emulator connected.
+- Do not merge or cut an Android release if the smoke check is red, missing artifacts, or did not run on the self-hosted runner.
+- When the workflow is temporarily unavailable, run `.\tools\run_android_smoke_release.cmd` locally and keep the fresh `artifacts/android-smoke-*` folder as release evidence.
+- In GitHub branch protection, mark `Android Release Smoke / smoke` as a required status check for the protected branch.
+- To automate that branch-protection update when the repository plan allows it, run `.\tools\run_set_github_required_smoke_check.cmd`.
+- GitHub documents that protected branches and required status checks are available on public repositories with GitHub Free, and on private repositories only with GitHub Pro, Team, Enterprise Cloud, or Enterprise Server: https://docs.github.com/en/rest/branches/branch-protection
+
 ## Logs
 
 If the app needs runtime verification after launch:
