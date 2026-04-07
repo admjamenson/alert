@@ -8,6 +8,9 @@ import {
   resolveLocale,
   resolveTimeZone,
 } from '../utils/dateTimeFormat';
+import { EntitlementService } from './EntitlementService';
+import { CostGuard } from './cost/CostGuard';
+import CostPolicy from '../domain/cost/CostPolicy';
 
 export type CapSeverity = 'Minor' | 'Moderate' | 'Severe' | 'Extreme';
 export type CapUrgency = 'Immediate' | 'Expected' | 'Future' | 'Past';
@@ -447,6 +450,20 @@ export const EventHubService = {
         },
       };
     }
+    const entitlements = await EntitlementService.getEntitlements().catch(() => null);
+    const tier = entitlements?.isPremium ? 'premium' : 'free';
+    const region = params.country || 'XX';
+    const recordEventHubCost = async (cacheHit: boolean) => {
+      await CostGuard.record({
+        feature: 'eventhub.monitoring',
+        provider: 'eventhub',
+        tier,
+        region,
+        costUsd: cacheHit ? 0 : CostPolicy.estimateCost('eventhub.monitoring'),
+        ts: Date.now(),
+        cacheHit,
+      });
+    };
 
     const query = new URLSearchParams();
     query.set('bbox', params.bbox);
@@ -460,6 +477,7 @@ export const EventHubService = {
     const cacheKey = query.toString();
     const cached = readEventsCache(cacheKey);
     if (cached) {
+      await recordEventHubCost(true);
       return {
         unifiedEvents: cached.unifiedEvents,
         mapEvents: cached.mapEvents,
@@ -468,6 +486,25 @@ export const EventHubService = {
         meta: {
           ...cached.meta,
           cacheHit: true,
+        },
+      };
+    }
+    const budget = await CostGuard.evaluate({
+      feature: 'eventhub.monitoring',
+      provider: 'eventhub',
+      tier,
+      region,
+    });
+    if (!budget.allow) {
+      return {
+        unifiedEvents: [],
+        mapEvents: [],
+        alerts: [],
+        providers: [],
+        meta: {
+          failClosed: true,
+          hubAvailable: false,
+          cacheHit: false,
         },
       };
     }
@@ -511,6 +548,7 @@ export const EventHubService = {
         meta,
         expiresAt: Date.now() + 20_000,
       });
+      await recordEventHubCost(false);
       return { unifiedEvents, mapEvents, alerts, providers, meta };
     } catch {
       return {
@@ -563,6 +601,20 @@ export const EventHubService = {
   }): Promise<HealthTopItem[]> {
     const baseUrl = getApiBaseUrl();
     if (!baseUrl) return [];
+    const entitlements = await EntitlementService.getEntitlements().catch(() => null);
+    const tier = entitlements?.isPremium ? 'premium' : 'free';
+    const region = params.country || 'XX';
+    const recordHealthCost = async (cacheHit: boolean) => {
+      await CostGuard.record({
+        feature: 'eventhub.monitoring',
+        provider: 'eventhub',
+        tier,
+        region,
+        costUsd: cacheHit ? 0 : CostPolicy.estimateCost('eventhub.monitoring'),
+        ts: Date.now(),
+        cacheHit,
+      });
+    };
     const radiusKm = Number.isFinite(params.radiusKm as number) ? Number(params.radiusKm) : 35;
     const bbox = buildBboxFromPoint(params.latitude, params.longitude, radiusKm);
 
@@ -571,7 +623,17 @@ export const EventHubService = {
     if (params.country) query.set('country', params.country);
     const cacheKey = query.toString();
     const cached = readHealthTopCache(cacheKey);
-    if (cached) return cached.items;
+    if (cached) {
+      await recordHealthCost(true);
+      return cached.items;
+    }
+    const budget = await CostGuard.evaluate({
+      feature: 'eventhub.monitoring',
+      provider: 'eventhub',
+      tier,
+      region,
+    });
+    if (!budget.allow) return [];
 
     const trimmedBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
     const url = `${trimmedBase}/v1/health/top?${query.toString()}`;
@@ -604,6 +666,7 @@ export const EventHubService = {
       items,
       expiresAt: Date.now() + 5 * 60 * 1000,
     });
+    await recordHealthCost(false);
     return items;
   },
 };

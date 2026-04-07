@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
+  BackHandler,
   I18nManager,
   View,
   Text,
@@ -11,14 +12,13 @@ import {
   Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { CommonActions } from '@react-navigation/native';
+import { CommonActions, useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../context/ThemeContext';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useTranslation } from 'react-i18next';
 import { ThemeTokens } from '../constants/ThemeTokens';
 import LocaleService, { LanguagePreference } from '../services/LocaleService';
 import { EntitlementService } from '../services/EntitlementService';
-import { ConsentManager } from '../ads/ConsentManager';
 import AdSlot from '../ads/AdSlot';
 import AlertLogo from '../assets/logo.png';
 import AppText from '../components/ui/AppText';
@@ -193,15 +193,15 @@ const SettingScreen: React.FC = ({ navigation }: any) => {
     );
   }, [t]);
 
-  const handleOpenAdsPrivacyOptions = useCallback(async () => {
-    const opened = await ConsentManager.openPrivacyOptions();
-    if (opened) return;
-    Alert.alert(
-      t('settings_ads_privacy_title'),
-      t('settings_ads_privacy_unavailable'),
-      [{ text: t('close') }],
-    );
-  }, [t]);
+  const triggerLightHaptic = useCallback(() => {
+    try {
+      const moduleRef = require('react-native-haptic-feedback');
+      const ReactNativeHapticFeedback = moduleRef.default || moduleRef;
+      ReactNativeHapticFeedback.trigger(ThemeTokens.haptics.light);
+    } catch {
+      // Ignore haptic failures to avoid blocking navigation.
+    }
+  }, []);
 
   const handleBackPress = useCallback(() => {
     if (navigation?.canGoBack?.()) {
@@ -236,28 +236,56 @@ const SettingScreen: React.FC = ({ navigation }: any) => {
     }
   }, [navigation]);
 
+  const handleBackPressFromButton = useCallback(() => {
+    triggerLightHaptic();
+    handleBackPress();
+  }, [handleBackPress, triggerLightHaptic]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS !== 'android') {
+        return undefined;
+      }
+
+      const subscription = BackHandler.addEventListener(
+        'hardwareBackPress',
+        () => {
+          handleBackPress();
+          return true;
+        },
+      );
+
+      return () => {
+        subscription.remove();
+      };
+    }, [handleBackPress]),
+  );
+
   return (
     <SafeAreaView
       style={[styles.container, { backgroundColor: colors.background }]}
       edges={['top']}
     >
       <View style={styles.header}>
-        <HeaderBackButton
-          onPress={handleBackPress}
-          iconColor={colors.text}
-          accessibilityLabel={t('common_back')}
-          accessibilityHint={t('common_back_hint')}
-        />
-        <View style={styles.headerTitleWrap}>
-          <AppText
-            variant="title1"
-            tone="default"
-            accessibilityRole="header"
-            style={[styles.headerTitle, { color: colors.text }]}
-            numberOfLines={1}
-          >
-            {t('settings_title')}
-          </AppText>
+        <View style={styles.headerTitleRow}>
+          <HeaderBackButton
+            onPress={handleBackPressFromButton}
+            iconColor={colors.text}
+            accessibilityLabel={t('common_back')}
+            accessibilityHint={t('common_back_hint')}
+          />
+          <View style={styles.headerTitleWrap}>
+            <AppText
+              variant="title1"
+              tone="default"
+              accessibilityRole="header"
+              accessibilityLabel={t('settings_title')}
+              style={[styles.headerTitle, { color: colors.text }]}
+              numberOfLines={1}
+            >
+              {t('settings_title')}
+            </AppText>
+          </View>
         </View>
       </View>
 
@@ -301,7 +329,11 @@ const SettingScreen: React.FC = ({ navigation }: any) => {
           </TouchableOpacity>
           <View style={[styles.separator, { backgroundColor: colors.border }]} />
           <TouchableOpacity
-            style={styles.linkRow}
+            style={[
+              styles.linkRow,
+              !isPremium && styles.premiumRowAttention,
+              !isPremium && { backgroundColor: colors.alert + '14', borderColor: colors.alert + '55' },
+            ]}
             onPress={() => navigation.navigate('Checkout')}
           >
             <Image source={AlertLogo} style={styles.premiumLogo} resizeMode="contain" />
@@ -309,7 +341,12 @@ const SettingScreen: React.FC = ({ navigation }: any) => {
               <Text style={[styles.linkText, { color: colors.text }]}>
                 {t('settings_alert_premium')}
               </Text>
-              <Text style={[styles.premiumHint, { color: colors.textSecondary }]}>
+              <Text
+                style={[
+                  styles.premiumHint,
+                  { color: isPremium ? colors.textSecondary : colors.alert },
+                ]}
+              >
                 {isPremium
                   ? t('settings_alert_premium_hint_active')
                   : t('settings_alert_premium_hint_free')}
@@ -429,9 +466,7 @@ const SettingScreen: React.FC = ({ navigation }: any) => {
 
           <TouchableOpacity
             style={styles.linkRow}
-            onPress={() => {
-              void handleOpenAdsPrivacyOptions();
-            }}
+            onPress={() => navigation.navigate('AdPrivacy')}
             accessibilityRole="button"
             accessibilityLabel={t('settings_ads_privacy_title')}
             accessibilityHint={t('settings_ads_privacy_hint')}
@@ -440,6 +475,25 @@ const SettingScreen: React.FC = ({ navigation }: any) => {
             <Text style={[styles.linkText, { color: colors.text }]}>
               {t('settings_ads_privacy_title')}
             </Text>
+            <Icon name="chevron-right" size={22} color={colors.textSecondary} />
+          </TouchableOpacity>
+          <View style={[styles.separator, { backgroundColor: colors.border }]} />
+          <TouchableOpacity
+            style={styles.linkRow}
+            onPress={() => navigation.navigate('Support')}
+            accessibilityRole="button"
+            accessibilityLabel={t('settings_support_title')}
+            accessibilityHint={t('settings_support_hint')}
+          >
+            <Icon name="lifebuoy" size={22} color={colors.text} />
+            <View style={styles.linkTextWrap}>
+              <Text style={[styles.linkText, { color: colors.text }]}>
+                {t('settings_support_title')}
+              </Text>
+              <Text style={[styles.linkSubtitle, { color: colors.textSecondary }]}>
+                {t('settings_support_subtitle')}
+              </Text>
+            </View>
             <Icon name="chevron-right" size={22} color={colors.textSecondary} />
           </TouchableOpacity>
         </View>
@@ -456,13 +510,19 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: ThemeTokens.spacing.xs,
     paddingHorizontal: ThemeTokens.spacing.lg + ThemeTokens.spacing.xs,
     paddingTop: ThemeTokens.spacing.sm,
     paddingBottom: ThemeTokens.spacing.md,
   },
+  headerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: ThemeTokens.spacing.xs,
+    flex: 1,
+    minWidth: 0,
+  },
   headerBackButton: {
-    width: ThemeTokens.SecurityMap.buttonMinSize - ThemeTokens.spacing.xs,
+    minWidth: ThemeTokens.SecurityMap.buttonMinSize,
     minHeight: ThemeTokens.SecurityMap.buttonMinSize,
     borderRadius: ThemeTokens.radius.pill,
     alignItems: 'center',
@@ -470,12 +530,14 @@ const styles = StyleSheet.create({
   },
   scrollContent: { paddingHorizontal: 20, paddingBottom: 40 },
   headerTitleWrap: {
-    flex: 1,
+    flexShrink: 1,
     minWidth: 0,
     justifyContent: 'center',
+    alignItems: 'flex-start',
   },
   headerTitle: {
     flexShrink: 1,
+    marginLeft: ThemeTokens.spacing.xs,
   },
   section: {
     borderRadius: 20,
@@ -527,9 +589,22 @@ const styles = StyleSheet.create({
     letterSpacing: ThemeTokens.typography.letterSpacing.body,
     flex: 1,
   },
+  linkTextWrap: {
+    flex: 1,
+    gap: 2,
+  },
+  linkSubtitle: {
+    fontFamily: FONT_FAMILY,
+    fontSize: ThemeTokens.typography.sizes.caption,
+    lineHeight: ThemeTokens.typography.lineHeights.caption,
+    letterSpacing: ThemeTokens.typography.letterSpacing.caption,
+  },
   premiumLogo: {
-    width: 22,
-    height: 22,
+    width: 34,
+    height: 34,
+  },
+  premiumRowAttention: {
+    borderWidth: 1,
   },
   premiumRowTextWrap: {
     flex: 1,

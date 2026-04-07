@@ -72,6 +72,13 @@ export type ChatMessageMeta = {
   durationSec?: number;
   uploadStatus?: 'uploaded' | 'local_only';
   storagePath?: string;
+  location?: {
+    latitude: number;
+    longitude: number;
+    label?: string;
+    source?: 'sos' | 'guardians_chat';
+    sharedAt?: string;
+  };
 };
 
 export type ChatMessageItem = {
@@ -407,7 +414,9 @@ export const ChatThreadService = {
       if (guardiansConversation.members.length > 0) {
         payload.members = arrayUnion(...guardiansConversation.members);
       }
-      await setDoc(conversationRef(GUARDIANS_CONVERSATION_ID), payload, { merge: true });
+      void setDoc(conversationRef(GUARDIANS_CONVERSATION_ID), payload, {
+        merge: true,
+      }).catch(() => {});
     } catch {
       // Offline-safe: local conversation is enough for immediate access.
     }
@@ -608,7 +617,9 @@ export const ChatThreadService = {
     }
     if (members.length > 0) payload.members = arrayUnion(...members);
     try {
-      await setDoc(conversationRef(params.conversationId), payload, { merge: true });
+      void setDoc(conversationRef(params.conversationId), payload, {
+        merge: true,
+      }).catch(() => {});
     } catch {
       // offline-safe fallback keeps local conversation state.
     }

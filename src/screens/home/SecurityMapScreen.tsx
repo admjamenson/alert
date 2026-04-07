@@ -93,6 +93,16 @@ export const SecurityMapScreen = ({ navigation, route }: any) => {
   const [saving, setSaving] = useState(false);
   const [mapMode, setMapMode] = useState<MapStyleMode>('default');
   const [mapChromeHidden, setMapChromeHidden] = useState(false);
+  const [profileRefreshKey, setProfileRefreshKey] = useState(0);
+
+  useEffect(() => {
+    const unsubscribe = navigation?.addListener?.('focus', () => {
+      setProfileRefreshKey(Date.now());
+    });
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
+  }, [navigation]);
 
   const routeLat = route?.params?.targetLocation?.latitude;
   const routeLon = route?.params?.targetLocation?.longitude;
@@ -468,6 +478,7 @@ export const SecurityMapScreen = ({ navigation, route }: any) => {
               ? { latitude: userLat, longitude: userLon }
               : null
           }
+          profileRefreshKey={profileRefreshKey}
           glyphs={snapshot?.glyphs || []}
           incidents={localizedItems}
           chromeHidden={mapChromeHidden}

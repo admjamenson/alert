@@ -21,7 +21,7 @@
  * 1. User presses SOS button
  * 2. triggerSecureSOS() called
  * 3. Kyber encryption applied to location
- * 4. Broadcast sent to emergency services + guardians
+ * 4. In-app SOS sent to guardians with precise location
  * 5. Return success status
  *
  * PERFORMANCE:
@@ -519,19 +519,31 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({
       const ProfileService = getProfileService();
       const SosDispatchService = getSosDispatchService();
       const i18n = getI18n();
-      const storedContacts = await AsyncStorage.getItem('@emergency_contacts');
-      const contacts = storedContacts ? JSON.parse(storedContacts) : [];
-
-      if (contacts.length === 0) {
+      const guardiansRaw = await AsyncStorage.getItem('@guardians_list');
+      const guardians = guardiansRaw
+        ? JSON.parse(guardiansRaw)
+            .map((item: any) => ({
+              remoteId:
+                typeof item?.remoteId === 'string' ? item.remoteId.trim() : undefined,
+              name:
+                typeof item?.name === 'string' && item.name.trim().length > 0
+                  ? item.name.trim()
+                  : i18n.t('guardian_label', { defaultValue: 'Guardian' }),
+            }))
+            .filter((item: { remoteId?: string; name: string }) => Boolean(item.remoteId))
+        : [];
+      if (guardians.length === 0) {
         Alert.alert(
-          i18n.t('sos_contacts_required_title'),
-          i18n.t('sos_contacts_required_body'),
+          i18n.t('sos_guardians_required_title', {
+            defaultValue: 'Guardians required',
+          }),
+          i18n.t('sos_guardians_required_body', {
+            defaultValue:
+              'Add at least one guardian in Alert so your SOS can be delivered in-app.',
+          }),
         );
         return false;
       }
-
-      const guardiansRaw = await AsyncStorage.getItem('@guardians_list');
-      const guardians = guardiansRaw ? JSON.parse(guardiansRaw) : [];
       const profile = await ProfileService.getProfile();
       let dispatchLocation = securityState.location;
       if (!canUseLocationForRiskMaps(securityState) || !dispatchLocation) {
@@ -550,14 +562,26 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({
         }
         dispatchLocation = lastPreciseLocationRef.current;
       }
-      return await SosDispatchService.dispatchFromApp({
+      const sent = await SosDispatchService.dispatchFromApp({
         location: dispatchLocation,
-        contacts,
+        locationName: securityState.locationName || lastLocationNameRef.current,
         senderName: profile.name,
         guardians,
       });
+      if (!sent) {
+        Alert.alert(
+          i18n.t('sos_failed_title'),
+          i18n.t('sos_failed_body'),
+        );
+      }
+      return sent;
     } catch (error) {
       console.error('[SecurityContext] SOS error:', error);
+      const i18n = getI18n();
+      Alert.alert(
+        i18n.t('sos_failed_title'),
+        i18n.t('sos_failed_body'),
+      );
       return false;
     }
   };

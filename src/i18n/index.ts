@@ -76,6 +76,7 @@ const resources = {
       map_title: 'Safety map',
       map_no_location: 'Location unavailable',
       map_loading: 'Preparing map...',
+      map_search_placeholder: 'Search this area',
       map_unavailable: 'Map unavailable. Check your connection.',
       map_open_label: 'Open map',
       map_open_hint: 'Shows the full-screen map with options.',
@@ -181,6 +182,7 @@ const resources = {
       gps_off: 'GPS disabled',
       forecast_unavailable: 'Forecast unavailable right now.',
       forecast_rain_chance: '{{chance}}% rain',
+      weather_unknown: 'Weather unavailable',
       weather_feels_like: 'Feels like {{temp}}',
       weather_alert_storm_nearby: 'Storm approaching',
       weather_alert_lightning_nearby: 'Lightning risk nearby',
@@ -350,6 +352,21 @@ const resources = {
         'Source badges and freshness explain why a state is being shown.',
       assistant_monitoring_bullet_map:
         'If data is incomplete, the app should fall back to a monitoring state instead of exposing a raw technical error.',
+      assistant_monitoring_overview_title: 'What Alert is monitoring',
+      assistant_monitoring_overview_body:
+        'Right now I can summarize {{summary}} with {{risk}} context and live signals from Alert.',
+      assistant_monitoring_snapshot:
+        '{{active}} active situations out of {{monitored}} monitored right now.',
+      assistant_monitoring_snapshot_unavailable:
+        'Monitoring snapshot is unavailable right now.',
+      assistant_monitoring_events_list: 'Monitored categories include {{list}}.',
+      assistant_event_title: '{{event}} status',
+      assistant_event_body:
+        'Here is what Alert knows about {{event}}: {{summary}}',
+      assistant_event_summary_empty:
+        'No recent signals for {{event}} in your current coverage.',
+      assistant_event_action_empty:
+        'Keep monitoring alerts for {{event}} in the live feed.',
       assistant_general_title: 'Monitoring summary',
       assistant_general_body:
         'Alert can explain monitored signals, trusted sources, route exposure, and local status. Current local risk: {{risk}}. {{summary}}',
@@ -375,10 +392,19 @@ const resources = {
       checkin_notification_title: 'Check-in',
       checkin_default_message: 'I am heading out',
       sos_sent_title: 'SOS sent',
-      sos_sent_body: 'Your SOS request was sent to all guardians.',
+      sos_sent_body:
+        'Your SOS with location was sent in Alert to your guardians.',
       sos_failed_title: 'SOS not sent',
       sos_failed_body:
         'We could not send your SOS request right now. Try again.',
+      sos_action_hint_idle: 'Sends an SOS alert to your trusted guardians in Alert.',
+      sos_action_hint_sending: 'Sending your SOS alert now.',
+      sos_action_hint_active: 'SOS active. Stay safe and wait for responses.',
+      sos_guardians_required_title: 'Guardians required',
+      sos_guardians_required_body:
+        'Add at least one guardian in Alert so your SOS can be delivered in-app.',
+      sos_in_app_message_body:
+        'SOS active. My location: {{location}}. Open map: {{mapUrl}}',
       gps_required_title: 'Location required',
       gps_required_body: 'Enable location in app settings to continue.',
       gps_required_cancel: 'Cancel',
@@ -451,7 +477,7 @@ const resources = {
       settings_premium_active: 'Premium active',
       settings_alert_premium: 'Alert Premium',
       settings_alert_premium_hint_free:
-        'Start Premium and unlock billing controls.',
+        'Subscribe to Alert Premium and unlock all features.',
       settings_alert_premium_hint_active:
         'Manage your plan, receipts, and account status.',
       settings_route_default: 'My route',
@@ -489,6 +515,53 @@ const resources = {
       settings_route_transport_bike_a11y: 'Travel by bike',
       settings_route_transport_walk_a11y: 'Travel on foot',
       settings_widgets: 'Widgets',
+      settings_support_title: 'Support',
+      settings_support_subtitle: 'Quick answers or contact our team',
+      settings_support_hint: 'Open support chat and email options.',
+      support_screen_title: 'Support',
+      support_chat_scope_title: 'General support only',
+      support_chat_scope_body:
+        'This chat answers general questions about using the app. For sensitive or urgent topics, contact our team by email.',
+      support_chat_input_placeholder: 'Ask a question',
+      support_chat_send_action: 'Send',
+      support_chat_empty_title: 'How can we help?',
+      support_chat_empty_body:
+        'Get quick answers about settings, subscriptions, widgets, and app updates.',
+      support_suggestion_notifications: 'How do I change notifications?',
+      support_suggestion_subscription: 'How does my subscription work?',
+      support_suggestion_update: 'How do I update the app?',
+      support_suggestion_settings: 'Where are the settings?',
+      support_suggestion_widgets: 'How do I enable widgets?',
+      support_chat_refusal:
+        'I can’t help with that topic here. This chat handles general questions only. Please email {{email}} for help.',
+      support_chat_fallback:
+        'I can help with general questions about the app. For this request, please contact {{email}}.',
+      support_email_title: 'Need a dedicated response?',
+      support_email_body:
+        'Email our team and include any relevant details. We reply as quickly as possible. {{email}}',
+      support_email_cta: 'Email support',
+      support_email_hint: 'Opens your email app to contact support.',
+      support_email_subject: 'Alert Support Request',
+      support_email_body_template:
+        'Hello Alert team,\n\nI need help with:\n\n',
+      support_faq_notifications:
+        'You can update notifications in Settings > Notifications. Choose what matters most and keep only the alerts you want.',
+      support_faq_settings:
+        'Open Settings from your profile tab. From there you can manage preferences, language, and safety options.',
+      support_faq_subscription:
+        'Premium unlocks advanced monitoring and priority safety features. You can review plan options inside Alert Premium.',
+      support_faq_billing:
+        'Billing is managed by your app store. If something looks off, contact support by email and include the purchase date.',
+      support_faq_widgets:
+        'Go to Settings > Widgets to see available widgets and learn how to add them to your home screen.',
+      support_faq_language:
+        'You can change language in Settings > Language. The app will refresh automatically after selection.',
+      support_faq_update:
+        'We recommend keeping Alert updated via the App Store or Play Store for the latest safety improvements.',
+      support_faq_permissions:
+        'If alerts are limited, check system permissions for location and notifications in your device settings.',
+      support_faq_compatibility:
+        'Alert supports recent iOS and Android versions. For best performance, keep your device updated.',
       widgets_picker_app_name: 'Alert',
       widgets_picker_count: '{{count}}',
       widgets_picker_format_2x2: '2 x 2',
@@ -528,6 +601,7 @@ const resources = {
       widget_sources_count: 'Sources: {{count}}',
       widget_source_mixed: 'Official and verified sources',
       widget_destination_default: 'Work',
+      widget_route_no_active: 'No active route',
       widget_commute_subtitle_line: '{{destination}}',
       widget_commute_metric_exact: '{{minutes}}m',
       widget_commute_metric_format: '{{minutes}}m (+{{extra}})',
@@ -544,6 +618,9 @@ const resources = {
       widget_alerts_focus_local_attention: 'Local caution',
       widget_alerts_focus_local_risk: 'Local risk',
       widget_alerts_focus_sos: 'SOS nearby',
+      widget_alerts_focus_lightning: 'Lightning nearby',
+      widget_alerts_focus_rain_now: 'Raining now',
+      widget_alerts_focus_rain_soon: 'Rain soon',
       widget_alerts_focus_protest: 'Active protest',
       widget_alerts_focus_heavy_rain: 'Heavy rain',
       widget_alerts_focus_flood: 'Flood risk',
@@ -671,6 +748,15 @@ const resources = {
         'Opens consent and privacy options for ads in supported regions.',
       settings_ads_privacy_unavailable:
         'Privacy options are not available right now. Try again later.',
+      ads_privacy_title: 'Ad Privacy',
+      ads_privacy_body_1:
+        'Alert may display ads to help support and improve the service. We do not sell your personal data. We do not use SOS content, trusted contacts, sensitive routes, or precise location for commercial ad targeting.',
+      ads_privacy_body_2:
+        'When necessary to deliver, measure, and protect ads against fraud, advertising partners may process limited technical data in accordance with applicable law and their own policies.',
+      ads_privacy_body_3:
+        'You can limit personalized ads in your device settings. Where required by law, Alert will ask for your consent.',
+      ads_privacy_closing:
+        'At Alert, safety and privacy come before monetization.',
       settings_system_running: 'System is operating normally.',
       settings_theme_system: 'Automatic (System)',
       settings_theme_light: 'Light mode',
@@ -719,6 +805,8 @@ const resources = {
       guardians_conversation_title: 'Guardians',
       guardians_conversation_stub_preview:
         'Emergency group with your guardians',
+      guardians_conversation_member_count:
+        '{{count}} guardians in this emergency group',
       guardians_conversation_pinned: 'Pinned conversation',
       messages_error_load: 'Could not load conversations.',
       messages_refresh_action: 'Refresh messages',
@@ -738,8 +826,12 @@ const resources = {
       chat_location_active: 'Location active',
       chat_send_message: 'Send message',
       chat_audio_play: 'Play audio',
+      chat_audio_unavailable_title: 'Audio unavailable',
+      chat_audio_unavailable_body:
+        'This build cannot record or play audio right now.',
       chat_video_play: 'Play video',
       chat_menu_title: 'Group options',
+      chat_menu_guardians_group: 'Guardians group',
       chat_menu_search: 'Search',
       chat_menu_mute: 'Mute notifications',
       chat_menu_theme: 'Chat theme',
@@ -1416,6 +1508,7 @@ const resources = {
       map_title: 'Mapa de segurança',
       map_no_location: 'Localização indisponível',
       map_loading: 'Preparando mapa...',
+      map_search_placeholder: 'Buscar no mapa',
       map_unavailable: 'Mapa indisponível. Verifique a conexão.',
       map_open_label: 'Abrir mapa',
       map_open_hint: 'Mostra o mapa em tela cheia com opções.',
@@ -1523,6 +1616,7 @@ const resources = {
       gps_off: 'GPS desativado',
       forecast_unavailable: 'Previsão indisponível no momento.',
       forecast_rain_chance: '{{chance}}% chuva',
+      weather_unknown: 'Clima indisponível',
       weather_feels_like: 'Sensação térmica {{temp}}',
       weather_alert_storm_nearby: 'Tempestade próxima',
       weather_alert_lightning_nearby: 'Risco de raios',
@@ -1694,6 +1788,21 @@ const resources = {
         'Badges de fonte e atualização explicam por que um estado está sendo mostrado.',
       assistant_monitoring_bullet_map:
         'Se o dado estiver incompleto, o app deve cair para um estado de monitoramento em vez de expor erro técnico cru.',
+      assistant_monitoring_overview_title: 'O que o Alert estÃ¡ monitorando',
+      assistant_monitoring_overview_body:
+        'Agora posso resumir {{summary}} com contexto de {{risk}} e sinais vivos do Alert.',
+      assistant_monitoring_snapshot:
+        '{{active}} situaÃ§Ãµes ativas entre {{monitored}} monitoradas agora.',
+      assistant_monitoring_snapshot_unavailable:
+        'Snapshot de monitoramento indisponÃ­vel no momento.',
+      assistant_monitoring_events_list: 'Categorias monitoradas incluem {{list}}.',
+      assistant_event_title: 'Status de {{event}}',
+      assistant_event_body:
+        'O Alert monitorou {{event}} assim: {{summary}}',
+      assistant_event_summary_empty:
+        'Sem sinais recentes de {{event}} na sua cobertura atual.',
+      assistant_event_action_empty:
+        'Continue acompanhando {{event}} no feed ao vivo.',
       assistant_general_title: 'Resumo do monitoramento',
       assistant_general_body:
         'Posso explicar sinais monitorados, fontes confiáveis, exposição na rota e status local. Risco local atual: {{risk}}. {{summary}}',
@@ -1711,9 +1820,17 @@ const resources = {
         'Antes de sair, revise alertas oficiais e áreas de risco perto de você. Se sentir perigo, acione o SOS.',
       sos_sent_title: 'SOS enviado',
       sos_sent_body:
-        'Seu pedido de socorro foi enviado para todos os guardiões.',
+        'Seu SOS com localização foi enviado no Alert para seus guardiões.',
       sos_failed_title: 'SOS não enviado',
       sos_failed_body: 'Não foi possível enviar o SOS agora. Tente novamente.',
+      sos_action_hint_idle: 'Envia um SOS para seus guardiões de confiança no Alert.',
+      sos_action_hint_sending: 'Enviando seu SOS agora.',
+      sos_action_hint_active: 'SOS ativo. Fique em segurança e aguarde.',
+      sos_guardians_required_title: 'Guardiões necessários',
+      sos_guardians_required_body:
+        'Adicione ao menos um guardião no Alert para entregar seu SOS no app.',
+      sos_in_app_message_body:
+        'SOS ativado. Minha localização: {{location}}. Abrir mapa: {{mapUrl}}',
       gps_required_title: 'Localização necessária',
       gps_required_body:
         'Ative a localização nas configurações do app para continuar.',
@@ -1823,6 +1940,15 @@ const resources = {
         'Abre opções de consentimento e privacidade para anúncios em regiões suportadas.',
       settings_ads_privacy_unavailable:
         'As opções de privacidade não estão disponíveis agora. Tente novamente em instantes.',
+      ads_privacy_title: 'Privacidade de anúncios',
+      ads_privacy_body_1:
+        'O Alert pode exibir anúncios para ajudar a manter e evoluir o serviço. Não vendemos seus dados pessoais. Não usamos conteúdo de SOS, contatos de confiança, rotas sensíveis ou localização precisa para segmentação comercial.',
+      ads_privacy_body_2:
+        'Quando necessário para exibir, medir e proteger anúncios contra fraude, parceiros de publicidade podem processar dados técnicos limitados, de acordo com a legislação aplicável e suas próprias políticas.',
+      ads_privacy_body_3:
+        'Você pode limitar anúncios personalizados nas configurações do seu dispositivo. Quando exigido por lei, o Alert solicitará seu consentimento.',
+      ads_privacy_closing:
+        'No Alert, segurança e privacidade vêm antes da monetização.',
       settings_system_running: 'Sistema funcionando normalmente.',
       settings_theme_system: 'Automático (Sistema)',
       settings_theme_light: 'Modo claro',
@@ -1871,6 +1997,8 @@ const resources = {
       guardians_conversation_title: 'Guardioes',
       guardians_conversation_stub_preview:
         'Grupo de emergencia dos seus Guardioes',
+      guardians_conversation_member_count:
+        '{{count}} guardioes neste grupo de emergencia',
       guardians_conversation_pinned: 'Conversa fixada',
       messages_error_load: 'Não foi possível carregar as conversas.',
       messages_refresh_action: 'Atualizar mensagens',
@@ -1890,8 +2018,12 @@ const resources = {
       chat_location_active: 'Localização ativa',
       chat_send_message: 'Enviar mensagem',
       chat_audio_play: 'Reproduzir áudio',
+      chat_audio_unavailable_title: 'Áudio indisponível',
+      chat_audio_unavailable_body:
+        'Esta versão não consegue gravar ou reproduzir áudio agora.',
       chat_video_play: 'Reproduzir vídeo',
       chat_menu_title: 'Opções do grupo',
+      chat_menu_guardians_group: 'Grupo dos guardiões',
       chat_menu_search: 'Pesquisar',
       chat_menu_mute: 'Silenciar notificações',
       chat_menu_theme: 'Tema da conversa',
@@ -2557,6 +2689,53 @@ const resources = {
       settings_route_transport_bike_a11y: 'Usar bike',
       settings_route_transport_walk_a11y: 'Ir a pé',
       settings_widgets: 'Widgets',
+      settings_support_title: 'Suporte',
+      settings_support_subtitle: 'Tire dúvidas rápidas ou fale com nossa equipe',
+      settings_support_hint: 'Abre o chat de suporte e opções de email.',
+      support_screen_title: 'Suporte',
+      support_chat_scope_title: 'Suporte geral apenas',
+      support_chat_scope_body:
+        'Este chat responde dúvidas gerais sobre uso do app. Para temas sensíveis ou urgentes, fale com nossa equipe por email.',
+      support_chat_input_placeholder: 'Digite sua dúvida',
+      support_chat_send_action: 'Enviar',
+      support_chat_empty_title: 'Como podemos ajudar?',
+      support_chat_empty_body:
+        'Respostas rápidas sobre configurações, assinatura, widgets e atualização do app.',
+      support_suggestion_notifications: 'Como altero minhas notificações?',
+      support_suggestion_subscription: 'Como funciona minha assinatura?',
+      support_suggestion_update: 'Como atualizar o app?',
+      support_suggestion_settings: 'Onde encontro as configurações?',
+      support_suggestion_widgets: 'Como ativar widgets?',
+      support_chat_refusal:
+        'Não posso ajudar com esse assunto por aqui. Este chat atende apenas dúvidas gerais. Para esse caso, envie um email para {{email}}.',
+      support_chat_fallback:
+        'Posso ajudar com dúvidas gerais sobre o app. Para esse pedido, envie um email para {{email}}.',
+      support_email_title: 'Precisa de uma resposta dedicada?',
+      support_email_body:
+        'Envie um email para nossa equipe com os detalhes. Respondemos o quanto antes. {{email}}',
+      support_email_cta: 'Falar com a equipe',
+      support_email_hint: 'Abre seu email para falar com o suporte.',
+      support_email_subject: 'Solicitação de suporte Alert',
+      support_email_body_template:
+        'Olá, equipe Alert,\n\nPreciso de ajuda com:\n\n',
+      support_faq_notifications:
+        'Você pode ajustar notificações em Configurações > Notificações. Escolha apenas os alertas que importam para você.',
+      support_faq_settings:
+        'Abra Configurações no seu perfil. Lá você encontra preferências, idioma e opções de segurança.',
+      support_faq_subscription:
+        'O Premium libera recursos avançados de monitoramento e proteção. Veja os planos dentro de Alert Premium.',
+      support_faq_billing:
+        'A cobrança é gerenciada pela loja do seu dispositivo. Se algo estiver diferente, envie um email com a data da compra.',
+      support_faq_widgets:
+        'Vá em Configurações > Widgets para ver os modelos disponíveis e aprender a fixar na tela inicial.',
+      support_faq_language:
+        'Você pode mudar o idioma em Configurações > Idioma. O app atualiza automaticamente.',
+      support_faq_update:
+        'Mantenha o Alert atualizado pela App Store ou Play Store para receber as melhorias de segurança.',
+      support_faq_permissions:
+        'Se os alertas estiverem limitados, verifique permissões de localização e notificações nas configurações do dispositivo.',
+      support_faq_compatibility:
+        'O Alert funciona nas versões recentes de iOS e Android. Para melhor performance, mantenha seu dispositivo atualizado.',
       widgets_picker_app_name: 'Alert',
       widgets_picker_count: '{{count}}',
       widgets_picker_format_2x2: '2 x 2',
@@ -2594,6 +2773,7 @@ const resources = {
       widget_sources_count: 'Fontes: {{count}}',
       widget_source_mixed: 'Fontes oficiais e verificadas',
       widget_destination_default: 'Trabalho',
+      widget_route_no_active: 'Sem rota ativa',
       widget_commute_subtitle_line: '{{destination}}',
       widget_commute_metric_exact: '{{minutes}}m',
       widget_commute_metric_format: '{{minutes}}m (+{{extra}})',
@@ -2610,6 +2790,9 @@ const resources = {
       widget_alerts_focus_local_attention: 'Atenção local',
       widget_alerts_focus_local_risk: 'Risco local',
       widget_alerts_focus_sos: 'SOS próximo',
+      widget_alerts_focus_lightning: 'Raios próximos',
+      widget_alerts_focus_rain_now: 'Está chovendo',
+      widget_alerts_focus_rain_soon: 'Vai chover',
       widget_alerts_focus_protest: 'Protesto ativo',
       widget_alerts_focus_heavy_rain: 'Chuva forte',
       widget_alerts_focus_flood: 'Risco inundação',
@@ -2737,8 +2920,13 @@ const resourcesWithGlobalLocales = {
     monitoring_feed_scope_city: 'Ville',
     monitoring_feed_scope_state: 'Region',
     monitoring_feed_scope_country: 'Pays',
+    monitoring_feed_scope_hint: 'Ajuste le zoom et la couverture de la carte.',
     monitoring_feed_action_share: 'Partager',
+    monitoring_feed_action_share_hint:
+      'Partage cette carte de monitoring avec des liens.',
     monitoring_feed_action_save: 'Enregistrer',
+    monitoring_feed_action_save_hint:
+      'Enregistre la capture actuelle de la carte dans votre galerie.',
     monitoring_action_refresh: 'Actualiser',
     monitoring_action_refresh_hint:
       'Force une actualisation immediate de cette carte.',
@@ -2774,8 +2962,13 @@ const resourcesWithGlobalLocales = {
     monitoring_feed_scope_city: 'Stadt',
     monitoring_feed_scope_state: 'Bundesland',
     monitoring_feed_scope_country: 'Land',
+    monitoring_feed_scope_hint: 'Passt Zoom und Abdeckung der Karte an.',
     monitoring_feed_action_share: 'Teilen',
+    monitoring_feed_action_share_hint:
+      'Teilt diese Monitoring-Karte mit Links.',
     monitoring_feed_action_save: 'Speichern',
+    monitoring_feed_action_save_hint:
+      'Speichert den aktuellen Kartenscreenshot in deiner Galerie.',
     monitoring_action_refresh: 'Aktualisieren',
     monitoring_action_refresh_hint: 'Aktualisiert diese Karte sofort.',
     monitoring_action_map_default: 'Standardkarte aktivieren',
@@ -2810,8 +3003,13 @@ const resourcesWithGlobalLocales = {
     monitoring_feed_scope_city: '市区町村',
     monitoring_feed_scope_state: '都道府県',
     monitoring_feed_scope_country: '国',
+    monitoring_feed_scope_hint: '地図のズームと範囲を調整します。',
     monitoring_feed_action_share: '共有',
+    monitoring_feed_action_share_hint:
+      'この監視マップをリンク付きで共有します。',
     monitoring_feed_action_save: '保存',
+    monitoring_feed_action_save_hint:
+      '現在の地図スクリーンショットをギャラリーに保存します。',
     monitoring_action_refresh: '更新',
     monitoring_action_refresh_hint: 'この地図のデータをすぐに更新します。',
     monitoring_action_map_default: '標準地図に切り替え',
@@ -2844,8 +3042,13 @@ const resourcesWithGlobalLocales = {
     monitoring_feed_scope_city: '도시',
     monitoring_feed_scope_state: '주/도',
     monitoring_feed_scope_country: '국가',
+    monitoring_feed_scope_hint: '지도의 확대와 범위를 조정합니다.',
     monitoring_feed_action_share: '공유',
+    monitoring_feed_action_share_hint:
+      '이 모니터링 지도를 링크와 함께 공유합니다.',
     monitoring_feed_action_save: '저장',
+    monitoring_feed_action_save_hint:
+      '현재 지도 스크린샷을 갤러리에 저장합니다.',
     monitoring_action_refresh: '새로고침',
     monitoring_action_refresh_hint: '이 지도 데이터를 즉시 새로고침합니다.',
     monitoring_action_map_default: '기본 지도 켜기',
@@ -2934,3 +3137,4 @@ export const setStoredLanguage = async (mode: 'system' | string) => {
 };
 
 export { default } from 'i18next';
+

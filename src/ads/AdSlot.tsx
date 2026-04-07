@@ -71,7 +71,7 @@ export const AdSlot: React.FC<Props> = ({
   const markedImpressionRef = useRef(false);
   const requestTrackedRef = useRef(false);
 
-  const sdk = useMemo(() => AdsBootstrap.getSdkModule(), []);
+  const sdk = useMemo(() => AdsBootstrap.getSdkModule() as BannerAdSdk | null, []);
 
   useEffect(() => {
     let mounted = true;

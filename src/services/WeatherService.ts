@@ -4,6 +4,9 @@ import { AlertNotification } from '../types/notifications';
 import i18n from '../i18n';
 import { NotificationService } from './NotificationService';
 import { normalizeToIsoDateTime } from '../utils/dateTimeFormat';
+import { EntitlementService } from './EntitlementService';
+import { CostGuard } from './cost/CostGuard';
+import CostPolicy from '../domain/cost/CostPolicy';
 
 const WEATHER_CACHE_KEY = '@Alert:WeatherCacheV3';
 const LEGACY_WEATHER_CACHE_KEYS = ['@Alert:WeatherCache', '@Alert:WeatherCacheV2'];
@@ -765,6 +768,35 @@ export const WeatherService = {
     options?: { force?: boolean },
   ): Promise<WeatherResult> {
     await clearLegacyWeatherCachesIfNeeded();
+    const locale = getLocales()?.[0];
+    const languageTag = locale?.languageTag || 'pt-BR';
+    const language = locale?.languageCode || 'pt';
+    const countryCode = locale?.countryCode || 'XX';
+    const isPt = languageTag.toLowerCase().startsWith('pt');
+
+    const entitlements = await EntitlementService.getEntitlements().catch(() => null);
+    const tier = entitlements?.isPremium ? 'premium' : 'free';
+    const recordWeatherCost = async (cacheHit: boolean) => {
+      await CostGuard.record({
+        feature: 'weather.current',
+        provider: 'open-meteo',
+        tier,
+        region: countryCode,
+        costUsd: cacheHit ? 0 : CostPolicy.estimateCost('weather.current'),
+        ts: Date.now(),
+        cacheHit,
+      });
+    };
+
+    const budget = await CostGuard.evaluate({
+      feature: 'weather.current',
+      provider: 'open-meteo',
+      tier,
+      region: countryCode,
+    });
+
+    const cacheTtlMs = WEATHER_CACHE_TTL * budget.cacheTtlMultiplier;
+
     const cachedRaw = await AsyncStorage.getItem(WEATHER_CACHE_KEY);
     let cachedFallback: WeatherResult | null = null;
     if (cachedRaw) {
@@ -778,9 +810,10 @@ export const WeatherService = {
           cachedFallback = cachedData;
           if (
             !options?.force &&
-            Date.now() - cached.ts < WEATHER_CACHE_TTL &&
+            Date.now() - cached.ts < cacheTtlMs &&
             isWithinKm({ lat: cached.lat, lon: cached.lon }, { lat, lon })
           ) {
+            await recordWeatherCost(true);
             return cachedData;
           }
         }
@@ -789,10 +822,21 @@ export const WeatherService = {
       }
     }
 
-    const locale = getLocales()?.[0];
-    const languageTag = locale?.languageTag || 'pt-BR';
-    const language = locale?.languageCode || 'pt';
-    const isPt = languageTag.toLowerCase().startsWith('pt');
+    if (!budget.allow) {
+      if (cachedFallback) {
+        await recordWeatherCost(true);
+        return cachedFallback;
+      }
+      return sanitizeWeatherPayload({
+        city: '...',
+        temp: '--',
+        wind: 0,
+        icon: 'weather-cloudy',
+        label: i18n.t('weather_unknown') || '...',
+        isDay: true,
+        timestamp: new Date().toISOString(),
+      });
+    }
 
     const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,is_day,wind_speed_10m,precipitation,rain,showers,snowfall&hourly=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,precipitation_probability,precipitation,rain,showers,snowfall&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max,sunrise,sunset&forecast_days=4&timezone=auto`;
     const legacyWeatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&hourly=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,precipitation_probability,precipitation,rain,showers,snowfall&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max,sunrise,sunset&forecast_days=4&timezone=auto`;
@@ -868,7 +912,7 @@ export const WeatherService = {
         }
       }
 
-        if (weatherData) {
+      if (weatherData) {
         if (typeof weatherData.timezone === 'string' && weatherData.timezone.trim()) {
           timeZone = weatherData.timezone.trim();
         }
@@ -1096,6 +1140,7 @@ export const WeatherService = {
           };
         });
       } else if (cachedFallback) {
+        await recordWeatherCost(true);
         let fallbackCity = cachedFallback.city;
         if (!fallbackCity || fallbackCity === '...') {
           try {
@@ -1124,6 +1169,7 @@ export const WeatherService = {
       (label === '...' || temp === '--') &&
       cachedFallback
     ) {
+      await recordWeatherCost(true);
       return cachedFallback;
     }
 
@@ -1165,6 +1211,7 @@ export const WeatherService = {
 
     const cache: WeatherCache = { lat, lon, ts: Date.now(), data };
     await AsyncStorage.setItem(WEATHER_CACHE_KEY, JSON.stringify(cache));
+    await recordWeatherCost(false);
 
     return data;
   },

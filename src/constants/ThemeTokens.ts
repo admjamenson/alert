@@ -274,6 +274,7 @@ export const ThemeTokens = {
       right: 10,
     },
     railLabelFontSize: 12,
+    railLabelMaxFontScale: 1.4,
     railGap: 8,
     fabSize: 44,
     fabHitSlop: 10,

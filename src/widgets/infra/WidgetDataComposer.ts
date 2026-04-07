@@ -14,7 +14,7 @@ import { NotificationService } from '../../services/NotificationService';
 import { RiskReportService } from '../../services/RiskReportService';
 import { RouteService } from '../../services/RouteService';
 import { RouteDestinationService } from '../../services/RouteDestinationService';
-import { WeatherService } from '../../services/WeatherService';
+import { WeatherResult, WeatherService } from '../../services/WeatherService';
 import { WidgetConfidence } from '../domain/WidgetConfidence';
 import { WidgetPreset, WIDGET_PRESETS } from '../domain/WidgetPreset';
 import { WidgetMeterTier, WidgetSnapshot, WidgetStatusBadge, WidgetStatusTone } from '../domain/WidgetSnapshot';
@@ -78,6 +78,12 @@ type SharedRiskContext = {
   assessment: CanonicalWidgetAssessment | null;
 };
 
+type SharedWidgetSignals = {
+  weather: WeatherResult | null;
+  monitoring: Awaited<ReturnType<typeof MonitoringService.getActiveEvents>> | null;
+  riskReports: RiskReport[];
+};
+
 const memoryCache = new Map<WidgetPreset, CacheEntry>();
 
 const parseJson = <T,>(raw: string | null): T | null => {
@@ -90,6 +96,43 @@ const parseJson = <T,>(raw: string | null): T | null => {
 };
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+const toRad = (v: number) => (v * Math.PI) / 180;
+const distanceKm = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => {
+  const R = 6371;
+  const dLat = toRad(b.lat - a.lat);
+  const dLon = toRad(b.lon - a.lon);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const h =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return 2 * R * Math.asin(Math.sqrt(h));
+};
+const isWithinKm = (
+  a: { latitude: number; longitude: number },
+  b: { latitude: number; longitude: number },
+  radiusKm: number,
+) => distanceKm({ lat: a.latitude, lon: a.longitude }, { lat: b.latitude, lon: b.longitude }) <= radiusKm;
+
+const extractAlertLocation = (alert: AlertNotification): { latitude: number; longitude: number } | null => {
+  const dataLocation = alert?.data?.location;
+  const payloadLocation = (alert?.payload as any)?.location;
+  const coordinate = (alert?.payload as any)?.coordinate;
+  const lat = Number(
+    dataLocation?.latitude ??
+      payloadLocation?.latitude ??
+      (Array.isArray(coordinate) ? coordinate[1] : undefined),
+  );
+  const lon = Number(
+    dataLocation?.longitude ??
+      payloadLocation?.longitude ??
+      (Array.isArray(coordinate) ? coordinate[0] : undefined),
+  );
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  return { latitude: lat, longitude: lon };
+};
+
+const CRITICAL_DISTANCE_KM = 5;
 
 const buildCompactCommuteMetric = (minutes: number) => {
   const safeMinutes = Math.max(1, Math.round(Number(minutes || 0)));
@@ -347,6 +390,38 @@ const freshnessLabelFromSnapshot = (snapshot: OperationalSnapshot): string => {
 
 const ensureLevel = (level: number) => clamp(Math.round(level), 0, 100);
 
+const buildTimeWindowSegments = (params: {
+  level: number;
+  weather: WeatherResult | null;
+  overrideTone: WidgetStatusTone;
+}): number[] => {
+  const base = ensureLevel(params.level);
+  const segments = [
+    base,
+    ensureLevel(base - 4),
+    ensureLevel(base - 8),
+    ensureLevel(base - 12),
+    ensureLevel(base - 16),
+  ];
+
+  const signal = params.weather?.intelligenceSignal;
+  if (signal?.kind === 'rain') {
+    if (signal.startsInMinutes <= 0 || signal.source === 'current') {
+      segments[0] = ensureLevel(segments[0] + 12);
+      segments[1] = ensureLevel(segments[1] + 10);
+    } else if (signal.startsInMinutes <= 60) {
+      segments[1] = ensureLevel(segments[1] + 10);
+      segments[2] = ensureLevel(segments[2] + 8);
+    }
+  }
+
+  if (params.overrideTone === 'high') {
+    return segments.map(value => ensureLevel(Math.max(value, 82)));
+  }
+
+  return segments.map(ensureLevel);
+};
+
 const fallbackSituationScore = (activeSituationCount: number, sourceCount = 0, base = 18) => {
   const safeActiveCount = Math.max(0, Math.round(Number(activeSituationCount || 0)));
   const coverageRatio = safeActiveCount / TOTAL_MONITORED_SITUATIONS;
@@ -372,6 +447,100 @@ const buildStatusBadge = (params: {
     tone,
     label: statusLabelForTone(tone),
   };
+};
+
+const CRITICAL_MONITORING_IDS = new Set([
+  'lightning',
+  'storm',
+  'hurricane',
+  'tornado',
+  'wildfire',
+  'earthquake',
+  'tsunami',
+  'volcano',
+]);
+
+const buildOverrideBadge = (params: {
+  base: WidgetStatusBadge;
+  weather: WeatherResult | null;
+  monitoring: Awaited<ReturnType<typeof MonitoringService.getActiveEvents>> | null;
+  riskReports: RiskReport[];
+  location: { latitude: number; longitude: number } | null;
+}): WidgetStatusBadge => {
+  if (params.location && params.riskReports.length > 0) {
+    const hasNearbySos = params.riskReports.some(report =>
+      isWithinKm(params.location!, { latitude: report.latitude, longitude: report.longitude }, CRITICAL_DISTANCE_KM),
+    );
+    if (hasNearbySos) {
+      return {
+        tone: 'high',
+        label: i18n.t('widget_alerts_focus_sos', { defaultValue: 'SOS nearby' }),
+      };
+    }
+  }
+
+  if (params.location && params.monitoring?.alerts?.length) {
+    const hasNearbyLightning = params.monitoring.alerts.some(alert => {
+      const eventType = String(alert?.data?.eventType || alert?.type || '').toLowerCase();
+      if (!eventType.includes('lightning')) return false;
+      const coords = extractAlertLocation(alert);
+      if (!coords) return false;
+      return isWithinKm(params.location!, coords, CRITICAL_DISTANCE_KM);
+    });
+    if (hasNearbyLightning) {
+      return {
+        tone: 'high',
+        label: i18n.t('widget_alerts_focus_lightning', { defaultValue: 'Lightning nearby' }),
+      };
+    }
+  }
+
+  if (params.riskReports.length > 0) {
+    return {
+      tone: 'high',
+      label: i18n.t('widget_alerts_focus_sos', { defaultValue: 'SOS nearby' }),
+    };
+  }
+
+  if (params.monitoring?.activeIds) {
+    const activeIds = params.monitoring.activeIds;
+    if (activeIds.has('lightning')) {
+      return {
+        tone: 'high',
+        label: i18n.t('widget_alerts_focus_lightning', { defaultValue: 'Lightning nearby' }),
+      };
+    }
+    for (const id of CRITICAL_MONITORING_IDS) {
+      if (activeIds.has(id)) {
+        return {
+          tone: 'high',
+          label: i18n.t('widget_alerts_focus_storm', { defaultValue: 'Severe storm' }),
+        };
+      }
+    }
+  }
+
+  const signal = params.weather?.intelligenceSignal;
+  if (signal?.kind === 'lightning' || signal?.kind === 'thunder' || signal?.kind === 'hail') {
+    return {
+      tone: 'high',
+      label: i18n.t('widget_alerts_focus_lightning', { defaultValue: 'Lightning nearby' }),
+    };
+  }
+  if (signal?.kind === 'rain') {
+    if (signal.startsInMinutes <= 0 || signal.source === 'current') {
+      return {
+        tone: 'moderate',
+        label: i18n.t('widget_alerts_focus_rain_now', { defaultValue: 'Raining now' }),
+      };
+    }
+    return {
+      tone: 'moderate',
+      label: i18n.t('widget_alerts_focus_rain_soon', { defaultValue: 'Rain soon' }),
+    };
+  }
+
+  return params.base;
 };
 
 const buildOperationalSignals = (
@@ -602,6 +771,17 @@ export interface IWidgetDataSourcesAdapter {
 }
 
 export class WidgetDataComposer implements IWidgetDataSourcesAdapter {
+  private async loadSharedSignals(location: { latitude: number; longitude: number } | null): Promise<SharedWidgetSignals> {
+    if (!location) {
+      return { weather: null, monitoring: null, riskReports: [] };
+    }
+    const [weather, monitoring, riskReports] = await Promise.all([
+      WeatherService.getCurrentWeather(location.latitude, location.longitude).catch(() => null),
+      MonitoringService.getActiveEvents(location.latitude, location.longitude, 0.55).catch(() => null),
+      RiskReportService.getAll().catch(() => []),
+    ]);
+    return { weather, monitoring, riskReports };
+  }
   private async loadSharedRiskContext(force?: boolean): Promise<SharedRiskContext> {
     const location = await getCurrentLocation();
     if (!location) {
@@ -641,7 +821,10 @@ export class WidgetDataComposer implements IWidgetDataSourcesAdapter {
     });
   }
 
-  private async composeRiskNowSnapshot(shared?: SharedRiskContext): Promise<WidgetSnapshot> {
+  private async composeRiskNowSnapshot(
+    shared?: SharedRiskContext,
+    signals?: SharedWidgetSignals,
+  ): Promise<WidgetSnapshot> {
     const location = shared?.location || (await getCurrentLocation());
     if (!location) {
       const fallback = {
@@ -660,8 +843,18 @@ export class WidgetDataComposer implements IWidgetDataSourcesAdapter {
       return fallback;
     }
 
+    const sharedSignals =
+      signals || (await this.loadSharedSignals({ latitude: location.latitude, longitude: location.longitude }));
+
     if (shared?.assessment) {
       const snapshot = shared.assessment.snapshot;
+      const overrideBadge = buildOverrideBadge({
+        base: shared.assessment.statusBadge,
+        weather: sharedSignals.weather,
+        monitoring: sharedSignals.monitoring,
+        riskReports: sharedSignals.riskReports,
+        location: shared?.location || location,
+      });
       return {
         preset: 'risk_now',
         title: i18n.t('widget_preset_risk_now', { defaultValue: 'Status' }),
@@ -685,7 +878,7 @@ export class WidgetDataComposer implements IWidgetDataSourcesAdapter {
         sourceKind: shared.assessment.sourceKind,
         sourceName: shared.assessment.sourceLabel,
         readModelState: shared.assessment.readModelState,
-        statusBadge: shared.assessment.statusBadge,
+        statusBadge: overrideBadge,
         visual: {
           level: shared.assessment.level,
           meterTier: pickTierFromLevel(shared.assessment.level),
@@ -709,6 +902,13 @@ export class WidgetDataComposer implements IWidgetDataSourcesAdapter {
     const operationalSignals = buildOperationalSignals(operational);
     if (operationalSignals) {
       const snapshot = operationalSignals.snapshot;
+      const overrideBadge = buildOverrideBadge({
+        base: operationalSignals.statusBadge,
+        weather: sharedSignals.weather,
+        monitoring: sharedSignals.monitoring,
+        riskReports: sharedSignals.riskReports,
+        location,
+      });
       return {
         preset: 'risk_now',
         title: i18n.t('widget_preset_risk_now', { defaultValue: 'Status' }),
@@ -732,7 +932,7 @@ export class WidgetDataComposer implements IWidgetDataSourcesAdapter {
         sourceKind: operationalSignals.sourceKind,
         sourceName: operationalSignals.sourceLabel,
         readModelState: operationalSignals.readModelState,
-        statusBadge: operationalSignals.statusBadge,
+        statusBadge: overrideBadge,
         visual: {
           level: operationalSignals.level,
           meterTier: pickTierFromLevel(operationalSignals.level),
@@ -748,19 +948,21 @@ export class WidgetDataComposer implements IWidgetDataSourcesAdapter {
       };
     }
 
-    const [weather, monitoring] = await Promise.all([
-      WeatherService.getCurrentWeather(location.latitude, location.longitude).catch(() => null),
-      MonitoringService.getActiveEvents(location.latitude, location.longitude, 0.55).catch(() => null),
-    ]);
-
-    const activeCount = monitoring?.activeIds?.size || 0;
-    const sourceCount = Object.keys(monitoring?.sourceMetaByEventId || {}).length;
+    const activeCount = sharedSignals.monitoring?.activeIds?.size || 0;
+    const sourceCount = Object.keys(sharedSignals.monitoring?.sourceMetaByEventId || {}).length;
     const confidence = pickConfidenceFromEventCount(activeCount);
-    const updatedAt = weather?.timestamp || new Date().toISOString();
+    const updatedAt = sharedSignals.weather?.timestamp || new Date().toISOString();
     const score = fallbackSituationScore(activeCount, sourceCount, 18);
     const statusBadge = buildStatusBadge({
       level: score,
       readModelState: 'stale',
+    });
+    const overrideBadge = buildOverrideBadge({
+      base: statusBadge,
+      weather: sharedSignals.weather,
+      monitoring: sharedSignals.monitoring,
+      riskReports: sharedSignals.riskReports,
+      location,
     });
 
     return {
@@ -789,7 +991,7 @@ export class WidgetDataComposer implements IWidgetDataSourcesAdapter {
       sourceKind: confidence === 'high' ? 'OFFICIAL' : 'VERIFIED',
       sourceName: i18n.t('widget_source_mixed', { defaultValue: 'Official + verified' }),
       readModelState: 'stale',
-      statusBadge,
+      statusBadge: overrideBadge,
       visual: {
         level: score,
         meterTier: pickTierFromLevel(score),
@@ -805,7 +1007,7 @@ export class WidgetDataComposer implements IWidgetDataSourcesAdapter {
     };
   }
 
-  private async composeCommuteSnapshot(): Promise<WidgetSnapshot> {
+  private async composeCommuteSnapshot(signals?: SharedWidgetSignals): Promise<WidgetSnapshot> {
     const [location, destination] = await Promise.all([
       getCurrentLocation(),
       RouteDestinationService.getDefaultDestination(),
@@ -814,9 +1016,7 @@ export class WidgetDataComposer implements IWidgetDataSourcesAdapter {
     if (!location || !destination) {
       const fallback = {
         ...buildFallbackSnapshot('commute', { deeplink: 'alertapp://route-settings' }),
-        subtitle: i18n.t('widget_state_limited_coverage', {
-          defaultValue: 'Limited coverage in this area',
-        }),
+        subtitle: i18n.t('widget_route_no_active', { defaultValue: 'No active route' }),
       };
       fallback.visual = {
         ...fallback.visual,
@@ -858,6 +1058,13 @@ export class WidgetDataComposer implements IWidgetDataSourcesAdapter {
       level: corridorLevel,
       readModelState: 'fresh',
     });
+    const overrideBadge = buildOverrideBadge({
+      base: statusBadge,
+      weather: signals?.weather || null,
+      monitoring: signals?.monitoring || null,
+      riskReports: signals?.riskReports || [],
+      location,
+    });
 
     return {
       preset: 'commute',
@@ -876,7 +1083,7 @@ export class WidgetDataComposer implements IWidgetDataSourcesAdapter {
       chips: [getLabelForConfidence(confidence), buildUpdatedLabel(updatedAt)],
       sourceKind: 'VERIFIED',
       sourceName: i18n.t('widget_source_routes', { defaultValue: 'Route model' }),
-      statusBadge,
+      statusBadge: overrideBadge,
       visual: {
         level: corridorLevel,
         meterTier: pickTierFromLevel(corridorLevel),
@@ -892,7 +1099,10 @@ export class WidgetDataComposer implements IWidgetDataSourcesAdapter {
     };
   }
 
-  private async composeCityPulseSnapshot(shared?: SharedRiskContext): Promise<WidgetSnapshot> {
+  private async composeCityPulseSnapshot(
+    shared?: SharedRiskContext,
+    signals?: SharedWidgetSignals,
+  ): Promise<WidgetSnapshot> {
     const location = shared?.location || (await getCurrentLocation());
     if (!location) {
       const fallback = {
@@ -944,6 +1154,13 @@ export class WidgetDataComposer implements IWidgetDataSourcesAdapter {
       level,
       readModelState: operational?.state,
     });
+    const overrideBadge = buildOverrideBadge({
+      base: statusBadge,
+      weather: signals?.weather || null,
+      monitoring: signals?.monitoring || null,
+      riskReports: signals?.riskReports || [],
+      location,
+    });
 
     return {
       preset: 'city_pulse',
@@ -975,17 +1192,15 @@ export class WidgetDataComposer implements IWidgetDataSourcesAdapter {
         ? operationalSignals.sourceLabel
         : i18n.t('widget_source_city', { defaultValue: 'City feeds' }),
       readModelState: operationalSignals?.readModelState || operational?.state,
-      statusBadge,
+      statusBadge: overrideBadge,
       visual: {
         level,
         meterTier: pickTierFromLevel(level),
-        segmentProfile: [
-          ensureLevel(level - 8),
+        segmentProfile: buildTimeWindowSegments({
           level,
-          ensureLevel(level - 5),
-          ensureLevel(level - 14),
-          ensureLevel(level - 20),
-        ],
+          weather: signals?.weather || null,
+          overrideTone: overrideBadge.tone,
+        }),
         iconKey: 'city',
       },
     };
@@ -994,11 +1209,11 @@ export class WidgetDataComposer implements IWidgetDataSourcesAdapter {
   private async composeAlertsTickerSnapshot(
     shared?: SharedRiskContext,
     riskReference?: WidgetSnapshot,
+    signals?: SharedWidgetSignals,
   ): Promise<WidgetSnapshot> {
     const location = shared?.location || (await getCurrentLocation());
-    const [notifications, riskReports, operational] = await Promise.all([
+    const [notifications, operational] = await Promise.all([
       NotificationService.getAll().catch(() => []),
-      RiskReportService.getAll().catch(() => []),
       shared?.briefing
         ? Promise.resolve(shared.briefing.operational)
         : location
@@ -1008,6 +1223,7 @@ export class WidgetDataComposer implements IWidgetDataSourcesAdapter {
           }).catch(() => null)
         : Promise.resolve(null),
     ]);
+    const riskReports = signals?.riskReports || (await RiskReportService.getAll().catch(() => []));
     const operationalSignals = shared?.assessment || buildOperationalSignals(operational);
     const referenceLevel =
       typeof riskReference?.visual?.level === 'number'
@@ -1037,10 +1253,17 @@ export class WidgetDataComposer implements IWidgetDataSourcesAdapter {
         level,
         readModelState: operational?.state,
       });
+    const overrideBadge = buildOverrideBadge({
+      base: statusBadge,
+      weather: signals?.weather || null,
+      monitoring: signals?.monitoring || null,
+      riskReports,
+      location,
+    });
     const headline = buildAlertsTickerHeadline({
       notifications,
       riskReports,
-      statusBadge,
+      statusBadge: overrideBadge,
       operational: shared?.briefing?.operational || operational,
     });
 
@@ -1070,7 +1293,7 @@ export class WidgetDataComposer implements IWidgetDataSourcesAdapter {
           i18n.t('widget_source_alert_center', { defaultValue: 'Alert center' }),
       readModelState:
         operationalSignals?.readModelState || riskReference?.readModelState || operational?.state,
-      statusBadge,
+      statusBadge: overrideBadge,
       visual: {
         level,
         meterTier: pickTierFromLevel(level),
@@ -1094,8 +1317,13 @@ export class WidgetDataComposer implements IWidgetDataSourcesAdapter {
       briefing: null,
       assessment: null,
     }));
+    const sharedSignals = await this.loadSharedSignals(sharedRiskContext.location).catch(() => ({
+      weather: null,
+      monitoring: null,
+      riskReports: [],
+    }));
 
-    const riskNow = await this.composeRiskNowSnapshot(sharedRiskContext).catch(() =>
+    const riskNow = await this.composeRiskNowSnapshot(sharedRiskContext, sharedSignals).catch(() =>
       buildFallbackSnapshot('risk_now'),
     );
     map.set('risk_now', riskNow);
@@ -1104,17 +1332,17 @@ export class WidgetDataComposer implements IWidgetDataSourcesAdapter {
     const commuteFromCache = this.getCachedSnapshot('commute', options?.force);
     const commute =
       commuteFromCache ||
-      (await this.composeCommuteSnapshot().catch(() => buildFallbackSnapshot('commute')));
+      (await this.composeCommuteSnapshot(sharedSignals).catch(() => buildFallbackSnapshot('commute')));
     map.set('commute', commute);
     this.setCachedSnapshot(commute);
 
-    const cityPulse = await this.composeCityPulseSnapshot(sharedRiskContext).catch(() =>
+    const cityPulse = await this.composeCityPulseSnapshot(sharedRiskContext, sharedSignals).catch(() =>
       buildFallbackSnapshot('city_pulse'),
     );
     map.set('city_pulse', cityPulse);
     this.setCachedSnapshot(cityPulse);
 
-    const alertsTicker = await this.composeAlertsTickerSnapshot(sharedRiskContext, riskNow).catch(() =>
+    const alertsTicker = await this.composeAlertsTickerSnapshot(sharedRiskContext, riskNow, sharedSignals).catch(() =>
       buildFallbackSnapshot('alerts_ticker'),
     );
     map.set('alerts_ticker', alertsTicker);

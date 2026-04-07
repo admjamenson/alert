@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  ActionSheetIOS,
   Alert,
   Image,
+  Modal,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -30,6 +31,7 @@ const ProfileScreen = ({ navigation }: any) => {
   const { colors } = useTheme();
   const [name, setName] = useState('');
   const [avatarUri, setAvatarUri] = useState<string | undefined>(undefined);
+  const [photoSheetVisible, setPhotoSheetVisible] = useState(false);
   const initials = useMemo(() => {
     const parts = name
       .trim()
@@ -59,46 +61,21 @@ const ProfileScreen = ({ navigation }: any) => {
   };
 
   const openPhotoActions = () => {
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          options: [t('common_cancel'), t('profile_gallery'), t('profile_camera')],
-          cancelButtonIndex: 0,
-        },
-        buttonIndex => {
-          if (buttonIndex === 1) {
-            void pickFromGallery();
-          } else if (buttonIndex === 2) {
-            void takePhoto();
-          }
-        },
-      );
-      return;
-    }
+    setPhotoSheetVisible(true);
+  };
 
-    Alert.alert(
-      t('profile_change_photo'),
-      undefined,
-      [
-        {
-          text: t('profile_gallery'),
-          onPress: () => {
-            void pickFromGallery();
-          },
-        },
-        {
-          text: t('profile_camera'),
-          onPress: () => {
-            void takePhoto();
-          },
-        },
-        {
-          text: t('common_cancel'),
-          style: 'cancel',
-        },
-      ],
-      { cancelable: true },
-    );
+  const handlePickGallery = () => {
+    setPhotoSheetVisible(false);
+    setTimeout(() => {
+      void pickFromGallery();
+    }, 120);
+  };
+
+  const handlePickCamera = () => {
+    setPhotoSheetVisible(false);
+    setTimeout(() => {
+      void takePhoto();
+    }, 120);
   };
 
   const pickFromGallery = async () => {
@@ -128,7 +105,10 @@ const ProfileScreen = ({ navigation }: any) => {
       <View style={styles.header}>
         <TouchableOpacity
           onPress={() => navigation.goBack()}
-          style={[styles.headerButton, { backgroundColor: colors.card, borderColor: colors.border }]}
+          style={[
+            styles.headerButton,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}
         >
           <Icon name="arrow-left" size={26} color={colors.text} />
         </TouchableOpacity>
@@ -222,6 +202,65 @@ const ProfileScreen = ({ navigation }: any) => {
           <Text style={styles.saveText}>{t('common_save')}</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      <Modal
+        visible={photoSheetVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPhotoSheetVisible(false)}
+      >
+        <Pressable
+          style={styles.sheetOverlay}
+          onPress={() => setPhotoSheetVisible(false)}
+          accessibilityRole="button"
+          accessibilityLabel={t('common_cancel')}
+        >
+          <Pressable
+            style={[
+              styles.sheetCard,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
+            onPress={() => {}}
+          >
+            <View style={styles.sheetHandle} />
+            <Text style={[styles.sheetTitle, { color: colors.text }]}>
+              {t('profile_change_photo')}
+            </Text>
+            <TouchableOpacity
+              style={[styles.sheetOption, { borderColor: colors.border }]}
+              onPress={handlePickGallery}
+              accessibilityRole="button"
+              accessibilityLabel={t('profile_gallery')}
+            >
+              <Icon name="image-outline" size={22} color={colors.text} />
+              <Text style={[styles.sheetOptionText, { color: colors.text }]}>
+                {t('profile_gallery')}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.sheetOption, { borderColor: colors.border }]}
+              onPress={handlePickCamera}
+              accessibilityRole="button"
+              accessibilityLabel={t('profile_camera')}
+            >
+              <Icon name="camera-outline" size={22} color={colors.text} />
+              <Text style={[styles.sheetOptionText, { color: colors.text }]}>
+                {t('profile_camera')}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.sheetCancel, { borderColor: colors.border }]}
+              onPress={() => setPhotoSheetVisible(false)}
+              accessibilityRole="button"
+              accessibilityLabel={t('common_cancel')}
+            >
+              <Text style={[styles.sheetCancelText, { color: colors.text }]}>
+                {t('common_cancel')}
+              </Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -232,85 +271,90 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: ThemeTokens.spacing.lg,
-    paddingVertical: ThemeTokens.spacing.md,
+    paddingHorizontal: ThemeTokens.spacing.xl,
+    paddingTop: ThemeTokens.spacing.lg,
+    paddingBottom: ThemeTokens.spacing.md,
   },
   headerButton: {
-    width: 44,
-    height: 44,
-    borderRadius: ThemeTokens.radius.md,
+    width: 42,
+    height: 42,
+    borderRadius: ThemeTokens.radius.lg,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    ...Platform.select({
+      ios: ThemeTokens.shadows.soft.ios,
+      android: ThemeTokens.shadows.soft.android,
+    }),
   },
   headerSpacer: {
-    width: 44,
-    height: 44,
+    width: 42,
+    height: 42,
   },
   title: {
     fontFamily: FONT_FAMILY,
-    fontSize: ThemeTokens.typography.sizes.title,
-    lineHeight: ThemeTokens.typography.lineHeights.title,
+    fontSize: ThemeTokens.typography.sizes.headline,
+    lineHeight: ThemeTokens.typography.lineHeights.headline,
     fontWeight: ThemeTokens.typography.weights.bold,
-    letterSpacing: ThemeTokens.typography.letterSpacing.title,
+    letterSpacing: ThemeTokens.typography.letterSpacing.headline,
   },
   scrollContent: {
-    paddingHorizontal: ThemeTokens.spacing.lg,
-    paddingBottom: ThemeTokens.spacing.xl,
+    paddingHorizontal: ThemeTokens.spacing.xl,
+    paddingBottom: ThemeTokens.spacing.xxl,
   },
   heroCard: {
     position: 'relative',
     overflow: 'hidden',
     borderWidth: 1,
     borderRadius: ThemeTokens.radius.xl,
-    paddingHorizontal: ThemeTokens.spacing.lg,
-    paddingTop: ThemeTokens.spacing.xl,
-    paddingBottom: ThemeTokens.spacing.lg,
+    paddingHorizontal: ThemeTokens.spacing.xl,
+    paddingTop: ThemeTokens.spacing.xxl,
+    paddingBottom: ThemeTokens.spacing.xl,
     ...Platform.select({
-      ios: ThemeTokens.shadows.soft.ios,
-      android: ThemeTokens.shadows.soft.android,
+      ios: ThemeTokens.shadows.medium.ios,
+      android: ThemeTokens.shadows.medium.android,
     }),
   },
   heroAccentPrimary: {
     position: 'absolute',
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    top: -52,
-    right: -32,
+    width: 190,
+    height: 190,
+    borderRadius: 95,
+    top: -64,
+    right: -48,
   },
   heroAccentSecondary: {
     position: 'absolute',
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    bottom: -40,
-    left: -18,
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    bottom: -50,
+    left: -28,
   },
   avatarWrap: { alignItems: 'center', marginBottom: ThemeTokens.spacing.lg },
   avatarRing: {
-    width: 122,
-    height: 122,
-    borderRadius: 61,
-    borderWidth: 1.5,
+    width: 132,
+    height: 132,
+    borderRadius: 66,
+    borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: ThemeTokens.spacing.sm,
   },
-  avatar: { width: 108, height: 108, borderRadius: 54 },
+  avatar: { width: 116, height: 116, borderRadius: 58 },
   avatarPlaceholder: {
-    width: 108,
-    height: 108,
-    borderRadius: 54,
+    width: 116,
+    height: 116,
+    borderRadius: 58,
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarInitials: {
     fontFamily: FONT_FAMILY,
-    fontSize: ThemeTokens.typography.sizes.title,
-    lineHeight: ThemeTokens.typography.lineHeights.title,
+    fontSize: ThemeTokens.typography.sizes.headline,
+    lineHeight: ThemeTokens.typography.lineHeights.headline,
     fontWeight: ThemeTokens.typography.weights.bold,
-    letterSpacing: ThemeTokens.typography.letterSpacing.title,
+    letterSpacing: ThemeTokens.typography.letterSpacing.headline,
   },
   avatarText: {
     fontFamily: FONT_FAMILY,
@@ -320,13 +364,13 @@ const styles = StyleSheet.create({
     fontWeight: ThemeTokens.typography.weights.medium,
   },
   formCard: {
-    marginTop: ThemeTokens.spacing.lg,
+    marginTop: ThemeTokens.spacing.xl,
     borderWidth: 1,
     borderRadius: ThemeTokens.radius.xl,
-    padding: ThemeTokens.spacing.lg,
+    padding: ThemeTokens.spacing.xl,
     ...Platform.select({
-      ios: ThemeTokens.shadows.soft.ios,
-      android: ThemeTokens.shadows.soft.android,
+      ios: ThemeTokens.shadows.medium.ios,
+      android: ThemeTokens.shadows.medium.android,
     }),
   },
   label: {
@@ -340,7 +384,7 @@ const styles = StyleSheet.create({
   input: {
     borderWidth: 1,
     borderRadius: ThemeTokens.radius.lg,
-    minHeight: 56,
+    minHeight: 58,
     paddingHorizontal: ThemeTokens.spacing.md,
     paddingVertical: ThemeTokens.spacing.md,
     fontFamily: FONT_FAMILY,
@@ -349,11 +393,15 @@ const styles = StyleSheet.create({
     letterSpacing: ThemeTokens.typography.letterSpacing.body,
   },
   saveButton: {
-    marginTop: ThemeTokens.spacing.lg,
-    minHeight: 56,
-    borderRadius: ThemeTokens.radius.lg,
+    marginTop: ThemeTokens.spacing.xl,
+    minHeight: 58,
+    borderRadius: ThemeTokens.radius.xl,
     alignItems: 'center',
     justifyContent: 'center',
+    ...Platform.select({
+      ios: ThemeTokens.shadows.medium.ios,
+      android: ThemeTokens.shadows.medium.android,
+    }),
   },
   saveText: {
     color: '#FFF',
@@ -361,6 +409,72 @@ const styles = StyleSheet.create({
     fontWeight: ThemeTokens.typography.weights.bold,
     fontSize: ThemeTokens.typography.sizes.body,
     lineHeight: ThemeTokens.typography.lineHeights.body,
+    letterSpacing: ThemeTokens.typography.letterSpacing.body,
+  },
+  sheetOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(8,8,12,0.45)',
+    justifyContent: 'flex-end',
+  },
+  sheetCard: {
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    paddingHorizontal: ThemeTokens.spacing.lg,
+    paddingTop: ThemeTokens.spacing.md,
+    paddingBottom: ThemeTokens.spacing.xl,
+    borderWidth: 1,
+    ...Platform.select({
+      ios: ThemeTokens.shadows.strong.ios,
+      android: ThemeTokens.shadows.strong.android,
+    }),
+  },
+  sheetHandle: {
+    width: 44,
+    height: 5,
+    borderRadius: 3,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(0,0,0,0.18)',
+    marginBottom: ThemeTokens.spacing.md,
+  },
+  sheetTitle: {
+    fontFamily: FONT_FAMILY,
+    fontSize: ThemeTokens.typography.sizes.body,
+    lineHeight: ThemeTokens.typography.lineHeights.body,
+    fontWeight: ThemeTokens.typography.weights.semibold,
+    letterSpacing: ThemeTokens.typography.letterSpacing.body,
+    textAlign: 'center',
+    marginBottom: ThemeTokens.spacing.md,
+  },
+  sheetOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: ThemeTokens.spacing.sm,
+    paddingVertical: ThemeTokens.spacing.md,
+    borderRadius: ThemeTokens.radius.lg,
+    borderWidth: 1,
+    paddingHorizontal: ThemeTokens.spacing.md,
+    marginBottom: ThemeTokens.spacing.sm,
+  },
+  sheetOptionText: {
+    fontFamily: FONT_FAMILY,
+    fontSize: ThemeTokens.typography.sizes.body,
+    lineHeight: ThemeTokens.typography.lineHeights.body,
+    fontWeight: ThemeTokens.typography.weights.semibold,
+    letterSpacing: ThemeTokens.typography.letterSpacing.body,
+  },
+  sheetCancel: {
+    marginTop: ThemeTokens.spacing.xs,
+    borderRadius: ThemeTokens.radius.lg,
+    borderWidth: 1,
+    paddingVertical: ThemeTokens.spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sheetCancelText: {
+    fontFamily: FONT_FAMILY,
+    fontSize: ThemeTokens.typography.sizes.body,
+    lineHeight: ThemeTokens.typography.lineHeights.body,
+    fontWeight: ThemeTokens.typography.weights.semibold,
     letterSpacing: ThemeTokens.typography.letterSpacing.body,
   },
 });

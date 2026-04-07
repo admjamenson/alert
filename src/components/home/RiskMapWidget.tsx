@@ -1,20 +1,28 @@
-﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {
+  Image,
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Platform,
+} from 'react-native';
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useTranslation } from 'react-i18next';
+import {useTranslation} from 'react-i18next';
 
-import { useTheme } from '../../context/ThemeContext';
-import { useSecurity } from '../../context/SecurityContext';
-import { ThemeTokens } from '../../constants/ThemeTokens';
-import { TelemetryService } from '../../services/TelemetryService';
+import {useTheme} from '../../context/ThemeContext';
+import {useSecurity} from '../../context/SecurityContext';
+import {ThemeTokens} from '../../constants/ThemeTokens';
+import {TelemetryService} from '../../services/TelemetryService';
+import {ProfileService} from '../../services/ProfileService';
 import {
   MAP_MAX_ZOOM,
   MAP_STYLE_DEFAULT,
-  MAP_STYLE_MODE_STORAGE_KEY,
   MAP_STYLE_SAFE_FALLBACK,
   MAP_STYLE_SATELLITE,
+  OSM_STYLE_SATELLITE,
+  HAS_CONFIGURED_SATELLITE_STYLE,
   MapStyleMode,
 } from '../../constants/MapStyles';
 
@@ -22,6 +30,8 @@ const FONT_FAMILY =
   Platform.OS === 'ios'
     ? ThemeTokens.typography.families.ios
     : ThemeTokens.typography.families.android;
+
+const ALERT_LOGO = require('../../assets/logo.png');
 
 const FALLBACK_CENTER: [number, number] = [-40.26, -7.76];
 
@@ -34,7 +44,10 @@ const getCenterFromPayload = (payload: any): [number, number] | null => {
   if (Array.isArray(center) && center.length >= 2) {
     return [center[0], center[1]];
   }
-  if (Array.isArray(payload?.centerCoordinate) && payload.centerCoordinate.length >= 2) {
+  if (
+    Array.isArray(payload?.centerCoordinate) &&
+    payload.centerCoordinate.length >= 2
+  ) {
     return [payload.centerCoordinate[0], payload.centerCoordinate[1]];
   }
   return null;
@@ -55,7 +68,10 @@ const getZoomFromPayload = (payload: any): number | null => {
   return null;
 };
 
-const distanceMeters = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => {
+const distanceMeters = (
+  a: {lat: number; lon: number},
+  b: {lat: number; lon: number},
+) => {
   const toRad = (v: number) => (v * Math.PI) / 180;
   const R = 6371000;
   const dLat = toRad(b.lat - a.lat);
@@ -71,30 +87,45 @@ const distanceMeters = (a: { lat: number; lon: number }, b: { lat: number; lon: 
 const isValidCoordinate = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value);
 
-export const RiskMapWidget = React.memo(({ navigation }: any) => {
-  const { colors, isDark } = useTheme();
-  const { t } = useTranslation();
-  const { securityState } = useSecurity();
+export const RiskMapWidget = React.memo(({navigation}: any) => {
+  const {colors, isDark} = useTheme();
+  const {t} = useTranslation();
+  const {securityState} = useSecurity();
 
   const user = securityState.location;
-  const hasContextUser = isValidCoordinate(user?.latitude) && isValidCoordinate(user?.longitude);
+  const hasContextUser =
+    isValidCoordinate(user?.latitude) && isValidCoordinate(user?.longitude);
   const activeUser = useMemo(
-    () => (hasContextUser ? { latitude: user.latitude, longitude: user.longitude } : null),
+    () =>
+      hasContextUser
+        ? {latitude: user.latitude, longitude: user.longitude}
+        : null,
     [hasContextUser, user?.latitude, user?.longitude],
   );
   const hasUserLocation = Boolean(activeUser);
-  const [cameraCenter, setCameraCenter] = useState<[number, number]>(FALLBACK_CENTER);
+  const [cameraCenter, setCameraCenter] =
+    useState<[number, number]>(FALLBACK_CENTER);
   const [cameraZoom, setCameraZoom] = useState(15);
   const [showRecenter, setShowRecenter] = useState(false);
   const [isFollowing, setIsFollowing] = useState(true);
-  const [mapStyleMode, setMapStyleMode] = useState<MapStyleMode>('default');
-  const preferredMapStyle = useMemo(
-    () => (mapStyleMode === 'satellite' ? MAP_STYLE_SATELLITE : MAP_STYLE_DEFAULT),
-    [mapStyleMode],
+  const [mapStyleMode, setMapStyleMode] = useState<MapStyleMode>('satellite');
+  const satelliteStyle = useMemo(
+    () =>
+      HAS_CONFIGURED_SATELLITE_STYLE
+        ? MAP_STYLE_SATELLITE
+        : OSM_STYLE_SATELLITE,
+    [],
   );
-  const [resolvedMapStyle, setResolvedMapStyle] = useState<any>(preferredMapStyle);
+  const preferredMapStyle = useMemo(
+    () => (mapStyleMode === 'satellite' ? satelliteStyle : MAP_STYLE_DEFAULT),
+    [mapStyleMode, satelliteStyle],
+  );
+  const [resolvedMapStyle, setResolvedMapStyle] =
+    useState<any>(preferredMapStyle);
   const [usingFallbackStyle, setUsingFallbackStyle] = useState(false);
   const [mapReady, setMapReady] = useState(false);
+  const [avatarUri, setAvatarUri] = useState<string | null>(null);
+  const showMapControls = true;
   const cameraRef = useRef<MapLibreGL.CameraRef | null>(null);
   const mapStyleToggleLabel =
     mapStyleMode === 'satellite'
@@ -108,7 +139,9 @@ export const RiskMapWidget = React.memo(({ navigation }: any) => {
   useEffect(() => {
     if (!hasUserLocation) {
       setCameraCenter(prev =>
-        prev[0] === FALLBACK_CENTER[0] && prev[1] === FALLBACK_CENTER[1] ? prev : FALLBACK_CENTER,
+        prev[0] === FALLBACK_CENTER[0] && prev[1] === FALLBACK_CENTER[1]
+          ? prev
+          : FALLBACK_CENTER,
       );
       if (showRecenter) setShowRecenter(false);
       setIsFollowing(true);
@@ -125,37 +158,48 @@ export const RiskMapWidget = React.memo(({ navigation }: any) => {
   }, [activeUser, hasUserLocation, isFollowing, showRecenter]);
 
   useEffect(() => {
+    setResolvedMapStyle(preferredMapStyle);
+    setUsingFallbackStyle(false);
+    setMapReady(false);
+  }, [preferredMapStyle]);
+
+  useEffect(() => {
     let active = true;
-    const loadMapStyleMode = async () => {
-      try {
-        const stored = await AsyncStorage.getItem(MAP_STYLE_MODE_STORAGE_KEY);
+    ProfileService.getProfile()
+      .then(profile => {
         if (!active) return;
-        if (stored === 'default' || stored === 'satellite') {
-          setMapStyleMode(stored);
-        }
-      } catch {
-        // ignore preference errors
-      }
-    };
-    void loadMapStyleMode();
+        const uri =
+          typeof profile?.avatarUri === 'string'
+            ? profile.avatarUri.trim()
+            : '';
+        setAvatarUri(uri ? uri : null);
+      })
+      .catch(() => {});
     return () => {
       active = false;
     };
   }, []);
 
   useEffect(() => {
-    setResolvedMapStyle(preferredMapStyle);
-    setUsingFallbackStyle(false);
-    setMapReady(false);
-  }, [preferredMapStyle]);
+    const unsubscribe = navigation?.addListener?.('focus', () => {
+      ProfileService.getProfile()
+        .then(profile => {
+          const uri =
+            typeof profile?.avatarUri === 'string'
+              ? profile.avatarUri.trim()
+              : '';
+          setAvatarUri(uri ? uri : null);
+        })
+        .catch(() => {});
+    });
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
+  }, [navigation]);
 
   const toggleMapStyleMode = useCallback(() => {
     setMapStyleMode(prev => {
-      const next: MapStyleMode = prev === 'satellite' ? 'default' : 'satellite';
-      AsyncStorage.setItem(MAP_STYLE_MODE_STORAGE_KEY, next).catch(() => {
-        // ignore persistence errors
-      });
-      return next;
+      return prev === 'satellite' ? 'default' : 'satellite';
     });
   }, []);
 
@@ -187,7 +231,8 @@ export const RiskMapWidget = React.memo(({ navigation }: any) => {
       const center = getCenterFromPayload(payload);
       if (center) {
         setCameraCenter(prev =>
-          Math.abs(prev[0] - center[0]) < 0.00001 && Math.abs(prev[1] - center[1]) < 0.00001
+          Math.abs(prev[0] - center[0]) < 0.00001 &&
+          Math.abs(prev[1] - center[1]) < 0.00001
             ? prev
             : center,
         );
@@ -198,8 +243,8 @@ export const RiskMapWidget = React.memo(({ navigation }: any) => {
       }
       if (!center) return;
       const dist = distanceMeters(
-        { lat: activeUser.latitude, lon: activeUser.longitude },
-        { lat: center[1], lon: center[0] },
+        {lat: activeUser.latitude, lon: activeUser.longitude},
+        {lat: center[1], lon: center[0]},
       );
       const shouldShow = dist > 60;
       if (shouldShow !== showRecenter) {
@@ -230,13 +275,15 @@ export const RiskMapWidget = React.memo(({ navigation }: any) => {
   return (
     <View style={styles.container}>
       <View
-        style={[styles.mapWrap, { borderColor: colors.border, backgroundColor: colors.card }]}
+        style={[
+          styles.mapWrap,
+          {borderColor: colors.border, backgroundColor: colors.card},
+        ]}
         accessible
         accessibilityRole="button"
         accessibilityLabel={t('map_open_label')}
         accessibilityHint={t('map_open_hint')}
-        onAccessibilityTap={openSafetyMap}
-      >
+        onAccessibilityTap={openSafetyMap}>
         <MapLibreGL.MapView
           style={styles.map}
           mapStyle={resolvedMapStyle}
@@ -252,8 +299,7 @@ export const RiskMapWidget = React.memo(({ navigation }: any) => {
           onDidFinishLoadingMap={handleMapDidFinishLoading}
           onDidFailLoadingMap={handleMapDidFailLoading}
           onRegionDidChange={handleRegionDidChange}
-          onPress={openSafetyMap}
-        >
+          onPress={openSafetyMap}>
           <MapLibreGL.Camera
             ref={cameraRef}
             zoomLevel={cameraZoom}
@@ -264,62 +310,96 @@ export const RiskMapWidget = React.memo(({ navigation }: any) => {
           />
 
           {activeUser && (
-            <MapLibreGL.PointAnnotation id="me" coordinate={[activeUser.longitude, activeUser.latitude]}>
-              <View style={[styles.markerSelf, { borderColor: colors.primary }]}>
-                <Icon name="account-circle" size={22} color={colors.primary} />
+            <MapLibreGL.MarkerView
+              id="me"
+              coordinate={[activeUser.longitude, activeUser.latitude]}
+              anchor={{x: 0.5, y: 0.5}}>
+              <View style={[styles.markerSelf, {borderColor: colors.primary}]}>
+                {avatarUri ? (
+                  <Image
+                    source={{uri: avatarUri}}
+                    style={styles.markerAvatar}
+                  />
+                ) : (
+                  <Image
+                    source={ALERT_LOGO}
+                    style={styles.markerLogo}
+                    resizeMode="contain"
+                  />
+                )}
               </View>
-            </MapLibreGL.PointAnnotation>
+            </MapLibreGL.MarkerView>
           )}
         </MapLibreGL.MapView>
 
-        {!hasUserLocation && (
-          <View style={[styles.locationHint, { backgroundColor: 'rgba(0,0,0,0.55)' }]}>
+        {showMapControls && !hasUserLocation && (
+          <View
+            style={[
+              styles.locationHint,
+              {backgroundColor: 'rgba(0,0,0,0.55)'},
+            ]}>
             <Icon name="crosshairs-question" size={12} color="#FFFFFF" />
             <Text style={styles.locationHintText}>{t('map_no_location')}</Text>
           </View>
         )}
 
-        <TouchableOpacity
-          style={[
-            styles.mapStyleButton,
-            {
-              backgroundColor:
-                mapStyleMode === 'satellite' ? colors.primary : 'rgba(18,18,22,0.78)',
-              borderColor:
+        {showMapControls ? (
+          <TouchableOpacity
+            style={[
+              styles.mapStyleButton,
+              {
+                backgroundColor:
+                  mapStyleMode === 'satellite'
+                    ? colors.primary
+                    : 'rgba(18,18,22,0.78)',
+                borderColor:
+                  mapStyleMode === 'satellite'
+                    ? 'rgba(255,255,255,0.28)'
+                    : 'rgba(255,255,255,0.22)',
+              },
+            ]}
+            onPress={toggleMapStyleMode}
+            activeOpacity={0.88}
+            hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}
+            accessibilityRole="button"
+            accessibilityLabel={mapStyleToggleLabel}>
+            <Icon
+              name={
                 mapStyleMode === 'satellite'
-                  ? 'rgba(255,255,255,0.28)'
-                  : 'rgba(255,255,255,0.22)',
-            },
-          ]}
-          onPress={toggleMapStyleMode}
-          activeOpacity={0.88}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          accessibilityRole="button"
-          accessibilityLabel={mapStyleToggleLabel}
-        >
-          <Icon
-            name={mapStyleMode === 'satellite' ? 'satellite-variant' : 'layers-outline'}
-            size={16}
-            color="#FFFFFF"
-          />
-        </TouchableOpacity>
+                  ? 'satellite-variant'
+                  : 'layers-outline'
+              }
+              size={16}
+              color="#FFFFFF"
+            />
+          </TouchableOpacity>
+        ) : null}
 
-        {hasUserLocation && showRecenter && (
+        {showMapControls && hasUserLocation && showRecenter && (
           <TouchableOpacity
             style={[
               styles.recenterButton,
               {
                 backgroundColor: isDark ? '#111111' : '#FFFFFF',
-                borderColor: isDark ? 'rgba(255,255,255,0.16)' : 'rgba(17,17,17,0.12)',
+                borderColor: isDark
+                  ? 'rgba(255,255,255,0.16)'
+                  : 'rgba(17,17,17,0.12)',
               },
             ]}
             onPress={handleRecenter}
             activeOpacity={0.9}
             accessibilityRole="button"
-            accessibilityLabel={t('recenter')}
-          >
-            <Icon name="crosshairs-gps" size={16} color={isDark ? '#FFFFFF' : '#111111'} />
-            <Text style={[styles.recenterText, { color: isDark ? '#FFFFFF' : '#111111' }]}>
+            accessibilityLabel={t('recenter')}>
+            <Icon
+              name="crosshairs-gps"
+              size={16}
+              color={isDark ? '#FFFFFF' : '#111111'}
+            />
+            <Text
+              style={[
+                styles.recenterText,
+                {color: isDark ? '#FFFFFF' : '#111111'},
+              ]}>
               {t('recenter')}
             </Text>
           </TouchableOpacity>
@@ -330,7 +410,10 @@ export const RiskMapWidget = React.memo(({ navigation }: any) => {
 });
 
 const styles = StyleSheet.create({
-  container: { paddingHorizontal: ThemeTokens.spacing.lg, marginTop: ThemeTokens.spacing.xl },
+  container: {
+    paddingHorizontal: ThemeTokens.spacing.lg,
+    marginTop: ThemeTokens.spacing.xl,
+  },
   mapWrap: {
     height: 230,
     width: '100%',
@@ -342,12 +425,26 @@ const styles = StyleSheet.create({
       android: ThemeTokens.shadows.medium.android,
     }),
   },
-  map: { ...StyleSheet.absoluteFillObject },
+  map: {...StyleSheet.absoluteFillObject},
   markerSelf: {
     backgroundColor: '#FFFFFF',
     borderRadius: 18,
     padding: 2,
     borderWidth: 2,
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  markerAvatar: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+  },
+  markerLogo: {
+    width: 20,
+    height: 20,
   },
   mapStyleButton: {
     position: 'absolute',
@@ -381,7 +478,7 @@ const styles = StyleSheet.create({
       android: ThemeTokens.shadows.soft.android,
     }),
   },
-  recenterText: { fontSize: 12, fontWeight: '700', fontFamily: FONT_FAMILY },
+  recenterText: {fontSize: 12, fontWeight: '700', fontFamily: FONT_FAMILY},
   locationHint: {
     position: 'absolute',
     left: 12,
@@ -393,7 +490,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
   },
-  locationHintText: { fontSize: 11, color: '#FFFFFF', fontWeight: '700', fontFamily: FONT_FAMILY },
+  locationHintText: {
+    fontSize: 11,
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontFamily: FONT_FAMILY,
+  },
 });
 
 export default RiskMapWidget;

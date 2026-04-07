@@ -498,6 +498,14 @@ const RootNavigator = () => {
           getComponent={() => require('../screens/SettingScreen').default}
         />
         <Stack.Screen
+          name="Support"
+          getComponent={() => require('../screens/settings/SupportScreen').default}
+        />
+        <Stack.Screen
+          name="AdPrivacy"
+          getComponent={() => require('../screens/settings/AdPrivacyScreen').default}
+        />
+        <Stack.Screen
           name="LanguageSelector"
           getComponent={() => require('../screens/settings/LanguageSelectorScreen').default}
           options={{

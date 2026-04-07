@@ -1763,7 +1763,13 @@ const FeedMapPage = ({
         hitSlop={ThemeTokens.Monitoring.railHitSlop}
       >
         <Icon name={icon} size={18} color="#FFF" />
-        <Text style={styles.railBtnText} numberOfLines={1} ellipsizeMode="tail">
+        <Text
+          style={styles.railBtnText}
+          numberOfLines={1}
+          ellipsizeMode="tail"
+          allowFontScaling
+          maxFontSizeMultiplier={ThemeTokens.Monitoring.railLabelMaxFontScale}
+        >
           {label}
         </Text>
       </TouchableOpacity>
@@ -2286,7 +2292,13 @@ const FeedMapPage = ({
           hitSlop={ThemeTokens.Monitoring.railHitSlop}
         >
           <Icon name="robot-outline" size={18} color="#FFF" />
-          <Text style={styles.railBtnText} numberOfLines={1} ellipsizeMode="tail">
+          <Text
+            style={styles.railBtnText}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+            allowFontScaling
+            maxFontSizeMultiplier={ThemeTokens.Monitoring.railLabelMaxFontScale}
+          >
             {t('alert_ai_apply_map')}
           </Text>
         </TouchableOpacity>
@@ -2300,7 +2312,13 @@ const FeedMapPage = ({
           hitSlop={ThemeTokens.Monitoring.railHitSlop}
         >
           <Icon name="share-variant" size={18} color="#FFF" />
-          <Text style={styles.railBtnText} numberOfLines={1} ellipsizeMode="tail">
+          <Text
+            style={styles.railBtnText}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+            allowFontScaling
+            maxFontSizeMultiplier={ThemeTokens.Monitoring.railLabelMaxFontScale}
+          >
             {t('monitoring_feed_action_share')}
           </Text>
         </TouchableOpacity>
@@ -2322,7 +2340,13 @@ const FeedMapPage = ({
           ) : (
             <Icon name="content-save-outline" size={18} color="#FFF" />
           )}
-          <Text style={styles.railBtnText} numberOfLines={1} ellipsizeMode="tail">
+          <Text
+            style={styles.railBtnText}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+            allowFontScaling
+            maxFontSizeMultiplier={ThemeTokens.Monitoring.railLabelMaxFontScale}
+          >
             {saving
               ? t('monitoring_feed_save_label_saving', { defaultValue: 'Salvando' })
               : t('monitoring_feed_action_save')}

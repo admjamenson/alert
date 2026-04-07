@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   StyleSheet,
   View,
@@ -19,15 +19,11 @@ import { AppModal } from '../../components/ui/AppModal';
 import { ThemeTokens } from '../../constants/ThemeTokens';
 import AppText from '../../components/ui/AppText';
 
-const WHITE = ThemeTokens.colors.light.background;
-const BLACK = ThemeTokens.colors.light.text;
-const GRAY = ThemeTokens.colors.light.textSecondary;
-const ALERT_RED = ThemeTokens.colors.light.primary;
 const ONBOARDING_KEY = '@Alert:OnboardingComplete';
 
 const WelcomeScreen = ({ navigation }: any) => {
   const { t } = useTranslation();
-  const { colors } = useTheme();
+  const { colors, themeMode } = useTheme();
   const [modalVisible, setModalVisible] = useState(false);
   const [modalContent, setModalContent] = useState<'privacy' | 'terms'>(
     'privacy',
@@ -48,6 +44,16 @@ const WelcomeScreen = ({ navigation }: any) => {
     setModalContent(type);
     setModalVisible(true);
   };
+
+  const triggerLightHaptic = useCallback(() => {
+    try {
+      const moduleRef = require('react-native-haptic-feedback');
+      const ReactNativeHapticFeedback = moduleRef.default || moduleRef;
+      ReactNativeHapticFeedback.trigger(ThemeTokens.haptics.light);
+    } catch {
+      // Ignore haptic failures to keep onboarding smooth.
+    }
+  }, []);
 
   useEffect(() => {
     const checkProfile = async () => {
@@ -146,8 +152,11 @@ const WelcomeScreen = ({ navigation }: any) => {
   );
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor={WHITE} />
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      <StatusBar
+        barStyle={themeMode === 'dark' ? 'light-content' : 'dark-content'}
+        backgroundColor={colors.background}
+      />
 
       <ScrollView
         horizontal
@@ -166,19 +175,27 @@ const WelcomeScreen = ({ navigation }: any) => {
             </View>
 
             <View style={styles.textSection}>
-              <AppText variant="title1" tone="default" style={styles.title}>
+              <AppText
+                variant="title1"
+                tone="default"
+                style={[styles.title, { color: colors.text }]}
+              >
                 {t('welcome_title')}
               </AppText>
               <LanguageSelector />
 
               <View style={styles.termsContainer}>
-                <AppText variant="footnote" tone="secondary" style={styles.termsText}>
+                <AppText
+                  variant="footnote"
+                  tone="secondary"
+                  style={[styles.termsText, { color: colors.textSecondary }]}
+                >
                   {t('welcome_terms_prefix')}{' '}
                   <AppText
                     variant="footnote"
                     tone="primary"
                     weight="semibold"
-                    style={styles.link}
+                    style={[styles.link, { color: colors.primary }]}
                     onPress={() => openModal('privacy')}
                   >
                     {t('welcome_privacy')}
@@ -188,7 +205,7 @@ const WelcomeScreen = ({ navigation }: any) => {
                     variant="footnote"
                     tone="primary"
                     weight="semibold"
-                    style={styles.link}
+                    style={[styles.link, { color: colors.primary }]}
                     onPress={() => openModal('terms')}
                   >
                     {t('welcome_terms')}
@@ -199,8 +216,13 @@ const WelcomeScreen = ({ navigation }: any) => {
             </View>
 
             <TouchableOpacity
-              style={styles.button}
+              style={[
+                styles.button,
+                { backgroundColor: colors.primary },
+                ThemeTokens.shadows.soft.ios,
+              ]}
               onPress={async () => {
+                triggerLightHaptic();
                 await AsyncStorage.setItem(ONBOARDING_KEY, 'true');
                 navigation.navigate('Login');
               }}
@@ -213,18 +235,28 @@ const WelcomeScreen = ({ navigation }: any) => {
 
             <TouchableOpacity
               onPress={async () => {
+                triggerLightHaptic();
                 await AsyncStorage.setItem(ONBOARDING_KEY, 'true');
                 navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
               }}
               activeOpacity={0.7}
               style={styles.linkButton}
             >
-              <AppText variant="body" tone="primary" weight="semibold" style={styles.link}>
+              <AppText
+                variant="body"
+                tone="primary"
+                weight="semibold"
+                style={[styles.link, { color: colors.primary }]}
+              >
                 {t('welcome_enter_now')}
               </AppText>
             </TouchableOpacity>
 
-            <AppText variant="caption1" tone="secondary" style={styles.swipeHint}>
+            <AppText
+              variant="caption1"
+              tone="secondary"
+              style={[styles.swipeHint, { color: colors.textSecondary }]}
+            >
               {t('welcome_swipe_hint')}
             </AppText>
           </View>
@@ -241,17 +273,30 @@ const WelcomeScreen = ({ navigation }: any) => {
             </View>
 
             <View style={styles.textSection}>
-              <AppText variant="title1" tone="default" style={styles.title}>
+              <AppText
+                variant="title1"
+                tone="default"
+                style={[styles.title, { color: colors.text }]}
+              >
                 {t('welcome_ready_title')}
               </AppText>
-              <AppText variant="body" tone="secondary" style={styles.subtitle}>
+              <AppText
+                variant="body"
+                tone="secondary"
+                style={[styles.subtitle, { color: colors.textSecondary }]}
+              >
                 {t('welcome_ready_subtitle')}
               </AppText>
             </View>
 
             <TouchableOpacity
-              style={styles.button}
+              style={[
+                styles.button,
+                { backgroundColor: colors.primary },
+                ThemeTokens.shadows.soft.ios,
+              ]}
               onPress={async () => {
+                triggerLightHaptic();
                 await AsyncStorage.setItem(ONBOARDING_KEY, 'true');
                 navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
               }}
@@ -264,13 +309,19 @@ const WelcomeScreen = ({ navigation }: any) => {
 
             <TouchableOpacity
               onPress={async () => {
+                triggerLightHaptic();
                 await AsyncStorage.setItem(ONBOARDING_KEY, 'true');
                 navigation.navigate('Login');
               }}
               activeOpacity={0.7}
               style={styles.linkButton}
             >
-              <AppText variant="body" tone="primary" weight="semibold" style={styles.link}>
+              <AppText
+                variant="body"
+                tone="primary"
+                weight="semibold"
+                style={[styles.link, { color: colors.primary }]}
+              >
                 {t('welcome_have_account')}
               </AppText>
             </TouchableOpacity>
@@ -288,7 +339,11 @@ const WelcomeScreen = ({ navigation }: any) => {
           contentContainerStyle={styles.modalScroll}
           showsVerticalScrollIndicator={false}
         >
-          <AppText variant="modalBody" tone="secondary" style={[styles.legalBodyText, { color: colors.textSecondary }]}>
+          <AppText
+            variant="modalBody"
+            tone="secondary"
+            style={[styles.legalBodyText, { color: colors.textSecondary }]}
+          >
             {modalContent === 'privacy' ? PRIVACY_POLICY : TERMS_OF_SERVICE}
           </AppText>
         </ScrollView>
@@ -308,60 +363,36 @@ const WelcomeScreen = ({ navigation }: any) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: WHITE },
+  container: { flex: 1 },
   page: { flex: 1 },
   content: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 30,
-    paddingVertical: 50,
+    paddingHorizontal: ThemeTokens.spacing.xl + ThemeTokens.spacing.sm,
+    paddingVertical: ThemeTokens.spacing.xxxl,
   },
   imageContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   logoImage: { width: 220, height: 220 },
   textSection: { alignItems: 'center', width: '100%', marginBottom: 20 },
-  title: {
-    color: BLACK,
-    marginBottom: 12,
-    textAlign: 'center',
-  },
+  title: { marginBottom: ThemeTokens.spacing.md, textAlign: 'center' },
   termsContainer: { paddingHorizontal: 10, marginTop: 8 },
-  termsText: {
-    textAlign: 'center',
-    color: GRAY,
-  },
-  subtitle: {
-    textAlign: 'center',
-    color: GRAY,
-  },
-  link: {
-    color: ALERT_RED,
-  },
-  linkButton: { marginTop: 12 },
+  termsText: { textAlign: 'center' },
+  subtitle: { textAlign: 'center' },
+  link: {},
+  linkButton: { marginTop: ThemeTokens.spacing.md },
   button: {
     width: '100%',
-    backgroundColor: ALERT_RED,
-    paddingVertical: 16,
-    borderRadius: 30,
+    paddingVertical: ThemeTokens.spacing.md + ThemeTokens.spacing.xs,
+    borderRadius: ThemeTokens.radius.pill,
     alignItems: 'center',
-    elevation: 3,
-    shadowColor: BLACK,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    ...ThemeTokens.shadows.soft.android,
   },
-  buttonText: {
-    color: WHITE,
-  },
-  swipeHint: {
-    marginTop: 10,
-    color: GRAY,
-  },
+  buttonText: {},
+  swipeHint: { marginTop: ThemeTokens.spacing.sm },
   legalScroll: { maxHeight: 520 },
   modalScroll: { paddingVertical: ThemeTokens.spacing.md },
-  legalBodyText: {
-    color: GRAY,
-  },
+  legalBodyText: {},
   modalButton: {
     height: 46,
     borderRadius: ThemeTokens.radius.md,
@@ -369,30 +400,28 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: ThemeTokens.spacing.md,
   },
-  modalButtonText: {
-    color: '#FFF',
-  },
+  modalButtonText: {},
   languageBlock: { alignItems: 'center' },
   languageLabel: {
-    color: GRAY,
-    marginBottom: 8,
+    marginBottom: ThemeTokens.spacing.sm,
   },
-  languageRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' },
+  languageRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: ThemeTokens.spacing.sm,
+    justifyContent: 'center',
+  },
   languageChip: {
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.15)',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
+    paddingVertical: ThemeTokens.spacing.xs + 2,
+    paddingHorizontal: ThemeTokens.spacing.md,
   },
   languageChipActive: {
-    borderColor: ALERT_RED,
-    backgroundColor: 'rgba(230,28,36,0.08)',
+    backgroundColor: '#00000000',
   },
-  languageText: {
-    color: BLACK,
-  },
-  languageTextActive: { color: ALERT_RED },
+  languageText: {},
+  languageTextActive: {},
 });
 
 export default WelcomeScreen;

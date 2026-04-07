@@ -304,32 +304,20 @@ const AnimatedGlyph = memo(
 
       const lightningLoop = Animated.loop(
         Animated.sequence([
-          Animated.delay(2000),
+          Animated.delay(720),
           Animated.timing(lightningOpacity, {
             toValue: 1,
-            duration: 90,
+            duration: 80,
             easing: Easing.out(Easing.quad),
             useNativeDriver: true,
           }),
           Animated.timing(lightningOpacity, {
             toValue: 0,
-            duration: 120,
+            duration: 140,
             easing: Easing.in(Easing.quad),
             useNativeDriver: true,
           }),
-          Animated.delay(120),
-          Animated.timing(lightningOpacity, {
-            toValue: 0.88,
-            duration: 70,
-            easing: Easing.out(Easing.quad),
-            useNativeDriver: true,
-          }),
-          Animated.timing(lightningOpacity, {
-            toValue: 0,
-            duration: 160,
-            easing: Easing.in(Easing.quad),
-            useNativeDriver: true,
-          }),
+          Animated.delay(60),
         ]),
       );
       lightningLoop.start();

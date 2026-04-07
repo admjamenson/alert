@@ -16,14 +16,12 @@ import {
   ActionSheetIOS,
   Linking,
   PanResponder,
+  useColorScheme,
 } from 'react-native';
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { useTheme } from '../../context/ThemeContext';
-import { useSecurity } from '../../context/SecurityContext';
 import { PermissionManager } from '../../utils/permissions';
 import { RouteDetails, RouteService } from '../../services/RouteService';
-import { useRoute } from '@react-navigation/native';
 import { launchCamera, launchImageLibrary } from 'react-native-image-picker';
 // Audio recorder import disabled - causes build issues with Nitro modules
 // import AudioRecorderPlayer, {
@@ -47,10 +45,12 @@ import {
   isRasterStyle,
 } from '../../constants/MapStyles';
 import {
+  ChatMessageMeta,
   ChatMessageItem,
   ChatMessageType,
   ChatThreadService,
 } from '../../services/ChatThreadService';
+import { GuardiansGroupChatScreen } from './GuardiansGroupChatScreen';
 import {
   GUARDIANS_CONVERSATION_ID,
   isGuardiansConversation,
@@ -59,6 +59,8 @@ import {
   canUseLocationForRiskMaps,
   isFiniteCoordinatePair,
 } from '../../utils/locationQuality';
+import { NotificationService } from '../../services/NotificationService';
+import i18n from '../../i18n';
 
 interface ChatParams {
   conversationId?: string;
@@ -78,6 +80,7 @@ type ChatMessage = {
   type: 'text' | 'image' | 'audio' | 'video' | 'document';
   text?: string;
   uri?: string;
+  meta?: ChatMessageMeta;
   duration?: number;
   peakDb?: number;
   status?: 'pending' | 'sent' | 'delivered' | 'failed';
@@ -87,20 +90,110 @@ type ChatMessage = {
   isSelf: boolean;
 };
 
-const audioRecorderPlayer = new AudioRecorderPlayer();
+type AudioPlaybackEvent = {
+  duration?: number;
+  currentPosition?: number;
+};
+
+type AudioRecordEvent = {
+  currentMetering?: number;
+};
+
+type AudioRecorderPlayerLike = {
+  startPlayer: (uri?: string) => Promise<void>;
+  stopPlayer: () => Promise<void>;
+  setVolume: (value: number) => Promise<void> | void;
+  addPlayBackListener: (listener: (event: AudioPlaybackEvent) => void) => void;
+  removePlayBackListener: () => void;
+  startRecorder: (
+    uri?: string,
+    audioSet?: Record<string, unknown>,
+    meteringEnabled?: boolean,
+  ) => Promise<string>;
+  stopRecorder: () => Promise<string>;
+  addRecordBackListener: (listener: (event: AudioRecordEvent) => void) => void;
+  removeRecordBackListener: () => void;
+};
+
+type AudioRecorderPlayerModuleLike = {
+  default?: new () => AudioRecorderPlayerLike;
+  AudioEncoderAndroidType?: Record<string, unknown>;
+  AudioSourceAndroidType?: Record<string, unknown>;
+  AVEncoderAudioQualityIOSType?: Record<string, unknown>;
+  AVEncodingOption?: Record<string, unknown>;
+  AVModeIOSOption?: Record<string, unknown>;
+  OutputFormatAndroidType?: Record<string, unknown>;
+};
+
+const createNoopAudioRecorderPlayer = (): AudioRecorderPlayerLike => ({
+  startPlayer: async () => {},
+  stopPlayer: async () => {},
+  setVolume: async () => {},
+  addPlayBackListener: () => {},
+  removePlayBackListener: () => {},
+  startRecorder: async () => '',
+  stopRecorder: async () => '',
+  addRecordBackListener: () => {},
+  removeRecordBackListener: () => {},
+});
+
+const audioRecorderPlayerModule: AudioRecorderPlayerModuleLike | null = (() => {
+  try {
+    return require('react-native-audio-recorder-player');
+  } catch {
+    return null;
+  }
+})();
+
+const audioRecorderPlayer: AudioRecorderPlayerLike = audioRecorderPlayerModule?.default
+  ? new audioRecorderPlayerModule.default()
+  : createNoopAudioRecorderPlayer();
+const audioMessagingAvailable = Boolean(audioRecorderPlayerModule?.default);
 
 const CHAT_STORAGE_KEY = '@Alert:ChatMessages';
 const CHAT_LAST_SEEN_KEY = '@Alert:ChatLastSeen';
 const ACTIVE_CALL_KEY = '@Alert:ActiveCall';
 const GUARDIANS_PAGE_SIZE = 30;
+const LAST_LOCATION_KEY = '@Alert:LastLocation';
+const LAST_LOCATION_NAME_KEY = '@Alert:LastLocationName';
 
 const VOICE_AUDIO_SET = {
-  AudioSourceAndroid: AudioSourceAndroidType.VOICE_RECOGNITION,
-  OutputFormatAndroid: OutputFormatAndroidType.MPEG_4,
-  AudioEncoderAndroid: AudioEncoderAndroidType.AAC,
-  AVModeIOS: AVModeIOSOption.spokenaudio,
-  AVFormatIDKeyIOS: AVEncodingOption.aac,
-  AVEncoderAudioQualityKeyIOS: AVEncoderAudioQualityIOSType.high,
+  ...(audioRecorderPlayerModule?.AudioSourceAndroidType?.VOICE_RECOGNITION !==
+  undefined
+    ? {
+        AudioSourceAndroid:
+          audioRecorderPlayerModule.AudioSourceAndroidType
+            .VOICE_RECOGNITION,
+      }
+    : {}),
+  ...(audioRecorderPlayerModule?.OutputFormatAndroidType?.MPEG_4 !== undefined
+    ? {
+        OutputFormatAndroid:
+          audioRecorderPlayerModule.OutputFormatAndroidType.MPEG_4,
+      }
+    : {}),
+  ...(audioRecorderPlayerModule?.AudioEncoderAndroidType?.AAC !== undefined
+    ? {
+        AudioEncoderAndroid:
+          audioRecorderPlayerModule.AudioEncoderAndroidType.AAC,
+      }
+    : {}),
+  ...(audioRecorderPlayerModule?.AVModeIOSOption?.spokenaudio !== undefined
+    ? {
+        AVModeIOS: audioRecorderPlayerModule.AVModeIOSOption.spokenaudio,
+      }
+    : {}),
+  ...(audioRecorderPlayerModule?.AVEncodingOption?.aac !== undefined
+    ? {
+        AVFormatIDKeyIOS: audioRecorderPlayerModule.AVEncodingOption.aac,
+      }
+    : {}),
+  ...(audioRecorderPlayerModule?.AVEncoderAudioQualityIOSType?.high !== undefined
+    ? {
+        AVEncoderAudioQualityKeyIOS:
+          audioRecorderPlayerModule.AVEncoderAudioQualityIOSType.high,
+      }
+    : {}),
   AVNumberOfChannelsKeyIOS: 1,
   AVSampleRateKeyIOS: 44100,
   AVEncoderBitRateKeyIOS: 128000,
@@ -116,15 +209,191 @@ const resolvePlaybackVolume = (peakDb?: number) => {
   return 1.0;
 };
 
+const chatThemeTokens = {
+  colors: ThemeTokens?.colors ?? {
+    light: {
+      primary: '#E61C24',
+      background: '#FFFFFF',
+      surface: '#FFFFFF',
+      card: '#FFFFFF',
+      text: '#111111',
+      muted: '#5A5A5A',
+      textSecondary: '#5A5A5A',
+      border: '#E9E9E9',
+      danger: '#E61C24',
+      riskLow: '#34C759',
+      riskMedium: '#FFCC00',
+      riskHigh: '#E61C24',
+      safe: '#34C759',
+      alert: '#E61C24',
+      neutral: '#111111',
+      ripple: 'rgba(230, 28, 36, 0.12)',
+    },
+    dark: {
+      primary: '#E61C24',
+      background: '#111111',
+      surface: '#171717',
+      card: '#171717',
+      text: '#FFFFFF',
+      muted: '#B2B2B2',
+      textSecondary: '#B2B2B2',
+      border: '#242424',
+      danger: '#E61C24',
+      riskLow: '#34C759',
+      riskMedium: '#FFCC00',
+      riskHigh: '#E61C24',
+      safe: '#34C759',
+      alert: '#E61C24',
+      neutral: '#FFFFFF',
+      ripple: 'rgba(230, 28, 36, 0.18)',
+    },
+  },
+  typography: ThemeTokens?.typography ?? {
+    families: {
+      ios: 'System',
+      android: 'sans-serif',
+    },
+  },
+  haptics: ThemeTokens?.haptics ?? {
+    light: 'impactLight',
+    medium: 'impactMedium',
+    success: 'notificationSuccess',
+    error: 'notificationError',
+  },
+  radius: ThemeTokens?.radius ?? {
+    pill: 999,
+  },
+};
+
 const FONT_FAMILY =
   Platform.OS === 'ios'
-    ? ThemeTokens.typography.families.ios
-    : ThemeTokens.typography.families.android;
+    ? chatThemeTokens.typography.families.ios
+    : chatThemeTokens.typography.families.android;
 
 type Guardian = {
   id: string;
   name: string;
   phone?: string;
+  remoteId?: string;
+  avatarUri?: string;
+  lastLocation?: [number, number];
+  lastUpdatedAt?: string;
+};
+
+type GuardianMapMarker = {
+  key: string;
+  annotationId: string;
+  name: string;
+  coordinate: [number, number];
+  source: 'profile' | 'shared';
+  updatedAtMs: number;
+};
+
+const normalizeGuardianLocation = (value: any): [number, number] | undefined => {
+  if (!value) return undefined;
+  const lat = Number(
+    value?.latitude ??
+      value?.lat ??
+      value?.location?.latitude ??
+      value?.location?.lat,
+  );
+  const lon = Number(
+    value?.longitude ??
+      value?.lon ??
+      value?.lng ??
+      value?.location?.longitude ??
+      value?.location?.lon ??
+      value?.location?.lng,
+  );
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return undefined;
+  return [lon, lat];
+};
+
+const normalizeGuardianRecord = (value: any): Guardian | null => {
+  const id = String(
+    value?.id ?? value?.recordID ?? value?.remoteId ?? value?.phone ?? '',
+  ).trim();
+  if (!id) return null;
+
+  const remoteId =
+    typeof value?.remoteId === 'string' && value.remoteId.trim().length > 0
+      ? value.remoteId.trim()
+      : undefined;
+  const name =
+    String(
+      value?.name ??
+        value?.displayName ??
+        value?.fromName ??
+        value?.title ??
+        '',
+    ).trim() ||
+    i18n.t('guardian_label', {
+      defaultValue: 'Guardian',
+    });
+
+  return {
+    id,
+    name,
+    phone:
+      typeof value?.phone === 'string'
+        ? value.phone
+        : typeof value?.phoneNumber === 'string'
+          ? value.phoneNumber
+          : undefined,
+    remoteId,
+    avatarUri:
+      typeof value?.avatarUri === 'string' && value.avatarUri.trim().length > 0
+        ? value.avatarUri.trim()
+        : undefined,
+    lastLocation: normalizeGuardianLocation(value),
+    lastUpdatedAt:
+      typeof value?.lastUpdatedAt === 'string'
+        ? value.lastUpdatedAt
+        : typeof value?.updatedAt === 'string'
+          ? value.updatedAt
+          : undefined,
+  };
+};
+
+const loadGuardiansRoster = async (): Promise<Guardian[]> => {
+  try {
+    const raw = await AsyncStorage.getItem('@guardians_list');
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map(normalizeGuardianRecord)
+      .filter((item): item is Guardian => item !== null);
+  } catch {
+    return [];
+  }
+};
+
+const resolveGuardiansConversationMembers = (
+  currentUserId: string,
+  guardians: Guardian[],
+) =>
+  Array.from(
+    new Set([
+      currentUserId,
+      ...guardians
+        .map(item =>
+          typeof item.remoteId === 'string' ? item.remoteId.trim() : '',
+        )
+        .filter(Boolean),
+    ]),
+  );
+
+const extractSharedLocation = (
+  meta?: ChatMessageMeta,
+): { latitude: number; longitude: number; source?: 'sos' | 'guardians_chat' } | null => {
+  const latitude = Number(meta?.location?.latitude);
+  const longitude = Number(meta?.location?.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  return {
+    latitude,
+    longitude,
+    source: meta?.location?.source,
+  };
 };
 
 const getCenterFromPayload = (payload: any): [number, number] | null => {
@@ -186,12 +455,17 @@ const mergeChatMessages = (
   });
 };
 
-export const ChatMonitorScreen = ({ navigation }: any) => {
-  const { colors, isDark } = useTheme();
-  const { securityState, requestPreciseFixNow } = useSecurity();
+const LegacyChatMonitorScreen = ({
+  navigation,
+  params,
+}: {
+  navigation: any;
+  params: ChatParams;
+}) => {
+  const systemColorScheme = useColorScheme();
+  const isDark = systemColorScheme === 'dark';
+  const colors = isDark ? chatThemeTokens.colors.dark : chatThemeTokens.colors.light;
   const { t } = useTranslation();
-  const route = useRoute();
-  const params = (route.params || {}) as ChatParams;
   const deepLinkTarget =
     params.lat !== undefined && params.lon !== undefined
       ? {
@@ -218,6 +492,7 @@ export const ChatMonitorScreen = ({ navigation }: any) => {
   const [locationToast, setLocationToast] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [playingId, setPlayingId] = useState<string | null>(null);
+  const [avatarUri, setAvatarUri] = useState<string | null>(null);
   const [playbackPositionMs, setPlaybackPositionMs] = useState(0);
   const [playbackDurationMs, setPlaybackDurationMs] = useState(0);
   const [activeCall, setActiveCall] = useState<{
@@ -226,6 +501,15 @@ export const ChatMonitorScreen = ({ navigation }: any) => {
     startedAt: string;
   } | null>(null);
   const [participants, setParticipants] = useState<Guardian[]>([]);
+  const [conversationTarget, setConversationTarget] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
+  const [securityLocation, setSecurityLocation] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
+  const [securityLocationName, setSecurityLocationName] = useState('');
   const [menuVisible, setMenuVisible] = useState(false);
   const [profileName, setProfileName] = useState('');
   const [chatUser, setChatUser] = useState<{ id: string; name: string } | null>(
@@ -250,16 +534,64 @@ export const ChatMonitorScreen = ({ navigation }: any) => {
     null,
   );
   const guardiansOldestCursorRef = useRef<number | null>(null);
+  const requestPreciseFixNow = React.useCallback(async () => {
+    try {
+      const [storedLocation, storedLocationName] = await Promise.all([
+        AsyncStorage.getItem(LAST_LOCATION_KEY),
+        AsyncStorage.getItem(LAST_LOCATION_NAME_KEY),
+      ]);
+      const parsedLocation = storedLocation ? JSON.parse(storedLocation) : null;
+      const latitude = Number(parsedLocation?.latitude);
+      const longitude = Number(parsedLocation?.longitude);
+      if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+        setSecurityLocation({ latitude, longitude });
+      }
+      if (
+        typeof storedLocationName === 'string' &&
+        storedLocationName.trim().length > 0
+      ) {
+        setSecurityLocationName(storedLocationName.trim());
+      }
+    } catch {
+      // ignore local location recovery failures
+    }
+    return 'unknown';
+  }, []);
+  const securityState = useMemo(
+    () => ({
+      location: securityLocation,
+      locationName: securityLocationName,
+    }),
+    [securityLocation, securityLocationName],
+  );
   const localeTag = getLocales()?.[0]?.languageTag || 'pt-BR';
-  const panicMode = Boolean(resolvedSenderName || deepLinkTarget);
+  const sharedRequesterLocation = useMemo(() => {
+    for (const item of messages) {
+      if (item.isSelf) continue;
+      const shared = extractSharedLocation(item.meta);
+      if (shared?.source === 'sos') {
+        return { latitude: shared.latitude, longitude: shared.longitude };
+      }
+    }
+    for (const item of messages) {
+      if (item.isSelf) continue;
+      const shared = extractSharedLocation(item.meta);
+      if (shared) {
+        return { latitude: shared.latitude, longitude: shared.longitude };
+      }
+    }
+    return null;
+  }, [messages]);
+  const routeTarget = params.targetLocation || deepLinkTarget || null;
+  const target =
+    routeTarget || conversationTarget || sharedRequesterLocation || null;
+  const panicMode = Boolean(resolvedSenderName || target);
   const isRasterBaseMap = useMemo(() => isRasterStyle(OSM_STYLE_NORMAL), []);
   const mapStyle = useMemo(
     () => (panicMode && isRasterBaseMap ? OSM_STYLE_PANIC : OSM_STYLE_NORMAL),
     [panicMode, isRasterBaseMap],
   );
   const showPanicOverlay = panicMode && !isRasterBaseMap;
-
-  const target = params.targetLocation || deepLinkTarget || null;
   const securityLat =
     typeof securityState.location?.latitude === 'number'
       ? securityState.location.latitude
@@ -271,6 +603,67 @@ export const ChatMonitorScreen = ({ navigation }: any) => {
   const hasSecurityLocation =
     canUseLocationForRiskMaps(securityState) &&
     isFiniteCoordinatePair(securityLat, securityLon);
+
+  const guardianMapMarkers = useMemo<GuardianMapMarker[]>(() => {
+    if (!isGuardiansMode) return [];
+    const markers = new Map<string, GuardianMapMarker>();
+
+    participants.forEach(item => {
+      if (!item.lastLocation) return;
+      const key = item.remoteId || item.id;
+      if (!key || key === chatUser?.id) return;
+      markers.set(key, {
+        key,
+        annotationId: `guardian-profile-${key.replace(/[^a-zA-Z0-9_-]/g, '_')}`,
+        name: item.name,
+        coordinate: item.lastLocation,
+        source: 'profile',
+        updatedAtMs: Date.parse(item.lastUpdatedAt || '') || 0,
+      });
+    });
+
+    messages.forEach(item => {
+      if (item.isSelf) return;
+      const shared = extractSharedLocation(item.meta);
+      if (!shared) return;
+      const key = String(item.senderId || item.sender || item.id).trim();
+      if (!key || key === chatUser?.id) return;
+      const createdAtMs = Number(
+        item.createdAtMs || Date.parse(item.timestamp) || 0,
+      );
+      const candidate: GuardianMapMarker = {
+        key,
+        annotationId: `guardian-shared-${key.replace(/[^a-zA-Z0-9_-]/g, '_')}`,
+        name: item.sender || t('chat_sender_fallback'),
+        coordinate: [shared.longitude, shared.latitude],
+        source: 'shared',
+        updatedAtMs: createdAtMs,
+      };
+      const existing = markers.get(key);
+      if (
+        !existing ||
+        existing.source === 'profile' ||
+        candidate.updatedAtMs >= existing.updatedAtMs
+      ) {
+        markers.set(key, candidate);
+      }
+    });
+
+    return Array.from(markers.values());
+  }, [chatUser?.id, isGuardiansMode, messages, participants, t]);
+
+  const participantLocationKeys = useMemo(() => {
+    const keys = new Set<string>();
+    participants.forEach(item => {
+      if (item.lastLocation) {
+        keys.add(item.remoteId || item.id);
+      }
+    });
+    guardianMapMarkers.forEach(item => {
+      keys.add(item.key);
+    });
+    return keys;
+  }, [guardianMapMarkers, participants]);
 
   useEffect(() => {
     if (!hasSecurityLocation) return;
@@ -292,6 +685,29 @@ export const ChatMonitorScreen = ({ navigation }: any) => {
       };
     });
   }, [hasSecurityLocation, securityLat, securityLon]);
+
+  useEffect(() => {
+    if (!isGuardiansMode || routeTarget) return;
+    let active = true;
+
+    const loadActiveSosTarget = async () => {
+      try {
+        const activeSos = await NotificationService.getActiveSos();
+        if (!active || !activeSos?.location) return;
+        const latitude = Number(activeSos.location.latitude);
+        const longitude = Number(activeSos.location.longitude);
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+        setConversationTarget({ latitude, longitude });
+      } catch {
+        // ignore
+      }
+    };
+
+    void loadActiveSosTarget();
+    return () => {
+      active = false;
+    };
+  }, [isGuardiansMode, routeTarget]);
 
   useEffect(() => {
     recordingRef.current = recording;
@@ -352,8 +768,14 @@ export const ChatMonitorScreen = ({ navigation }: any) => {
     const setupGuardiansThread = async () => {
       try {
         const me = await ChatThreadService.getCurrentChatUser();
+        const guardiansRoster = await loadGuardiansRoster();
+        const members = resolveGuardiansConversationMembers(
+          me.id,
+          guardiansRoster,
+        );
         if (!active) return;
         setChatUser(me);
+        setParticipants(guardiansRoster);
         if (!profileName) setProfileName(me.name || '');
 
         await ChatThreadService.ensureGuardiansConversation(me.id).catch(
@@ -363,7 +785,7 @@ export const ChatMonitorScreen = ({ navigation }: any) => {
           conversationId: guardiansConversationId,
           title: t('guardians_conversation_title'),
           type: 'group',
-          members: [me.id],
+          members,
         }).catch(() => undefined);
 
         const cached = ChatThreadService.getCachedMessages(
@@ -462,6 +884,16 @@ export const ChatMonitorScreen = ({ navigation }: any) => {
     return `${routeMeta.distanceKm} km - ${routeMeta.durationMin} min`;
   }, [routeMeta]);
 
+  const guardiansSubtitle = useMemo(() => {
+    if (!isGuardiansMode) return null;
+    if (participants.length > 0) {
+      return t('guardians_conversation_member_count', {
+        count: participants.length,
+      });
+    }
+    return t('guardians_conversation_stub_preview');
+  }, [isGuardiansMode, participants.length, t]);
+
   const selfName =
     profileName?.trim() || t('chat_sender_fallback') || 'Usuário';
 
@@ -491,6 +923,7 @@ export const ChatMonitorScreen = ({ navigation }: any) => {
           ? item.meta?.fileName || t('chat_attachment_document')
           : item.text,
       uri: item.uri,
+      meta: item.meta,
       duration:
         typeof item.meta?.durationSec === 'number'
           ? item.meta.durationSec
@@ -521,27 +954,58 @@ export const ChatMonitorScreen = ({ navigation }: any) => {
     type: ChatMessageType;
     text?: string;
     uri?: string;
-    meta?: Record<string, any>;
+    meta?: ChatMessageMeta;
   }): Promise<boolean> => {
     if (!isGuardiansMode) return false;
     try {
+      const activeUser = chatUser || (await ChatThreadService.getCurrentChatUser());
+      const guardiansRoster =
+        participants.length > 0 ? participants : await loadGuardiansRoster();
+      if (participants.length === 0) {
+        setParticipants(guardiansRoster);
+      }
+      const members = resolveGuardiansConversationMembers(
+        activeUser.id,
+        guardiansRoster,
+      );
+      const canAttachLocation =
+        Number.isFinite(Number(currentRegion?.latitude)) &&
+        Number.isFinite(Number(currentRegion?.longitude));
+      const sharedMeta =
+        shareLocation &&
+        canAttachLocation
+          ? {
+              ...(payload.meta || {}),
+              location: {
+                latitude: Number(currentRegion.latitude),
+                longitude: Number(currentRegion.longitude),
+                label:
+                  typeof securityState.locationName === 'string' &&
+                  securityState.locationName.trim().length > 0
+                    ? securityState.locationName.trim()
+                    : undefined,
+                source: 'guardians_chat' as const,
+                sharedAt: new Date().toISOString(),
+              },
+            }
+          : payload.meta;
       await ChatThreadService.sendMessage({
         conversationId: guardiansConversationId,
         type: payload.type,
         text: payload.text,
         uri: payload.uri,
-        meta: payload.meta,
+        meta: sharedMeta,
         conversation: {
           title: t('guardians_conversation_title'),
           type: 'group',
-          members: chatUser?.id ? [chatUser.id] : [],
+          members,
         },
       });
       syncGuardiansFromCache();
       return true;
     } catch {
       Alert.alert(t('messages_title'), t('chat_send_failed'));
-      return true;
+      return false;
     }
   };
 
@@ -659,22 +1123,15 @@ export const ChatMonitorScreen = ({ navigation }: any) => {
     const loadProfile = async () => {
       const profile = await ProfileService.getProfile();
       setProfileName(profile.name || '');
+      const uri = typeof profile?.avatarUri === 'string' ? profile.avatarUri.trim() : '';
+      setAvatarUri(uri ? uri : null);
     };
     void loadProfile();
   }, []);
 
   const loadGuardians = async () => {
-    try {
-      const raw = await AsyncStorage.getItem('@guardians_list');
-      const list: Guardian[] = raw ? JSON.parse(raw) : [];
-      if (Array.isArray(list)) {
-        setParticipants(list);
-      } else {
-        setParticipants([]);
-      }
-    } catch {
-      setParticipants([]);
-    }
+    const list = await loadGuardiansRoster();
+    setParticipants(list);
   };
 
   useEffect(() => {
@@ -818,6 +1275,13 @@ export const ChatMonitorScreen = ({ navigation }: any) => {
 
   const toggleAudioPlayback = async (message: ChatMessage) => {
     if (!message?.uri) return;
+    if (!audioMessagingAvailable) {
+      Alert.alert(
+        t('chat_audio_unavailable_title'),
+        t('chat_audio_unavailable_body'),
+      );
+      return;
+    }
     if (playingId === message.id) {
       await stopPlayback();
       return;
@@ -854,6 +1318,13 @@ export const ChatMonitorScreen = ({ navigation }: any) => {
 
   const startRecording = async () => {
     if (recordingRef.current) return;
+    if (!audioMessagingAvailable) {
+      Alert.alert(
+        t('chat_audio_unavailable_title'),
+        t('chat_audio_unavailable_body'),
+      );
+      return;
+    }
     const status = await PermissionManager.requestMicrophonePermission();
     if (status !== 'granted') {
       if (status === 'blocked') {
@@ -1223,31 +1694,31 @@ export const ChatMonitorScreen = ({ navigation }: any) => {
         onMoveShouldSetPanResponder: () => true,
         onPanResponderGrant: () => {
           if (recordingLockedRef.current) {
-            ReactNativeHapticFeedback.trigger(ThemeTokens.haptics.success);
+            ReactNativeHapticFeedback.trigger(chatThemeTokens.haptics.success);
             void stopRecording();
             return;
           }
           recordingLockedRef.current = false;
           recordingCancelRef.current = false;
           setRecordingLocked(false);
-          ReactNativeHapticFeedback.trigger(ThemeTokens.haptics.light);
+          ReactNativeHapticFeedback.trigger(chatThemeTokens.haptics.light);
           void startRecording();
         },
         onPanResponderMove: (_, gestureState) => {
           if (gestureState.dx < -80 && !recordingLockedRef.current) {
-            ReactNativeHapticFeedback.trigger(ThemeTokens.haptics.error);
+            ReactNativeHapticFeedback.trigger(chatThemeTokens.haptics.error);
             void cancelRecording();
             return;
           }
           if (gestureState.dy < -40 && !recordingLockedRef.current) {
             recordingLockedRef.current = true;
             setRecordingLocked(true);
-            ReactNativeHapticFeedback.trigger(ThemeTokens.haptics.medium);
+            ReactNativeHapticFeedback.trigger(chatThemeTokens.haptics.medium);
           }
         },
         onPanResponderRelease: () => {
           if (!recordingLockedRef.current && !recordingCancelRef.current) {
-            ReactNativeHapticFeedback.trigger(ThemeTokens.haptics.success);
+            ReactNativeHapticFeedback.trigger(chatThemeTokens.haptics.success);
             void stopRecording();
           }
         },
@@ -1293,7 +1764,7 @@ export const ChatMonitorScreen = ({ navigation }: any) => {
   };
 
   const toggleShareLocation = () => {
-    ReactNativeHapticFeedback.trigger(ThemeTokens.haptics.light);
+    ReactNativeHapticFeedback.trigger(chatThemeTokens.haptics.light);
     setShareLocation(prev => {
       const next = !prev;
       if (next) {
@@ -1358,7 +1829,11 @@ export const ChatMonitorScreen = ({ navigation }: any) => {
               coordinate={[currentRegion.longitude, currentRegion.latitude]}
             >
               <View style={styles.markerSelf}>
-                <Icon name="account-circle" size={22} color="#1565C0" />
+                {avatarUri ? (
+                  <Image source={{ uri: avatarUri }} style={styles.markerAvatar} />
+                ) : (
+                  <Icon name="account-circle" size={22} color="#1565C0" />
+                )}
               </View>
             </MapLibreGL.PointAnnotation>
 
@@ -1372,6 +1847,35 @@ export const ChatMonitorScreen = ({ navigation }: any) => {
                 </View>
               </MapLibreGL.PointAnnotation>
             )}
+
+            {guardianMapMarkers.map(item => (
+              <MapLibreGL.PointAnnotation
+                key={item.annotationId}
+                id={item.annotationId}
+                coordinate={item.coordinate}
+              >
+                <View
+                  style={[
+                    styles.markerGuardian,
+                    item.source === 'shared'
+                      ? {
+                          backgroundColor: colors.primary,
+                          borderColor: colors.primary,
+                        }
+                      : {
+                          backgroundColor: colors.card,
+                          borderColor: colors.border,
+                        },
+                  ]}
+                >
+                  <Icon
+                    name="shield-account"
+                    size={16}
+                    color={item.source === 'shared' ? '#FFFFFF' : colors.primary}
+                  />
+                </View>
+              </MapLibreGL.PointAnnotation>
+            ))}
 
             {routeLine.length > 1 && (
               <MapLibreGL.ShapeSource
@@ -1510,16 +2014,25 @@ export const ChatMonitorScreen = ({ navigation }: any) => {
               ]}
             >
               <Text style={[styles.chatTitle, { color: colors.text }]}>
-                {t('chat_title')}
+                {isGuardiansMode
+                  ? t('guardians_conversation_title')
+                  : t('chat_title')}
               </Text>
             </View>
-            {resolvedSenderName && (
+            {guardiansSubtitle ? (
+              <Text
+                style={[styles.chatSubtitle, { color: colors.textSecondary }]}
+                numberOfLines={2}
+              >
+                {guardiansSubtitle}
+              </Text>
+            ) : resolvedSenderName ? (
               <Text
                 style={[styles.chatSubtitle, { color: colors.textSecondary }]}
               >
                 {t('chat_subtitle_sos', { name: resolvedSenderName })}
               </Text>
-            )}
+            ) : null}
           </View>
           <View style={styles.headerActions}>
             <TouchableOpacity
@@ -1616,22 +2129,33 @@ export const ChatMonitorScreen = ({ navigation }: any) => {
               {t('chat_no_guardians')}
             </Text>
           ) : (
-            participants.map(p => (
-              <View
-                key={p.id}
-                style={[
-                  styles.participantChip,
-                  {
-                    backgroundColor: colors.surface,
-                    borderColor: colors.border,
-                  },
-                ]}
-              >
-                <Text style={[styles.participantText, { color: colors.text }]}>
-                  {p.name}
-                </Text>
-              </View>
-            ))
+            participants.map(p => {
+              const hasLocation = participantLocationKeys.has(p.remoteId || p.id);
+              return (
+                <View
+                  key={p.id}
+                  style={[
+                    styles.participantChip,
+                    {
+                      backgroundColor: colors.surface,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <Icon
+                    name={
+                      hasLocation ? 'map-marker-check-outline' : 'shield-account'
+                    }
+                    size={14}
+                    color={hasLocation ? colors.primary : colors.textSecondary}
+                    style={styles.participantIcon}
+                  />
+                  <Text style={[styles.participantText, { color: colors.text }]}>
+                    {p.name}
+                  </Text>
+                </View>
+              );
+            })
           )}
         </View>
 
@@ -2012,6 +2536,27 @@ export const ChatMonitorScreen = ({ navigation }: any) => {
             <Text style={[styles.menuTitle, { color: colors.text }]}>
               {t('chat_menu_title')}
             </Text>
+            {!isGuardiansMode && (
+              <TouchableOpacity
+                style={styles.menuItem}
+                onPress={() => {
+                  closeMenu();
+                  navigation.navigate('ChatMonitor', {
+                    conversationId: GUARDIANS_CONVERSATION_ID,
+                    mode: 'GUARDIANS_GROUP',
+                  });
+                }}
+              >
+                <Icon
+                  name="shield-account"
+                  size={20}
+                  color={colors.text}
+                />
+                <Text style={[styles.menuItemText, { color: colors.text }]}>
+                  {t('chat_menu_guardians_group')}
+                </Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={styles.menuItem}
               onPress={() => {
@@ -2124,6 +2669,23 @@ export const ChatMonitorScreen = ({ navigation }: any) => {
   );
 };
 
+export const ChatMonitorScreen = ({ navigation, route }: any) => {
+  const params = (route?.params || {}) as ChatParams;
+  const guardiansConversationId =
+    params.conversationId || GUARDIANS_CONVERSATION_ID;
+  const isGuardiansMode =
+    params.mode === 'GUARDIANS_GROUP' ||
+    isGuardiansConversation(guardiansConversationId);
+
+  if (isGuardiansMode) {
+    return (
+      <GuardiansGroupChatScreen navigation={navigation} params={params} />
+    );
+  }
+
+  return <LegacyChatMonitorScreen navigation={navigation} params={params} />;
+};
+
 const styles = StyleSheet.create({
   container: { flex: 1 },
   mapBox: { height: '35%', width: '100%' },
@@ -2194,7 +2756,7 @@ const styles = StyleSheet.create({
     bottom: 12,
     height: 34,
     paddingHorizontal: 12,
-    borderRadius: ThemeTokens.radius.pill,
+    borderRadius: chatThemeTokens.radius.pill,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -2368,6 +2930,9 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 10,
     borderWidth: 1,
+  },
+  participantIcon: {
+    marginRight: 6,
   },
   participantText: { fontSize: 12, fontWeight: '600', fontFamily: FONT_FAMILY },
   participantEmpty: {
@@ -2576,10 +3141,21 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 2,
   },
+  markerAvatar: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+  },
   markerTarget: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
     padding: 2,
+  },
+  markerGuardian: {
+    borderRadius: 16,
+    paddingHorizontal: 7,
+    paddingVertical: 5,
+    borderWidth: 1,
   },
   menuOverlay: {
     flex: 1,

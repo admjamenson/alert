@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert as RNAlert,
   BackHandler,
+  Image,
   Platform,
   ScrollView,
   StyleSheet,
@@ -27,6 +28,7 @@ import {
 import { useSecurity } from '../../context/SecurityContext';
 import { useTheme } from '../../context/ThemeContext';
 import { GeocodingService, PlaceSuggestion } from '../../services/maps';
+import { ProfileService } from '../../services/ProfileService';
 import OfflineCacheService from '../../services/maps/OfflineCacheService';
 import {
   DefaultRouteDestination,
@@ -44,6 +46,8 @@ const FONT_FAMILY =
   Platform.OS === 'ios'
     ? ThemeTokens.typography.families.ios
     : ThemeTokens.typography.families.android;
+
+const ALERT_LOGO = require('../../assets/logo.png');
 
 const TRANSPORT_OPTIONS: Array<{
   mode: RouteTransportMode;
@@ -136,6 +140,7 @@ export const RouteSettingsScreen = ({ navigation }: any) => {
   const { colors } = useTheme();
   const { t, i18n } = useTranslation();
   const { securityState } = useSecurity();
+  const [avatarUri, setAvatarUri] = useState<string | null>(null);
 
   const user = securityState.location;
   const userLat = typeof user?.latitude === 'number' ? user.latitude : null;
@@ -159,6 +164,20 @@ export const RouteSettingsScreen = ({ navigation }: any) => {
   const cameraRef = useRef<MapLibreGL.CameraRef | null>(null);
   const lastCameraSignatureRef = useRef<string>('');
   const searchRequestIdRef = useRef(0);
+
+  useEffect(() => {
+    let active = true;
+    ProfileService.getProfile()
+      .then(profile => {
+        if (!active) return;
+        const uri = typeof profile?.avatarUri === 'string' ? profile.avatarUri.trim() : '';
+        setAvatarUri(uri ? uri : null);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const hasDestination =
     typeof destination?.latitude === 'number' &&
@@ -633,7 +652,11 @@ export const RouteSettingsScreen = ({ navigation }: any) => {
 
               <MapLibreGL.PointAnnotation id="me" coordinate={[userLon as number, userLat as number]}>
                 <View style={[styles.markerSelf, { borderColor: colors.primary }]}>
-                  <Icon name="account-circle" size={22} color={colors.primary} />
+                  {avatarUri ? (
+                    <Image source={{ uri: avatarUri }} style={styles.markerAvatar} />
+                  ) : (
+                    <Image source={ALERT_LOGO} style={styles.markerLogo} resizeMode="contain" />
+                  )}
                 </View>
               </MapLibreGL.PointAnnotation>
 
@@ -855,6 +878,15 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     padding: 2,
     borderWidth: 2,
+  },
+  markerAvatar: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+  },
+  markerLogo: {
+    width: 18,
+    height: 18,
   },
   markerDest: {
     backgroundColor: '#FFFFFF',

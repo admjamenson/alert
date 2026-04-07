@@ -1,6 +1,6 @@
 export type TrustMeta = {
-  sourceName: string;
-  updatedAt: string;
+  sourceName?: string;
+  updatedAt?: string;
   connectionStatus: 'online' | 'degraded' | 'offline';
   providerId: string;
 };

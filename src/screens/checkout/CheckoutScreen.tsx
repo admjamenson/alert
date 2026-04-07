@@ -613,16 +613,20 @@ const CheckoutScreen: React.FC<{ navigation: CheckoutNavigationProp }> = ({
       try {
         await handleHostedCheckout();
       } catch (hostedError) {
-        console.error('[premium/checkout/hosted]', getBillingErrorCode(hostedError));
+        const hostedCode = getBillingErrorCode(hostedError);
+        if (hostedCode !== 'premium_error_payment_canceled') {
+          console.error('[premium/checkout/hosted]', hostedCode);
+        }
         throw hostedError;
       }
     } catch (error) {
       const code = getBillingErrorCode(error);
-      console.error('[premium/checkout]', code);
+      if (code !== 'premium_error_payment_canceled') {
+        console.error('[premium/checkout]', code);
+      }
 
       if (code === 'premium_error_payment_canceled') {
-        const message = t('premium_error_payment_canceled');
-        setError(message);
+        setError('');
         setBusyAction(null);
         return;
       }
@@ -649,7 +653,7 @@ const CheckoutScreen: React.FC<{ navigation: CheckoutNavigationProp }> = ({
         return;
       }
 
-        Alert.alert(t('premium_error_title'), message);
+      Alert.alert(t('premium_error_title'), message);
     }
   }, [
     billingContext.provider,

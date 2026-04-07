@@ -35,6 +35,10 @@ set APP_HOME=%DIRNAME%
 @rem Resolve any "." and ".." in APP_HOME to make it shorter.
 for %%i in ("%APP_HOME%") do set APP_HOME=%%~fi
 
+@rem Ensure Gradle can write to a workspace-local cache on restricted systems.
+set GRADLE_USER_HOME=c:\Alert\gradlehome
+set JAVA_OPTS=%JAVA_OPTS% -Duser.home=c:\Alert\gradlehome
+
 @rem Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
 set DEFAULT_JVM_OPTS="-Xmx64m" "-Xms64m"
 

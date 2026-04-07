@@ -10,7 +10,10 @@ export const shouldAutoRequestLocationPermission = (
 export const getHomeLocationBannerState = (
   status: PermissionStatus,
 ): HomeLocationBannerState => {
+  // Treat both "blocked" (never ask again) and "unavailable" (system GPS off)
+  // as actionable states so the user sees the CTA to enable location.
   if (status === 'blocked') return 'blocked';
-  if (status === 'denied') return 'needs_permission';
+  if (status === 'denied' || status === 'unavailable')
+    return 'needs_permission';
   return 'hidden';
 };

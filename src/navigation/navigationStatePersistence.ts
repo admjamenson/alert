@@ -40,6 +40,8 @@ export const KNOWN_ROUTE_NAMES: ReadonlySet<keyof RootStackParamList> = new Set<
   'History',
   'Checkout',
   'Settings',
+  'Support',
+  'AdPrivacy',
   'LanguageSelector',
   'WebView',
   'ThemeSettings',

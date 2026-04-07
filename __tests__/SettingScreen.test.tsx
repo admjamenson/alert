@@ -1,5 +1,5 @@
 import React from 'react';
-import { I18nManager, Platform } from 'react-native';
+import { BackHandler, I18nManager, Platform } from 'react-native';
 import renderer, { act } from 'react-test-renderer';
 
 import SettingScreen from '../src/screens/SettingScreen';
@@ -12,6 +12,10 @@ const mockReset = jest.fn((payload: unknown) => ({
 jest.mock('@react-navigation/native', () => ({
   CommonActions: {
     reset: (payload: unknown) => mockReset(payload),
+  },
+  useFocusEffect: (effect: () => void | (() => void)) => {
+    const ReactLocal = require('react');
+    ReactLocal.useEffect(effect, [effect]);
   },
 }));
 
@@ -96,7 +100,7 @@ type NavigationMock = {
   getParent: jest.Mock<any, []>;
   dispatch: jest.Mock<any, [any]>;
   navigate: jest.Mock<void, [string]>;
-  addListener: jest.Mock<() => void, [string, () => void]>;
+  addListener: jest.Mock<any, [string, () => void]>;
 };
 
 const setPlatformOS = (value: 'ios' | 'android') => {
@@ -119,7 +123,7 @@ const createNavigationMock = (overrides: Partial<NavigationMock> = {}): Navigati
   getParent: jest.fn(() => null),
   dispatch: jest.fn(),
   navigate: jest.fn(),
-  addListener: jest.fn(() => jest.fn()),
+  addListener: jest.fn<any, [string, () => void]>(() => jest.fn()),
   ...overrides,
 });
 
@@ -128,7 +132,9 @@ const renderScreen = async (navigationOverrides: Partial<NavigationMock> = {}) =
   let testRenderer: renderer.ReactTestRenderer;
 
   await act(async () => {
-    testRenderer = renderer.create(<SettingScreen navigation={navigation} />);
+    testRenderer = renderer.create(
+      React.createElement(SettingScreen as any, { navigation }),
+    );
     await Promise.resolve();
   });
 
@@ -227,5 +233,36 @@ describe('SettingScreen', () => {
       routes: [{ name: 'FastHome' }],
     });
     expect(dispatch).toHaveBeenCalledTimes(2);
+  });
+
+  it('mirrors the safe back behavior on Android hardware back', async () => {
+    setPlatformOS('android');
+
+    let hardwareBackHandler: (() => boolean) | undefined;
+    const remove = jest.fn();
+    const addEventListenerSpy = jest
+      .spyOn(BackHandler, 'addEventListener')
+      .mockImplementation((eventName: any, handler: any) => {
+        expect(eventName).toBe('hardwareBackPress');
+        hardwareBackHandler = handler;
+        return { remove } as any;
+      });
+
+    const goBack = jest.fn();
+    const { testRenderer } = await renderScreen({
+      canGoBack: jest.fn(() => true),
+      goBack,
+    });
+
+    expect(typeof hardwareBackHandler).toBe('function');
+    expect(hardwareBackHandler?.()).toBe(true);
+    expect(goBack).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      testRenderer.unmount();
+    });
+
+    expect(remove).toHaveBeenCalledTimes(1);
+    addEventListenerSpy.mockRestore();
   });
 });

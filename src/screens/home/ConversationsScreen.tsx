@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   AccessibilityInfo,
   ActivityIndicator,
@@ -12,14 +12,17 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import {SafeAreaView} from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { useTranslation } from 'react-i18next';
+import {useTranslation} from 'react-i18next';
 
-import { useTheme } from '../../context/ThemeContext';
-import { ThemeTokens } from '../../constants/ThemeTokens';
-import { ChatConversationItem, ChatThreadService } from '../../services/ChatThreadService';
-import { TelemetryService } from '../../services/TelemetryService';
+import {useTheme} from '../../context/ThemeContext';
+import {ThemeTokens} from '../../constants/ThemeTokens';
+import {
+  ChatConversationItem,
+  ChatThreadService,
+} from '../../services/ChatThreadService';
+import {TelemetryService} from '../../services/TelemetryService';
 import {
   GUARDIANS_CONVERSATION_ID,
   isGuardiansConversation,
@@ -43,9 +46,10 @@ const FONT_FAMILY =
     ? ThemeTokens.typography.families.ios
     : ThemeTokens.typography.families.android;
 
-export const ConversationsScreen = ({ navigation }: any) => {
-  const { colors } = useTheme();
-  const { t } = useTranslation();
+export const ConversationsScreen = ({navigation, route}: any) => {
+  const {colors} = useTheme();
+  const {t} = useTranslation();
+  const prioritizeGuardians = Boolean(route?.params?.openGuardiansFirst);
   const [items, setItems] = useState<Conversation[]>([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
@@ -94,15 +98,21 @@ export const ConversationsScreen = ({ navigation }: any) => {
     navigation.navigate('Home');
   }, [navigation]);
 
-  const announceRefreshState = useCallback((messageKey: string) => {
-    AccessibilityInfo.isScreenReaderEnabled()
-      .then(enabled => {
-        if (enabled) AccessibilityInfo.announceForAccessibility(t(messageKey));
-      })
-      .catch(() => {});
-  }, [t]);
+  const announceRefreshState = useCallback(
+    (messageKey: string) => {
+      AccessibilityInfo.isScreenReaderEnabled()
+        .then(enabled => {
+          if (enabled)
+            AccessibilityInfo.announceForAccessibility(t(messageKey));
+        })
+        .catch(() => {});
+    },
+    [t],
+  );
 
-  const readLastSeenMap = useCallback(async (): Promise<Record<string, number>> => {
+  const readLastSeenMap = useCallback(async (): Promise<
+    Record<string, number>
+  > => {
     try {
       const lastSeenRaw = await AsyncStorage.getItem(CHAT_LAST_SEEN_KEY);
       return lastSeenRaw ? JSON.parse(lastSeenRaw) : {};
@@ -133,36 +143,47 @@ export const ConversationsScreen = ({ navigation }: any) => {
     return `${day}/${month}/${value.getFullYear()}`;
   }, []);
 
-  const buildPreview = useCallback((conversation: ChatConversationItem) => {
-    const last = conversation.lastMessage;
-    if (!last) return '';
-    if (last.type === 'text') return last.text || '';
-    if (last.type === 'image') return t('chat_attachment_image');
-    if (last.type === 'audio') return t('chat_attachment_audio');
-    if (last.type === 'video') return t('chat_attachment_video');
-    return t('chat_attachment_document');
-  }, [t]);
+  const buildPreview = useCallback(
+    (conversation: ChatConversationItem) => {
+      const last = conversation.lastMessage;
+      if (!last) return '';
+      if (last.type === 'text') return last.text || '';
+      if (last.type === 'image') return t('chat_attachment_image');
+      if (last.type === 'audio') return t('chat_attachment_audio');
+      if (last.type === 'video') return t('chat_attachment_video');
+      return t('chat_attachment_document');
+    },
+    [t],
+  );
 
-  const toConversationRow = useCallback((
-    item: ChatConversationItem,
-    currentUserId: string,
-    lastSeenMap: Record<string, number>,
-  ): Conversation => {
-    const guardians = isGuardiansConversation(item.id);
-    const ts = item.lastMessage?.createdAtMs || item.updatedAtMs || 0;
-    const seenAt = Number(lastSeenMap?.[item.id] || 0);
-    const preview = buildPreview(item);
-    return {
-      id: item.id,
-      title: guardians ? t('guardians_conversation_title') : item.title || t('messages_unknown'),
-      members: item.members,
-      lastText: preview || (guardians ? t('guardians_conversation_stub_preview') : ''),
-      timestamp: ts,
-      unread: ts > seenAt && (item.lastMessage?.senderId || '') !== currentUserId,
-      pinned: guardians || Boolean(item.pinned),
-      guardians,
-    };
-  }, [buildPreview, t]);
+  const toConversationRow = useCallback(
+    (
+      item: ChatConversationItem,
+      currentUserId: string,
+      lastSeenMap: Record<string, number>,
+    ): Conversation => {
+      const guardians = isGuardiansConversation(item.id);
+      const ts = item.lastMessage?.createdAtMs || item.updatedAtMs || 0;
+      const seenAt = Number(lastSeenMap?.[item.id] || 0);
+      const preview = buildPreview(item);
+      return {
+        id: item.id,
+        title: guardians
+          ? t('guardians_conversation_title')
+          : item.title || t('messages_unknown'),
+        members: item.members,
+        lastText:
+          preview ||
+          (guardians ? t('guardians_conversation_stub_preview') : ''),
+        timestamp: ts,
+        unread:
+          ts > seenAt && (item.lastMessage?.senderId || '') !== currentUserId,
+        pinned: guardians || Boolean(item.pinned),
+        guardians,
+      };
+    },
+    [buildPreview, t],
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -172,9 +193,12 @@ export const ConversationsScreen = ({ navigation }: any) => {
       })
       .catch(() => {});
 
-    const subscription = AccessibilityInfo.addEventListener('screenReaderChanged', enabled => {
-      setScreenReaderEnabled(enabled);
-    });
+    const subscription = AccessibilityInfo.addEventListener(
+      'screenReaderChanged',
+      enabled => {
+        setScreenReaderEnabled(enabled);
+      },
+    );
 
     return () => {
       mounted = false;
@@ -186,7 +210,9 @@ export const ConversationsScreen = ({ navigation }: any) => {
     setLoading(true);
     setLoadError(null);
     try {
-      await ChatThreadService.ensureGuardiansConversation().catch(() => undefined);
+      await ChatThreadService.ensureGuardiansConversation().catch(
+        () => undefined,
+      );
       const currentUser = await ChatThreadService.getCurrentChatUser();
       currentUserIdRef.current = currentUser.id;
       const lastSeenMap = await readLastSeenMap();
@@ -204,12 +230,16 @@ export const ConversationsScreen = ({ navigation }: any) => {
         async conversations => {
           const seenMap = await readLastSeenMap();
           const mapped = ensureGuardiansFirst(
-            conversations.map(item => toConversationRow(item, currentUser.id, seenMap)),
+            conversations.map(item =>
+              toConversationRow(item, currentUser.id, seenMap),
+            ),
           );
           setItems(mapped);
           setLoading(false);
           setLoadError(null);
-          TelemetryService.trackEvent('chat_conversations_loaded', { count: mapped.length });
+          TelemetryService.trackEvent('chat_conversations_loaded', {
+            count: mapped.length,
+          });
         },
         () => {
           setLoading(false);
@@ -250,10 +280,12 @@ export const ConversationsScreen = ({ navigation }: any) => {
     try {
       const netState = await NetInfo.fetch();
       const userIdFromRef = currentUserIdRef.current;
-      const currentUserId = userIdFromRef || (await ChatThreadService.getCurrentChatUser()).id;
+      const currentUserId =
+        userIdFromRef || (await ChatThreadService.getCurrentChatUser()).id;
       currentUserIdRef.current = currentUserId;
 
-      let refreshed = await ChatThreadService.refreshConversations(currentUserId);
+      let refreshed =
+        await ChatThreadService.refreshConversations(currentUserId);
       if (!netState.isConnected) {
         refreshed = ChatThreadService.getCachedConversations(currentUserId);
       }
@@ -277,7 +309,13 @@ export const ConversationsScreen = ({ navigation }: any) => {
       setRefreshing(false);
       refreshInFlightRef.current = false;
     }
-  }, [announceRefreshState, ensureGuardiansFirst, readLastSeenMap, t, toConversationRow]);
+  }, [
+    announceRefreshState,
+    ensureGuardiansFirst,
+    readLastSeenMap,
+    t,
+    toConversationRow,
+  ]);
 
   const filteredItems = useMemo(() => {
     const keyword = query.trim().toLowerCase();
@@ -289,22 +327,38 @@ export const ConversationsScreen = ({ navigation }: any) => {
     );
   }, [items, query]);
 
-  const skeletonRows = useMemo(() => Array.from({ length: 5 }, (_, idx) => `sk_${idx}`), []);
+  const guardiansConversation = useMemo(() => {
+    const pinned = filteredItems.find(item => item.guardians);
+    return pinned || buildGuardiansFallbackRow();
+  }, [buildGuardiansFallbackRow, filteredItems]);
+
+  const listWithoutGuardians = useMemo(
+    () => filteredItems.filter(item => !item.guardians),
+    [filteredItems],
+  );
+
+  const skeletonRows = useMemo(
+    () => Array.from({length: 5}, (_, idx) => `sk_${idx}`),
+    [],
+  );
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+    <SafeAreaView
+      style={[styles.container, {backgroundColor: colors.background}]}
+      edges={['top']}>
       <View style={styles.header}>
         <TouchableOpacity onPress={handleBack} style={styles.headerBtn}>
           <Icon name="arrow-left" size={26} color={colors.text} />
         </TouchableOpacity>
-        <Text style={[styles.title, { color: colors.text }]}>{t('messages_title')}</Text>
+        <Text style={[styles.title, {color: colors.text}]}>
+          {t('messages_title')}
+        </Text>
         {screenReaderEnabled ? (
           <TouchableOpacity
             onPress={() => void handleRefresh()}
             style={styles.headerBtn}
             accessibilityRole="button"
-            accessibilityLabel={t('messages_refresh_action')}
-          >
+            accessibilityLabel={t('messages_refresh_action')}>
             <Icon name="refresh" size={22} color={colors.text} />
           </TouchableOpacity>
         ) : (
@@ -313,23 +367,30 @@ export const ConversationsScreen = ({ navigation }: any) => {
       </View>
 
       <View style={styles.searchWrap}>
-        <View style={[styles.searchInputWrap, { borderColor: colors.border, backgroundColor: colors.card }]}>
+        <View
+          style={[
+            styles.searchInputWrap,
+            {borderColor: colors.border, backgroundColor: colors.card},
+          ]}>
           <Icon name="magnify" size={18} color={colors.textSecondary} />
           <TextInput
             value={query}
             onChangeText={setQuery}
             placeholder={t('chat_search_placeholder')}
             placeholderTextColor={colors.textSecondary}
-            style={[styles.searchInput, { color: colors.text }]}
+            style={[styles.searchInput, {color: colors.text}]}
             accessibilityLabel={t('chat_search_placeholder')}
           />
           {query.length > 0 ? (
             <TouchableOpacity
               style={styles.clearBtn}
               onPress={() => setQuery('')}
-              accessibilityLabel={t('chat_clear_search')}
-            >
-              <Icon name="close-circle" size={18} color={colors.textSecondary} />
+              accessibilityLabel={t('chat_clear_search')}>
+              <Icon
+                name="close-circle"
+                size={18}
+                color={colors.textSecondary}
+              />
             </TouchableOpacity>
           ) : null}
         </View>
@@ -343,99 +404,202 @@ export const ConversationsScreen = ({ navigation }: any) => {
             keyExtractor={item => item}
             contentContainerStyle={styles.list}
             renderItem={() => (
-              <View style={[styles.row, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                <View style={[styles.avatar, { backgroundColor: colors.surface }]} />
-                <View style={{ flex: 1 }}>
-                  <View style={[styles.skeletonLineLg, { backgroundColor: colors.surface }]} />
-                  <View style={[styles.skeletonLineSm, { backgroundColor: colors.surface }]} />
+              <View
+                style={[
+                  styles.row,
+                  {backgroundColor: colors.card, borderColor: colors.border},
+                ]}>
+                <View
+                  style={[styles.avatar, {backgroundColor: colors.surface}]}
+                />
+                <View style={{flex: 1}}>
+                  <View
+                    style={[
+                      styles.skeletonLineLg,
+                      {backgroundColor: colors.surface},
+                    ]}
+                  />
+                  <View
+                    style={[
+                      styles.skeletonLineSm,
+                      {backgroundColor: colors.surface},
+                    ]}
+                  />
                 </View>
               </View>
             )}
           />
         </View>
       ) : (
-      <FlatList
-        data={filteredItems}
-        keyExtractor={item => item.id}
-        refreshing={refreshing}
-        onRefresh={handleRefresh}
-        contentContainerStyle={styles.list}
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Icon name="message-text-outline" size={26} color={colors.textSecondary} />
-            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-              {loadError || t('messages_empty')}
-            </Text>
-          </View>
-        }
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={[styles.row, { backgroundColor: colors.card, borderColor: colors.border }]}
-            activeOpacity={0.85}
-            onPress={() => {
-              if (item.guardians) {
+        <FlatList
+          data={listWithoutGuardians}
+          keyExtractor={item => item.id}
+          refreshing={refreshing}
+          onRefresh={handleRefresh}
+          contentContainerStyle={styles.list}
+          ListHeaderComponent={
+            <TouchableOpacity
+              activeOpacity={0.9}
+              onPress={() => {
                 navigation.navigate('ChatMonitor', {
-                  conversationId: item.id,
+                  conversationId: guardiansConversation.id,
                   mode: 'GUARDIANS_GROUP',
                 });
-                return;
-              }
-              navigation.navigate('ChatThread', {
-                conversationId: item.id,
-                title: item.title,
-                memberIds: item.members,
-              });
-            }}
-          >
-            <View style={[styles.avatar, { backgroundColor: colors.surface }]}>
-              <Icon
-                name={item.guardians ? 'shield-account' : 'account-circle'}
-                size={28}
-                color={item.guardians ? colors.primary : colors.textSecondary}
-              />
-            </View>
-            <View style={styles.rowText}>
-              <View style={styles.rowTitleWrap}>
-                <Text
-                  style={[styles.rowTitle, { color: colors.text }]}
-                  numberOfLines={item.guardians ? 2 : 1}
-                  ellipsizeMode="tail"
-                >
-                  {item.title}
-                </Text>
-                {item.pinned ? (
-                  <Icon
-                    name="pin"
-                    size={12}
-                    color={colors.primary}
-                    style={styles.pinIcon}
-                    accessibilityLabel={t('guardians_conversation_pinned')}
-                  />
-                ) : null}
+                TelemetryService.trackEvent('chat_guardians_pin_tap');
+              }}
+              style={[
+                styles.row,
+                styles.guardiansRow,
+                styles.guardiansRowPriority,
+                {
+                  backgroundColor: colors.surface,
+                  borderColor: colors.primary,
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={t('guardians_conversation_title')}
+              accessibilityHint={t('guardians_conversation_stub_preview')}>
+              <View
+                style={[
+                  styles.avatar,
+                  styles.guardiansAvatar,
+                  {
+                    backgroundColor: colors.card,
+                    borderColor: colors.primary,
+                  },
+                ]}>
+                <Icon name="shield-account" size={28} color={colors.primary} />
               </View>
-              <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]} numberOfLines={1}>
-                {item.lastText}
+              <View style={styles.rowText}>
+                <View
+                  style={[
+                    styles.guardiansBadge,
+                    {
+                      backgroundColor: colors.primary,
+                    },
+                  ]}>
+                  <Icon name="pin" size={11} color="#FFF" />
+                  <Text style={styles.guardiansBadgeText}>
+                    {t('guardians_conversation_pinned')}
+                  </Text>
+                </View>
+                <View style={styles.rowTitleWrap}>
+                  <Text
+                    style={[styles.rowTitle, {color: colors.text}]}
+                    numberOfLines={2}
+                    ellipsizeMode="tail">
+                    {guardiansConversation.title}
+                  </Text>
+                </View>
+                <Text
+                  style={[styles.rowSubtitle, {color: colors.textSecondary}]}
+                  numberOfLines={1}>
+                  {guardiansConversation.lastText}
+                </Text>
+              </View>
+              <View style={styles.rowMeta}>
+                <Text
+                  style={[styles.rowTime, {color: colors.textSecondary}]}
+                  numberOfLines={1}>
+                  {formatConversationTime(guardiansConversation.timestamp)}
+                </Text>
+                {guardiansConversation.unread && (
+                  <View
+                    style={[styles.unreadDot, {backgroundColor: colors.alert}]}
+                  />
+                )}
+              </View>
+            </TouchableOpacity>
+          }
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <Icon
+                name="message-text-outline"
+                size={26}
+                color={colors.textSecondary}
+              />
+              <Text style={[styles.emptyText, {color: colors.textSecondary}]}>
+                {loadError || t('messages_empty')}
               </Text>
             </View>
-            <View style={styles.rowMeta}>
-              <Text
-                style={[styles.rowTime, { color: colors.textSecondary }]}
-                numberOfLines={1}
-              >
-                {formatConversationTime(item.timestamp)}
-              </Text>
-              {item.unread && <View style={[styles.unreadDot, { backgroundColor: colors.alert }]} />}
-            </View>
-          </TouchableOpacity>
-        )}
-      />
+          }
+          renderItem={({item}) => (
+            <TouchableOpacity
+              style={[
+                styles.row,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                },
+              ]}
+              activeOpacity={0.85}
+              onPress={() => {
+                navigation.navigate('ChatThread', {
+                  conversationId: item.id,
+                  title: item.title,
+                  memberIds: item.members,
+                });
+              }}>
+              <View
+                style={[
+                  styles.avatar,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: 'transparent',
+                  },
+                ]}>
+                <Icon
+                  name="account-circle"
+                  size={28}
+                  color={colors.textSecondary}
+                />
+              </View>
+              <View style={styles.rowText}>
+                <View style={styles.rowTitleWrap}>
+                  <Text
+                    style={[styles.rowTitle, {color: colors.text}]}
+                    numberOfLines={1}
+                    ellipsizeMode="tail">
+                    {item.title}
+                  </Text>
+                  {item.pinned ? (
+                    <Icon
+                      name="pin"
+                      size={12}
+                      color={colors.primary}
+                      style={styles.pinIcon}
+                      accessibilityLabel={t('guardians_conversation_pinned')}
+                    />
+                  ) : null}
+                </View>
+                <Text
+                  style={[styles.rowSubtitle, {color: colors.textSecondary}]}
+                  numberOfLines={1}>
+                  {item.lastText}
+                </Text>
+              </View>
+              <View style={styles.rowMeta}>
+                <Text
+                  style={[styles.rowTime, {color: colors.textSecondary}]}
+                  numberOfLines={1}>
+                  {formatConversationTime(item.timestamp)}
+                </Text>
+                {item.unread && (
+                  <View
+                    style={[styles.unreadDot, {backgroundColor: colors.alert}]}
+                  />
+                )}
+              </View>
+            </TouchableOpacity>
+          )}
+        />
       )}
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
+  container: {flex: 1},
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -443,7 +607,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: ThemeTokens.spacing.lg,
     paddingVertical: ThemeTokens.spacing.sm,
   },
-  headerBtn: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center' },
+  headerBtn: {
+    width: 42,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   title: {
     fontSize: ThemeTokens.typography.sizes.title,
     lineHeight: ThemeTokens.typography.lineHeights.title,
@@ -478,7 +647,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  loadingWrap: { flex: 1 },
+  loadingWrap: {flex: 1},
   list: {
     paddingHorizontal: ThemeTokens.spacing.lg,
     paddingBottom: ThemeTokens.spacing.xl,
@@ -492,6 +661,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     marginBottom: ThemeTokens.spacing.sm,
   },
+  guardiansRow: {
+    shadowOpacity: 0.14,
+    shadowRadius: 18,
+    shadowOffset: {width: 0, height: 8},
+    elevation: 3,
+  },
+  guardiansRowPriority: {
+    transform: [{scale: 1.01}],
+  },
   avatar: {
     width: 46,
     height: 46,
@@ -499,7 +677,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  rowText: { flex: 1, minWidth: 0 },
+  guardiansAvatar: {
+    borderWidth: 1,
+  },
+  rowText: {flex: 1, minWidth: 0},
+  guardiansBadge: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginBottom: 8,
+  },
+  guardiansBadgeText: {
+    color: '#FFFFFF',
+    fontSize: ThemeTokens.typography.sizes.caption,
+    lineHeight: ThemeTokens.typography.lineHeights.caption,
+    letterSpacing: ThemeTokens.typography.letterSpacing.caption,
+    fontWeight: ThemeTokens.typography.weights.bold,
+    fontFamily: FONT_FAMILY,
+  },
   rowTitleWrap: {
     flexDirection: 'row',
     alignItems: 'flex-start',

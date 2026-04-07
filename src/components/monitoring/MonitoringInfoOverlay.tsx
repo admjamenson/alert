@@ -24,7 +24,7 @@ export type MonitoringOverlaySourceOfficiality =
 
 export type MonitoringOverlaySource = {
   name: string;
-  url?: string;
+  url?: string | null;
   officiality: MonitoringOverlaySourceOfficiality;
 };
 

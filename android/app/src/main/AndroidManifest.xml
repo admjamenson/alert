@@ -7,9 +7,54 @@
       android:label="@string/app_name"
       android:icon="@mipmap/ic_launcher"
       android:roundIcon="@mipmap/ic_launcher_round"
+      android:extractNativeLibs="true"
       android:allowBackup="false"
       android:theme="@style/AppTheme"
       android:supportsRtl="true">
+      <receiver
+        android:name=".widgets.AlertWidgetSmallProvider"
+        android:label="@string/widget_name_status"
+        android:exported="true">
+        <intent-filter>
+          <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+        </intent-filter>
+        <meta-data
+          android:name="android.appwidget.provider"
+          android:resource="@xml/alert_widget_small" />
+      </receiver>
+      <receiver
+        android:name=".widgets.AlertWidgetSmallAltProvider"
+        android:label="@string/widget_name_route"
+        android:exported="true">
+        <intent-filter>
+          <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+        </intent-filter>
+        <meta-data
+          android:name="android.appwidget.provider"
+          android:resource="@xml/alert_widget_small_alt" />
+      </receiver>
+      <receiver
+        android:name=".widgets.AlertWidgetMediumProvider"
+        android:label="@string/widget_name_attention_local"
+        android:exported="true">
+        <intent-filter>
+          <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+        </intent-filter>
+        <meta-data
+          android:name="android.appwidget.provider"
+          android:resource="@xml/alert_widget_medium" />
+      </receiver>
+      <receiver
+        android:name=".widgets.AlertWidgetLargeProvider"
+        android:label="@string/widget_name_status_local"
+        android:exported="true">
+        <intent-filter>
+          <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+        </intent-filter>
+        <meta-data
+          android:name="android.appwidget.provider"
+          android:resource="@xml/alert_widget_large" />
+      </receiver>
       <activity
         android:name=".MainActivity"
         android:label="@string/app_name"

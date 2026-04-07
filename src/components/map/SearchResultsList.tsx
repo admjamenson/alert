@@ -100,7 +100,7 @@ export const SearchResultsList: React.FC<SearchResultsListProps> = ({
       {visibleSections.length > 0 ? (
         <SectionList
           sections={visibleSections}
-          keyExtractor={item => item.id}
+          keyExtractor={item => item.id ?? item.name}
           keyboardShouldPersistTaps="handled"
           removeClippedSubviews
           initialNumToRender={8}
@@ -121,7 +121,7 @@ export const SearchResultsList: React.FC<SearchResultsListProps> = ({
       ) : (
         <FlatList
           data={results}
-          keyExtractor={item => item.id}
+          keyExtractor={item => item.id ?? item.name}
           keyboardShouldPersistTaps="handled"
           removeClippedSubviews
           initialNumToRender={8}

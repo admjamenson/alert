@@ -25,6 +25,7 @@ import {
   SecurityGlyph,
   SecurityIncidentItem,
 } from '../../services/data/UnifiedIncidentStore';
+import { ProfileService } from '../../services/ProfileService';
 import CityGlyph from './CityGlyph';
 
 type Props = {
@@ -33,6 +34,7 @@ type Props = {
   incidents: SecurityIncidentItem[];
   chromeHidden: boolean;
   mapMode: MapStyleMode;
+  profileRefreshKey?: number;
   onToggleMapMode: () => void;
   onMapPress: () => void;
   mapModeLabel: string;
@@ -76,6 +78,7 @@ export const SecurityMapView: React.FC<Props> = ({
   incidents,
   chromeHidden,
   mapMode,
+  profileRefreshKey,
   onToggleMapMode,
   onMapPress,
   mapModeLabel,
@@ -102,6 +105,7 @@ export const SecurityMapView: React.FC<Props> = ({
   const [mapFailed, setMapFailed] = useState(false);
   const [resolvedMapStyle, setResolvedMapStyle] = useState<any>(MAP_STYLE_DEFAULT);
   const [usingFallbackStyle, setUsingFallbackStyle] = useState(false);
+  const [avatarUri, setAvatarUri] = useState<string | null>(null);
 
   const canUseSatellite = HAS_CONFIGURED_SATELLITE_STYLE;
   const isRTL = I18nManager.isRTL;
@@ -129,6 +133,20 @@ export const SecurityMapView: React.FC<Props> = ({
       setCameraCenter([userLocation.longitude, userLocation.latitude]);
     }
   }, [userLocation?.latitude, userLocation?.longitude]);
+
+  useEffect(() => {
+    let active = true;
+    ProfileService.getProfile()
+      .then(profile => {
+        if (!active) return;
+        const uri = typeof profile?.avatarUri === 'string' ? profile.avatarUri.trim() : '';
+        setAvatarUri(uri ? uri : null);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [profileRefreshKey]);
 
   const incidentPoints = useMemo(() => {
     const features: PointFeature[] = incidents
@@ -255,14 +273,19 @@ export const SecurityMapView: React.FC<Props> = ({
         ) : null}
 
         {userLocation ? (
-          <MapLibreGL.PointAnnotation
+          <MapLibreGL.MarkerView
             id="security-map-user"
             coordinate={[userLocation.longitude, userLocation.latitude]}
+            anchor={{ x: 0.5, y: 0.5 }}
           >
             <View style={styles.userMarker}>
-              <Icon name="account-circle" size={20} color="#0D47A1" />
+              {avatarUri ? (
+                <Image source={{ uri: avatarUri }} style={styles.userAvatar} />
+              ) : (
+                <Image source={WATERMARK_LOGO} style={styles.userLogo} resizeMode="contain" />
+              )}
             </View>
-          </MapLibreGL.PointAnnotation>
+          </MapLibreGL.MarkerView>
         ) : null}
 
         {glyphs.map(glyph => (
@@ -450,6 +473,16 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(13,71,161,0.45)',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  userAvatar: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+  },
+  userLogo: {
+    width: 18,
+    height: 18,
   },
   watermarkOverlay: {
     position: 'absolute',

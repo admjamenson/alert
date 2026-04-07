@@ -16,6 +16,10 @@ import { useTranslation } from 'react-i18next';
 
 import { WeatherIcon } from '../weather/WeatherIcon';
 import { WeatherAnimatedIcon } from '../weather/WeatherAnimatedIcon';
+import {
+  mapWeatherVisualStateToIcon,
+  resolveWeatherVisualState,
+} from '../weather/weatherVisualState';
 import { useTheme } from '../../context/ThemeContext';
 import { useSecurity } from '../../context/SecurityContext';
 import { WeatherResult, WeatherService } from '../../services/WeatherService';
@@ -38,6 +42,8 @@ type WeatherWidgetProps = {
 const WEATHER_LOAD_GUARD_MS = 9000;
 const WEATHER_AUTO_REFRESH_MS = 60 * 1000;
 const DEGREE_SYMBOL = '\u00B0';
+const HOME_WEATHER_HEIGHT_SCALE = 2 / 3;
+const HOME_WEATHER_ICON_SCALE = 0.8;
 const KNOWN_WEATHER_ICONS = new Set([
   'weather-sunny',
   'weather-night',
@@ -55,8 +61,6 @@ const KNOWN_WEATHER_ICONS = new Set([
   'weather-hurricane',
 ]);
 
-const THUNDER_PATTERN =
-  /(trov|trovo|trovao|trov[aã]o|raio|raios|relamp|rel[aâ]mp|thunder|lightning|storm|tempest)/i;
 const LIGHTNING_PATTERN = /(raio|raios|lightning|lightnings|relamp|rel[aâ]mp)/i;
 const THUNDER_WORD_PATTERN = /(trov|trovo|trovao|trov[aã]o|thunder|storm|tempest)/i;
 const SNOW_PATTERN = /(neve|snow|sleet|blizzard)/i;
@@ -218,9 +222,6 @@ const mapCanonicalSignalToWeatherPresentation = (
       return { icon: 'weather-rainy', label: t('weather_signal_rain') };
   }
 };
-
-const impliesThunderstorm = (...values: Array<string | null | undefined>) =>
-  values.some(value => THUNDER_PATTERN.test(String(value || '')));
 
 const formatPrimaryTemperature = (raw: string | number | null | undefined): string => {
   const normalized = sanitizeTemperatureLabel(raw);
@@ -600,20 +601,24 @@ export const WeatherWidget = React.memo(
   const canonicalPresentation = canonicalSignal
     ? mapCanonicalSignalToWeatherPresentation(canonicalSignal, t)
     : null;
+  const weatherVisualState = useMemo(
+    () =>
+      resolveWeatherVisualState([
+        operationalWeatherSignal || {},
+        weather.intelligenceSignal || {},
+        { icon: weather.icon, label: weather.label },
+        { label: weather.forecast },
+      ]),
+    [
+      operationalWeatherSignal,
+      weather.forecast,
+      weather.icon,
+      weather.intelligenceSignal,
+      weather.label,
+    ],
+  );
   const displayedIcon = sanitizeWeatherIconName(
-    canonicalPresentation?.icon ||
-      (impliesThunderstorm(
-        operationalWeatherSignal?.label,
-        weather.intelligenceSignal?.label,
-        weather.label,
-        weather.forecast,
-      )
-        ? 'weather-lightning-rainy'
-        : operationalWeatherSignal?.icon && operationalWeatherSignal.icon.trim()
-          ? operationalWeatherSignal.icon
-          : weather.intelligenceSignal?.icon && weather.intelligenceSignal.icon.trim()
-            ? weather.intelligenceSignal.icon
-            : weather.icon),
+    mapWeatherVisualStateToIcon(weatherVisualState),
   );
   const displayedConditionLabel = sanitizeWeatherText(
     canonicalPresentation?.label ||
@@ -649,6 +654,9 @@ export const WeatherWidget = React.memo(
     conditionLabel !== '?'
       ? conditionLabel
       : t('forecast_unavailable');
+  const summaryLine = [conditionDisplay, maxMinLabel, feelsLikeLabel]
+    .filter(item => item && item.trim().length > 0)
+    .join(' • ');
   const weatherAccessibilityLabel = t('weather_city_accessibility', {
     city: cityDisplay,
     temp: tempDisplay,
@@ -660,13 +668,15 @@ export const WeatherWidget = React.memo(
   });
   const cityAllowsTwoLines = cityDisplay.length > 20 && screenWidth >= 390;
   const cityNumberOfLines = cityAllowsTwoLines ? 2 : 1;
-  const homeIconSize =
+  const homeIconBaseSize =
     screenWidth < 360
-      ? ThemeTokens.WeatherIcon.sizes.homeCompact + 10
-      : ThemeTokens.WeatherIcon.sizes.home + 12;
+      ? ThemeTokens.WeatherIcon.sizes.homeCompact
+      : ThemeTokens.WeatherIcon.sizes.home;
+  const homeIconSize =
+    Math.round(homeIconBaseSize * HOME_WEATHER_ICON_SCALE);
   const homeIconHitArea = Math.max(
-    homeIconSize + 4,
-    ThemeTokens.WeatherIcon.sizes.hitArea + 4,
+    homeIconSize + 2,
+    Math.round(ThemeTokens.WeatherIcon.sizes.hitArea * HOME_WEATHER_HEIGHT_SCALE),
   );
   const iconLatitude = isFiniteCoordinate(securityState.location?.latitude)
     ? securityState.location.latitude
@@ -731,9 +741,15 @@ export const WeatherWidget = React.memo(
                 </Text>
               </View>
             </View>
-            <Text style={[styles.conditionText, { color: homeWeatherBarColors.textSecondaryColor }]}>{conditionDisplay}</Text>
-            {maxMinLabel ? <Text style={[styles.maxMinText, { color: homeWeatherBarColors.textSecondaryColor }]}>{maxMinLabel}</Text> : null}
-            {feelsLikeLabel ? <Text style={[styles.feelsLikeText, { color: homeWeatherBarColors.textTertiaryColor }]}>{feelsLikeLabel}</Text> : null}
+            <Text
+              style={[styles.summaryText, { color: homeWeatherBarColors.textSecondaryColor }]}
+              numberOfLines={2}
+              ellipsizeMode="tail"
+              allowFontScaling
+              maxFontSizeMultiplier={1.3}
+            >
+              {summaryLine}
+            </Text>
           </View>
         </TouchableOpacity>
       </View>
@@ -825,7 +841,7 @@ const styles = StyleSheet.create({
     borderRadius: ThemeTokens.radius.xl,
     position: 'relative',
     overflow: 'hidden',
-    minHeight: 110,
+    minHeight: 74,
     borderWidth: 1,
     ...Platform.select({
       ios: ThemeTokens.shadows.medium.ios,
@@ -834,20 +850,20 @@ const styles = StyleSheet.create({
   },
   mainTapArea: {
     paddingHorizontal: ThemeTokens.spacing.md,
-    paddingTop: ThemeTokens.spacing.xs,
-    paddingBottom: ThemeTokens.spacing.xs,
+    paddingTop: 6,
+    paddingBottom: 8,
   },
   topRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
   },
   tempBig: {
     color: '#FFF',
-    fontSize: 32,
+    fontSize: 26,
     fontWeight: '800',
     letterSpacing: -1,
-    lineHeight: 36,
+    lineHeight: 30,
     fontFamily: FONT_FAMILY,
     includeFontPadding: false,
     textAlignVertical: 'center',
@@ -864,9 +880,9 @@ const styles = StyleSheet.create({
     height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
-    transform: [{ translateY: -1 }, { scale: 1.04 }],
+    transform: [{ translateY: -4 }, { scale: 1 }],
   },
-  centerMeta: { alignItems: 'stretch', marginTop: 4 },
+  centerMeta: { alignItems: 'stretch', marginTop: 2 },
   cityRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -884,16 +900,16 @@ const styles = StyleSheet.create({
     maxWidth: '88%',
   },
   cityName: {
-    fontSize: ThemeTokens.WeatherBar.CityText.fontSize,
+    fontSize: 22,
     fontWeight: ThemeTokens.WeatherBar.CityText.fontWeight,
     letterSpacing: ThemeTokens.WeatherBar.CityText.letterSpacing,
-    lineHeight: ThemeTokens.WeatherBar.CityText.lineHeight,
+    lineHeight: 28,
     fontFamily: FONT_FAMILY,
     color: '#FFF',
     textAlign: 'center',
     includeFontPadding: false,
   },
-  conditionText: {
+  summaryText: {
     color: 'rgba(255,255,255,0.92)',
     fontSize: 14,
     fontWeight: '700',
@@ -902,24 +918,7 @@ const styles = StyleSheet.create({
     fontFamily: FONT_FAMILY,
     textAlign: 'center',
     alignSelf: 'center',
-  },
-  maxMinText: {
-    color: 'rgba(255,255,255,0.92)',
-    fontSize: 17,
-    fontWeight: '800',
-    marginTop: 2,
-    textAlign: 'center',
-    lineHeight: 21,
-    fontFamily: FONT_FAMILY,
-  },
-  feelsLikeText: {
-    color: 'rgba(255,255,255,0.82)',
-    fontSize: 14,
-    fontWeight: '700',
-    marginTop: 1,
-    textAlign: 'center',
-    lineHeight: 18,
-    fontFamily: FONT_FAMILY,
+    maxWidth: '92%',
   },
   forecastText: {
     color: 'rgba(255,255,255,0.86)',

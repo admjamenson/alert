@@ -4,6 +4,7 @@ import {
   AlertAssistantReplyReadModel,
 } from '../../domain/trust/AlertAssistant';
 import { GetAlertBrainBriefingQuery } from './GetAlertBrainBriefingQuery';
+import { MONITORING_EVENTS } from '../../constants/MonitoringEvents';
 
 type ExecuteParams = {
   question: string;
@@ -23,11 +24,62 @@ const normalizeText = (value: string) =>
 
 const hasAny = (text: string, terms: string[]) => terms.some(term => text.includes(term));
 
-const resolveIntent = (question: string): AlertAssistantIntent | 'scope' => {
+type IntentBase = Exclude<AlertAssistantIntent, 'event_detail'>;
+
+type ResolvedIntent =
+  | { type: IntentBase }
+  | { type: 'event_detail'; category: string };
+
+const EVENT_KEYWORDS: Array<{ id: string; terms: string[] }> = [
+  { id: 'earthquake', terms: ['earthquake', 'terremoto', 'sismo'] },
+  { id: 'tsunami', terms: ['tsunami', 'maremoto'] },
+  { id: 'epidemic', terms: ['epidemia', 'epidemic'] },
+  { id: 'pandemic', terms: ['pandemia', 'pandemic'] },
+  { id: 'energy_outage', terms: ['energia', 'apagao', 'apagão', 'queda de energia', 'energia eletrica'] },
+  { id: 'water_outage', terms: ['falta de agua', 'falta de água', 'water outage', 'agua'] },
+  { id: 'heat', terms: ['calor', 'heat'] },
+  { id: 'heatwave', terms: ['onda de calor', 'heatwave'] },
+  { id: 'wind', terms: ['vento', 'wind', 'vendaval'] },
+  { id: 'wind_gust_10', terms: ['rajada 10', 'rajada 10km', 'wind gust 10'] },
+  { id: 'wind_gust_50', terms: ['rajada 50', 'rajada 50km', 'wind gust 50'] },
+  { id: 'storm', terms: ['tempestade', 'storm'] },
+  { id: 'lightning', terms: ['raio', 'raios', 'lightning'] },
+  { id: 'cyclone', terms: ['ciclone', 'cyclone'] },
+  { id: 'tornado', terms: ['tornado'] },
+  { id: 'hurricane', terms: ['furacao', 'furacão', 'hurricane'] },
+  { id: 'landslide', terms: ['deslizamento', 'landslide'] },
+  { id: 'snowstorm', terms: ['nevasca', 'snowstorm'] },
+  { id: 'wildfire', terms: ['incendio florestal', 'incêndio florestal', 'wildfire'] },
+  { id: 'hail', terms: ['granizo', 'hail'] },
+  { id: 'meteor', terms: ['meteoro', 'meteor'] },
+  { id: 'fog', terms: ['neblina', 'fog'] },
+  { id: 'drought', terms: ['seca', 'seca extrema', 'drought'] },
+  { id: 'gale', terms: ['vendaval', 'gale'] },
+  { id: 'volcano', terms: ['vulcao', 'vulcão', 'volcano'] },
+  { id: 'high_tide', terms: ['mare alta', 'maré alta', 'high tide'] },
+  { id: 'sandstorm', terms: ['tempestade de areia', 'sandstorm'] },
+  { id: 'downdraft', terms: ['downdraft', 'corrente descendente'] },
+  { id: 'volcanic_cloud', terms: ['nuvem de vulcao', 'nuvem de vulcão', 'volcanic cloud'] },
+  { id: 'rogue_waves', terms: ['rogue waves', 'onda rogue', 'onda gigante'] },
+  { id: 'dust_devils', terms: ['redemoinho de poeira', 'dust devil'] },
+];
+
+const resolveEventCategory = (normalized: string): string | null => {
+  for (const entry of EVENT_KEYWORDS) {
+    if (hasAny(normalized, entry.terms)) return entry.id;
+  }
+  return null;
+};
+
+const resolveIntent = (question: string): ResolvedIntent | 'scope' => {
   const normalized = normalizeText(question);
+  const eventCategory = resolveEventCategory(normalized);
+  if (eventCategory) {
+    return { type: 'event_detail', category: eventCategory };
+  }
 
   if (hasAny(normalized, ['widget', 'widgets', 'fita', 'status local', 'rota widget'])) {
-    return 'widgets';
+    return { type: 'widgets' };
   }
   if (
     hasAny(normalized, [
@@ -45,10 +97,10 @@ const resolveIntent = (question: string): AlertAssistantIntent | 'scope' => {
       'bus',
     ])
   ) {
-    return 'route';
+    return { type: 'route' };
   }
   if (hasAny(normalized, ['sos', 'emergencia', 'panic', 'panico', 'emergency'])) {
-    return 'sos';
+    return { type: 'sos' };
   }
   if (
     hasAny(normalized, [
@@ -65,7 +117,7 @@ const resolveIntent = (question: string): AlertAssistantIntent | 'scope' => {
       'atualizado',
     ])
   ) {
-    return 'sources';
+    return { type: 'sources' };
   }
   if (
     hasAny(normalized, [
@@ -79,7 +131,7 @@ const resolveIntent = (question: string): AlertAssistantIntent | 'scope' => {
       'pii',
     ])
   ) {
-    return 'privacy';
+    return { type: 'privacy' };
   }
   if (
     hasAny(normalized, [
@@ -91,9 +143,14 @@ const resolveIntent = (question: string): AlertAssistantIntent | 'scope' => {
       'monitoring',
       'camada',
       'layer',
+      'alerta',
+      'alertas',
+      'clima',
+      'tempo',
+      'weather',
     ])
   ) {
-    return 'monitoring';
+    return { type: 'monitoring' };
   }
   if (
     hasAny(normalized, [
@@ -110,7 +167,7 @@ const resolveIntent = (question: string): AlertAssistantIntent | 'scope' => {
       'safety',
     ])
   ) {
-    return 'safety';
+    return { type: 'safety' };
   }
   return 'scope';
 };
@@ -121,6 +178,7 @@ const buildSuggestedPrompts = (t: (key: string) => string) => [
   t('assistant_prompt_route'),
   t('assistant_prompt_sos'),
   t('assistant_prompt_sources'),
+  t('assistant_prompt_monitoring'),
 ];
 
 const trustKeyByStatus = {
@@ -206,10 +264,10 @@ export const GetAlertAssistantReplyQuery = {
       };
     }
 
-    if (intent === 'safety') {
+    if (intent.type === 'safety') {
       if (params.latitude == null || params.longitude == null || !briefing.operational.snapshot) {
         return {
-          intent,
+          intent: 'safety',
           title: t('assistant_safety_title'),
           body: t('assistant_safety_no_location_body'),
           bullets: [t('assistant_safety_no_location_bullet')],
@@ -220,7 +278,7 @@ export const GetAlertAssistantReplyQuery = {
         };
       }
       return {
-        intent,
+        intent: 'safety',
         title: t('assistant_safety_title'),
         body: t('assistant_safety_body', {
           risk: riskLabel,
@@ -239,9 +297,9 @@ export const GetAlertAssistantReplyQuery = {
       };
     }
 
-    if (intent === 'widgets') {
+    if (intent.type === 'widgets') {
       return {
-        intent,
+        intent: 'widgets',
         title: t('assistant_widgets_title'),
         body: t('assistant_widgets_body'),
         bullets: [
@@ -257,9 +315,9 @@ export const GetAlertAssistantReplyQuery = {
       };
     }
 
-    if (intent === 'route') {
+    if (intent.type === 'route') {
       return {
-        intent,
+        intent: 'route',
         title: t('assistant_route_title'),
         body: t('assistant_route_body'),
         bullets: [
@@ -274,9 +332,9 @@ export const GetAlertAssistantReplyQuery = {
       };
     }
 
-    if (intent === 'sos') {
+    if (intent.type === 'sos') {
       return {
-        intent,
+        intent: 'sos',
         title: t('assistant_sos_title'),
         body: t('assistant_sos_body'),
         bullets: [
@@ -291,9 +349,9 @@ export const GetAlertAssistantReplyQuery = {
       };
     }
 
-    if (intent === 'sources') {
+    if (intent.type === 'sources') {
       return {
-        intent,
+        intent: 'sources',
         title: t('assistant_sources_title'),
         body: t('assistant_sources_body', { trust: trustLabel }),
         bullets: [
@@ -308,9 +366,9 @@ export const GetAlertAssistantReplyQuery = {
       };
     }
 
-    if (intent === 'privacy') {
+    if (intent.type === 'privacy') {
       return {
-        intent,
+        intent: 'privacy',
         title: t('assistant_privacy_title'),
         body: t('assistant_privacy_body'),
         bullets: [
@@ -325,19 +383,85 @@ export const GetAlertAssistantReplyQuery = {
       };
     }
 
-    if (intent === 'monitoring') {
+    if (intent.type === 'monitoring') {
+      const snapshot = briefing.operational.snapshot;
+      const eventLabels = MONITORING_EVENTS.map(event =>
+        t(`monitoring_event_${event.id}`),
+      ).filter(Boolean);
+      const listSample = eventLabels.slice(0, 10).join(', ');
+      const snapshotLabel = snapshot
+        ? t('assistant_monitoring_snapshot', {
+            active: snapshot.activeSituationCount,
+            monitored: snapshot.monitoredSituationCount,
+          })
+        : t('assistant_monitoring_snapshot_unavailable');
       return {
-        intent,
-        title: t('assistant_monitoring_title'),
-        body: t('assistant_monitoring_body'),
+        intent: 'monitoring',
+        title: t('assistant_monitoring_overview_title'),
+        body: t('assistant_monitoring_overview_body', {
+          summary: briefing.summary || briefing.headline || t('assistant_safety_summary_empty'),
+          risk: riskLabel,
+        }),
         bullets: [
-          t('assistant_monitoring_bullet_satellite'),
-          t('assistant_monitoring_bullet_sources'),
-          t('assistant_monitoring_bullet_map'),
+          snapshotLabel,
+          signalCountLabel,
+          sourceCountLabel,
+          t('assistant_monitoring_events_list', { list: listSample }),
         ],
         sources,
         trustLabel,
         updatedLabel,
+        suggestedPrompts,
+      };
+    }
+
+    if (intent.type === 'event_detail') {
+      const categoryBriefing = await GetAlertBrainBriefingQuery.execute({
+        latitude: params.latitude,
+        longitude: params.longitude,
+        locale: params.locale,
+        timeZone: params.timeZone,
+        force: params.force,
+        category: intent.category,
+      });
+      const eventLabel = t(`monitoring_event_${intent.category}`);
+      const eventSummary =
+        categoryBriefing.summary ||
+        categoryBriefing.headline ||
+        t('assistant_event_summary_empty', { event: eventLabel });
+      const eventSignalCountLabel = t('assistant_reply_signal_count', {
+        count: categoryBriefing.signalCount,
+      });
+      const eventSourceCountLabel = t('assistant_reply_source_count', {
+        count: categoryBriefing.sourceCount,
+      });
+      const eventTrustLabel = t(trustKeyByStatus[categoryBriefing.trustStatus]);
+      const eventUpdatedLabel = formatUpdatedLabel(
+        categoryBriefing.updatedAt,
+        params.locale,
+        params.timeZone,
+        t,
+      );
+      const eventSources = categoryBriefing.sources.slice(0, 3).map(source => ({
+        name: source.name,
+        url: source.url,
+      }));
+
+      return {
+        intent: 'event_detail',
+        title: t('assistant_event_title', { event: eventLabel }),
+        body: t('assistant_event_body', {
+          event: eventLabel,
+          summary: eventSummary,
+        }),
+        bullets: [
+          eventSignalCountLabel,
+          eventSourceCountLabel,
+          categoryBriefing.action || t('assistant_event_action_empty', { event: eventLabel }),
+        ],
+        sources: eventSources,
+        trustLabel: eventTrustLabel,
+        updatedLabel: eventUpdatedLabel,
         suggestedPrompts,
       };
     }

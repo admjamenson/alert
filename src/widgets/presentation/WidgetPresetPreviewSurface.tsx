@@ -160,6 +160,12 @@ export const WidgetPresetPreviewSurface = ({ variant, format, model, selected }:
         },
       ]}
     >
+      <LinearGradient
+        colors={['#0B1222', '#0E1B35', '#0A1020']}
+        start={{ x: 0.1, y: 0 }}
+        end={{ x: 0.9, y: 1 }}
+        style={styles.previewBackground}
+      />
       {showDefaultBrandRow ? (
         <View style={styles.brandRow}>
           <View style={styles.brandLeft}>
@@ -272,14 +278,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 12,
     justifyContent: 'space-between',
-    backgroundColor: '#07122A',
+    backgroundColor: '#0B1222',
+  },
+  previewBackground: {
+    ...StyleSheet.absoluteFillObject,
   },
   overlay: {
     ...StyleSheet.absoluteFillObject,
     borderRadius: 22,
     borderTopWidth: 1,
-    borderColor: 'rgba(255,255,255,0.16)',
-    backgroundColor: 'rgba(0,0,0,0.22)',
+    borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: 'rgba(3,6,12,0.18)',
   },
   brandRow: {
     flexDirection: 'row',
@@ -296,14 +305,14 @@ const styles = StyleSheet.create({
     height: 18,
   },
   logo: {
-    width: 16,
-    height: 16,
+    width: 18,
+    height: 18,
     borderRadius: 4,
   },
   brandText: {
     color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 15,
+    fontWeight: '600',
     fontFamily: FONT_FAMILY,
   },
   riskNowWrap: {
@@ -314,9 +323,9 @@ const styles = StyleSheet.create({
   },
   riskTitle: {
     color: '#F0F4FF',
-    fontSize: 24,
-    lineHeight: 28,
-    fontWeight: '400',
+    fontSize: 22,
+    lineHeight: 26,
+    fontWeight: '500',
     fontFamily: FONT_FAMILY,
   },
   statusPill: {
@@ -341,7 +350,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   scoreRingCore: {
-    backgroundColor: '#101C34',
+    backgroundColor: '#0F1A33',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -359,8 +368,8 @@ const styles = StyleSheet.create({
   },
   commuteRoute: {
     color: '#F0F4FF',
-    fontSize: 24,
-    lineHeight: 28,
+    fontSize: 22,
+    lineHeight: 26,
     fontFamily: FONT_FAMILY,
     textAlign: 'center',
   },
@@ -371,23 +380,23 @@ const styles = StyleSheet.create({
   },
   commuteMetricMain: {
     color: '#FFFFFF',
-    fontSize: 86,
-    lineHeight: 90,
-    fontWeight: '600',
+    fontSize: 80,
+    lineHeight: 84,
+    fontWeight: '700',
     fontFamily: FONT_FAMILY,
     fontVariant: ['tabular-nums'],
   },
   commuteMetricAccent: {
     color: '#FFFFFF',
-    fontSize: 32,
-    lineHeight: 34,
+    fontSize: 28,
+    lineHeight: 30,
     fontFamily: FONT_FAMILY,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   commuteSubtitle: {
     color: '#E4ECFA',
-    fontSize: 16,
-    lineHeight: 20,
+    fontSize: 14,
+    lineHeight: 18,
     fontWeight: '500',
     fontFamily: FONT_FAMILY,
     textAlign: 'center',
@@ -416,9 +425,9 @@ const styles = StyleSheet.create({
   },
   tickerBrandText: {
     color: '#FFFFFF',
-    fontSize: 14,
-    lineHeight: 18,
-    fontWeight: '500',
+    fontSize: 13,
+    lineHeight: 16,
+    fontWeight: '600',
     fontFamily: FONT_FAMILY,
   },
   tickerTextWrap: {
@@ -434,9 +443,9 @@ const styles = StyleSheet.create({
   },
   tickerLine: {
     color: '#FFFFFF',
-    fontSize: 24,
-    lineHeight: 28,
-    fontWeight: '400',
+    fontSize: 20,
+    lineHeight: 24,
+    fontWeight: '500',
     fontFamily: FONT_FAMILY,
     textAlign: 'center',
   },
@@ -448,10 +457,10 @@ const styles = StyleSheet.create({
   },
   cityTitle: {
     color: '#ECF3FF',
-    fontSize: 26,
-    lineHeight: 30,
+    fontSize: 22,
+    lineHeight: 26,
     textAlign: 'center',
-    fontWeight: '400',
+    fontWeight: '500',
     fontFamily: FONT_FAMILY,
   },
   cityBarsRow: {
@@ -478,7 +487,7 @@ const styles = StyleSheet.create({
   },
   citySubtitle: {
     color: '#EDF3FF',
-    fontSize: 16,
+    fontSize: 14,
     lineHeight: 18,
     fontFamily: FONT_FAMILY,
     textAlign: 'center',

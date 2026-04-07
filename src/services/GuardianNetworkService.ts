@@ -288,20 +288,20 @@ export const GuardianNetworkService = {
     senderName?: string;
     message?: string;
     guardians: Array<{ remoteId?: string; name: string }>;
-  }): Promise<void> {
+  }): Promise<{ ok: boolean }> {
     const authenticated = await ensureAnonymousAuth();
-    if (!authenticated) return;
+    if (!authenticated) return { ok: false };
 
     const me = await getLocalUserId();
     const targets = payload.guardians
       .map(g => g.remoteId)
       .filter((id): id is string => Boolean(id));
-    if (targets.length === 0) return;
+    if (targets.length === 0) return { ok: false };
 
     const baseUrl = getApiBaseUrl();
     if (baseUrl) {
       try {
-        await fetch(`${baseUrl}/api/sos`, {
+        const response = await fetch(`${baseUrl}/api/sos`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -312,6 +312,7 @@ export const GuardianNetworkService = {
             targets,
           }),
         });
+        if (response.ok) return { ok: true };
       } catch {
         // ignore backend errors
       }
@@ -333,8 +334,9 @@ export const GuardianNetworkService = {
     });
     try {
       await batch.commit();
+      return { ok: true };
     } catch {
-      // ignore
+      return { ok: false };
     }
   },
 
