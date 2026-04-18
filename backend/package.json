@@ -9,17 +9,33 @@
     "build:epidemic-registry": "node scripts/build-epidemic-registry.js",
     "verify:epidemic": "node scripts/verify-epidemic-data.js",
     "doctor:billing": "node scripts/check-billing-infra.js",
-    "test:billing": "node src/billing/runBillingChecks.js"
+    "test:runtime": "node src/config/runtime.test.js",
+    "test:billing": "node src/billing/runBillingChecks.js",
+    "test:routing": "node src/eventHub/adapters/routingOsrmAdapter.test.js && node src/services/RouteOptionsService.test.js",
+    "test:http": "node src/http/errorContract.test.js",
+    "test:ops": "node src/eventHub/fetcher.test.js && node src/eventHub/EventHubService.test.js && node src/scale/InMemoryJobQueue.test.js && node src/scale/BullMqJobQueue.test.js && node src/platform/cache/CacheStore.test.js && node src/services/SosFanoutDispatcher.test.js && node src/services/createSosFanoutQueue.test.js && node src/services/RiskFeedService.test.js",
+    "load:local": "node scripts/load-local.js",
+    "load:regional": "node scripts/load-regional.js",
+    "capacity:model": "node scripts/capacity-model.js",
+    "scale:external-smoke": "node scripts/external-infra-smoke.js",
+    "economics:model": "node scripts/unit-economics-model.js",
+    "economics:guardrail": "node scripts/economics-guardrail.js",
+    "test:economics": "node src/economics/unitEconomics.test.js && node src/economics/priceBook.test.js"
   },
   "dependencies": {
     "@msgpack/msgpack": "^3.1.3",
+    "bullmq": "^5.0.0",
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "firebase-admin": "^12.6.0",
+    "redis": "^4.7.0",
     "stripe": "^18.1.0"
   },
   "overrides": {
     "fast-xml-parser": "5.5.9",
+    "node-forge": "1.4.0",
+    "path-to-regexp": "0.1.13",
+    "protobufjs": "7.5.5",
     "qs": "6.14.2"
   }
 }

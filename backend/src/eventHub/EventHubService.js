@@ -17,9 +17,13 @@ const { fetchMeteoGdacsEvents, fetchMeteoNowcastEvents } = require('./adapters/m
 const { fetchHealthEvents } = require('./adapters/healthAdapter');
 const { fetchCommunityEvents } = require('./adapters/communityAdapter');
 const { fetchInfrastructureEvents } = require('./adapters/infrastructureAdapter');
+const { createCacheStore } = require('../platform/cache/createCacheStore');
 
 const EVENTS_CACHE = new Map();
+const INFLIGHT_EVENTS = new Map();
 const LAST_PROVIDER_STATUS = new Map();
+let CONFIGURED_EVENTS_CACHE = null;
+let CONFIGURED_EVENTS_CACHE_ERROR = null;
 
 const cacheKeyForEvents = params =>
   JSON.stringify({
@@ -31,7 +35,25 @@ const cacheKeyForEvents = params =>
     limit: Number(params.limit || 120),
   });
 
-const readEventsCache = key => {
+const getConfiguredEventsCache = () => {
+  if (CONFIGURED_EVENTS_CACHE || CONFIGURED_EVENTS_CACHE_ERROR) {
+    return CONFIGURED_EVENTS_CACHE;
+  }
+  try {
+    CONFIGURED_EVENTS_CACHE = createCacheStore({
+      name: 'event-hub',
+      prefix: process.env.ALERT_EVENT_CACHE_KEY_PREFIX || 'alert:event-hub',
+    });
+  } catch (error) {
+    CONFIGURED_EVENTS_CACHE_ERROR = error;
+    if (process.env.ALERT_REQUIRE_EXTERNAL_INFRA === 'true') {
+      throw error;
+    }
+  }
+  return CONFIGURED_EVENTS_CACHE;
+};
+
+const readMemoryEventsCache = key => {
   const row = EVENTS_CACHE.get(key);
   if (!row) return null;
   if (row.expiresAt <= Date.now()) {
@@ -41,11 +63,62 @@ const readEventsCache = key => {
   return row.value;
 };
 
-const writeEventsCache = (key, ttlMs, value) => {
+const writeMemoryEventsCache = (key, ttlMs, value) => {
   EVENTS_CACHE.set(key, {
     value,
     expiresAt: Date.now() + Math.max(5000, Number(ttlMs || 15_000)),
   });
+};
+
+const snapshotCacheStore = cacheStore => {
+  try {
+    return typeof cacheStore?.snapshot === 'function' ? cacheStore.snapshot() : null;
+  } catch (_error) {
+    return null;
+  }
+};
+
+const readEventsCache = async (key, deps = {}) => {
+  const cacheStore = deps.cacheStore || getConfiguredEventsCache();
+  if (cacheStore && typeof cacheStore.getJson === 'function') {
+    try {
+      const cached = await cacheStore.getJson(key);
+      if (cached) {
+        return {
+          value: cached,
+          source: snapshotCacheStore(cacheStore)?.driver || 'external',
+        };
+      }
+    } catch (error) {
+      if (deps.logger?.warn) {
+        deps.logger.warn('[event-hub/cache] external cache read failed', {
+          error: error?.message || String(error),
+        });
+      }
+    }
+  }
+
+  const cached = readMemoryEventsCache(key);
+  return cached ? { value: cached, source: 'memory' } : null;
+};
+
+const writeEventsCache = async (key, ttlMs, value, deps = {}) => {
+  const cacheStore = deps.cacheStore || getConfiguredEventsCache();
+  if (cacheStore && typeof cacheStore.setJson === 'function') {
+    try {
+      await cacheStore.setJson(key, value, ttlMs);
+      return snapshotCacheStore(cacheStore)?.driver || 'external';
+    } catch (error) {
+      if (deps.logger?.warn) {
+        deps.logger.warn('[event-hub/cache] external cache write failed', {
+          error: error?.message || String(error),
+        });
+      }
+    }
+  }
+
+  writeMemoryEventsCache(key, ttlMs, value);
+  return 'memory';
 };
 
 const providerForId = id => PROVIDER_REGISTRY[id] || null;
@@ -194,77 +267,106 @@ const EventHubService = {
       sosPublicOptIn,
       limit,
     });
-    const cached = readEventsCache(cacheKey);
+    const cached = await readEventsCache(cacheKey, deps);
     if (cached) {
       return {
-        ...cached,
+        ...cached.value,
         meta: {
-          ...cached.meta,
+          ...cached.value.meta,
           cacheHit: true,
+          cacheDriver: cached.source,
+          coalesced: false,
           generatedAt: nowIso(),
         },
       };
     }
 
-    const calls = selectAdapterCalls({
-      providerIds,
-      bbox,
-      since,
-      country,
-      db: deps.db,
-      sosPublicOptIn,
-    });
+    const existing = INFLIGHT_EVENTS.get(cacheKey);
+    if (existing) {
+      const payload = await existing;
+      return {
+        ...payload,
+        meta: {
+          ...payload.meta,
+          cacheHit: false,
+          cacheDriver: null,
+          coalesced: true,
+          generatedAt: nowIso(),
+        },
+      };
+    }
 
-    const settled = await Promise.allSettled(calls);
-    const events = [];
-    const providerStatuses = [];
-    let healthTop = [];
-    let resolvedCountry = country || null;
+    const request = (async () => {
+      const calls = selectAdapterCalls({
+        providerIds,
+        bbox,
+        since,
+        country,
+        db: deps.db,
+        sosPublicOptIn,
+      });
 
-    settled.forEach(item => {
-      if (item.status !== 'fulfilled') return;
-      const value = item.value || {};
-      if (Array.isArray(value.events)) {
-        events.push(...value.events);
-      }
-      if (Array.isArray(value.top3)) {
-        healthTop = value.top3;
-      }
-      if (value.countryCode && !resolvedCountry) {
-        resolvedCountry = value.countryCode;
-      }
-      if (value.status) {
-        providerStatuses.push(normalizeStatusOutput(value.status));
-        updateProviderStatus(value.status);
-      }
-    });
+      const settled = await Promise.allSettled(calls);
+      const events = [];
+      const providerStatuses = [];
+      let healthTop = [];
+      let resolvedCountry = country || null;
 
-    const filtered = filterEvents({ events, bbox, types, since });
-    const deduped = dedupeUnifiedEvents(filtered);
-    const sorted = sortByRiskAndFreshness(deduped).slice(0, limit);
-    const payload = {
-      events: sorted,
-      healthTop,
-      meta: {
-        generatedAt: nowIso(),
-        latencyMs: Date.now() - startedAt,
-        count: sorted.length,
-        cacheHit: false,
-        failClosed: true,
-        bbox: bbox || null,
-        types,
-        since: since || null,
-        country: resolvedCountry,
-      },
-      providers: providerStatuses,
-    };
+      settled.forEach(item => {
+        if (item.status !== 'fulfilled') return;
+        const value = item.value || {};
+        if (Array.isArray(value.events)) {
+          events.push(...value.events);
+        }
+        if (Array.isArray(value.top3)) {
+          healthTop = value.top3;
+        }
+        if (value.countryCode && !resolvedCountry) {
+          resolvedCountry = value.countryCode;
+        }
+        if (value.status) {
+          providerStatuses.push(normalizeStatusOutput(value.status));
+          updateProviderStatus(value.status);
+        }
+      });
 
-    const maxTtlMs = providerStatuses
-      .map(status => Number(status.cacheTTLms || 0))
-      .filter(value => value > 0)
-      .sort((a, b) => a - b)[0] || 12_000;
-    writeEventsCache(cacheKey, maxTtlMs, payload);
-    return payload;
+      const filtered = filterEvents({ events, bbox, types, since });
+      const deduped = dedupeUnifiedEvents(filtered);
+      const sorted = sortByRiskAndFreshness(deduped).slice(0, limit);
+      const payload = {
+        events: sorted,
+        healthTop,
+        meta: {
+          generatedAt: nowIso(),
+          latencyMs: Date.now() - startedAt,
+          count: sorted.length,
+          cacheHit: false,
+          cacheDriver: null,
+          coalesced: false,
+          failClosed: true,
+          bbox: bbox || null,
+          types,
+          since: since || null,
+          country: resolvedCountry,
+        },
+        providers: providerStatuses,
+      };
+
+      const maxTtlMs = providerStatuses
+        .map(status => Number(status.cacheTTLms || 0))
+        .filter(value => value > 0)
+        .sort((a, b) => a - b)[0] || 12_000;
+      const cacheDriver = await writeEventsCache(cacheKey, maxTtlMs, payload, deps);
+      payload.meta.cacheDriver = cacheDriver;
+      return payload;
+    })();
+
+    INFLIGHT_EVENTS.set(cacheKey, request);
+    try {
+      return await request;
+    } finally {
+      INFLIGHT_EVENTS.delete(cacheKey);
+    }
   },
 
   async getHealthTop(query, deps = {}) {

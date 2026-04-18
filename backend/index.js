@@ -4,12 +4,14 @@ const admin = require('firebase-admin');
 const crypto = require('crypto');
 const zlib = require('zlib');
 const { decode: decodeMsgpack } = require('@msgpack/msgpack');
+const { validateRuntimeConfig } = require('./src/config/runtime');
 const { createFirebaseState } = require('./src/bootstrap/firebaseAdmin');
-const {
-  getMetaCountries,
-  getEpidemicFeed,
-} = require('./src/services/EpidemicFeedService');
+const { resolveRequestIdentity } = require('./src/http/identity');
+const registerEntitlementRoutes = require('./src/routes/registerEntitlementRoutes');
+const registerFeedRoutes = require('./src/routes/registerFeedRoutes');
+const registerMapsRoutes = require('./src/routes/registerMapsRoutes');
 const { EventHubService } = require('./src/eventHub/EventHubService');
+const { getProviderFetchMetrics } = require('./src/eventHub/fetcher');
 const {
   bboxFromPoint,
   haversineKm,
@@ -21,6 +23,22 @@ const {
 } = require('./src/billing/registerStripeBilling');
 const registerAppleBilling = require('./src/billing/registerAppleBilling');
 const registerAppStoreNotifications = require('./src/billing/registerAppStoreNotifications');
+const {
+  buildSosPushMessage,
+  createSosFanoutDispatcher,
+} = require('./src/services/SosFanoutDispatcher');
+const {
+  createExternalSosFanoutQueue,
+} = require('./src/services/createSosFanoutQueue');
+
+const runtimeConfig = (() => {
+  try {
+    return validateRuntimeConfig();
+  } catch (error) {
+    console.error('[bootstrap/config] runtime configuration invalid', error);
+    process.exit(1);
+  }
+})();
 
 const app = express();
 app.use(cors());
@@ -44,14 +62,25 @@ const FIREBASE_OPTIONAL_ROUTE_PATTERNS = [
   /^\/$/,
   /^\/healthz$/,
   /^\/api\/me\/entitlements$/,
+  /^\/api\/v1\/meta\/countries$/,
+  /^\/api\/v1\/weather\/feed$/,
+  /^\/api\/v1\/epidemic\/feed$/,
+  /^\/api\/v1\/risk\/feed$/,
+  /^\/api\/v1\/maps\/geocode\/autocomplete$/,
+  /^\/api\/v1\/maps\/geocode\/search$/,
+  /^\/api\/v1\/maps\/geocode\/reverse$/,
+  /^\/api\/v1\/maps\/routes$/,
   /^\/api\/relay\/ping$/,
   /^\/api\/relay\/metrics$/,
   /^\/v1\/meta\/countries$/,
   /^\/v1\/epidemic\/feed$/,
+  /^\/v1\/maps\/geocode\/autocomplete$/,
+  /^\/v1\/maps\/routes$/,
   /^\/v1\/operational\/snapshot$/,
   /^\/v1\/events$/,
   /^\/v1\/health\/top$/,
   /^\/v1\/providers\/status$/,
+  /^\/v1\/ops\/summary$/,
   /^\/favicon\.ico$/,
 ];
 
@@ -101,6 +130,9 @@ const serviceAvailability = {
   stripeBilling: false,
   appleBilling: false,
   appStoreNotifications: false,
+  sosFanoutQueue: false,
+  sosFanoutQueueDriver: null,
+  sosFanoutQueueReason: null,
 };
 
 const registerServiceModule = (label, registerFn, availabilityKey, unavailableReason) => {
@@ -164,6 +196,9 @@ app.get('/healthz', (_req, res) => {
       stripeBilling: serviceAvailability.stripeBilling,
       appleBilling: serviceAvailability.appleBilling,
       appStoreNotifications: serviceAvailability.appStoreNotifications,
+      sosFanoutQueue: serviceAvailability.sosFanoutQueue,
+      sosFanoutQueueDriver: serviceAvailability.sosFanoutQueueDriver,
+      sosFanoutQueueReason: serviceAvailability.sosFanoutQueueReason,
     },
     reason: firebaseState.reason,
     generatedAt: new Date().toISOString(),
@@ -233,34 +268,60 @@ app.use((req, res, next) => {
   return next();
 });
 
+registerEntitlementRoutes(app, {
+  db,
+  config: runtimeConfig,
+  logger: console,
+});
+
+registerFeedRoutes(app, {
+  db,
+  config: runtimeConfig,
+  logger: console,
+});
+
+registerMapsRoutes(app, {
+  config: runtimeConfig,
+  logger: console,
+});
+
 const clampPercent = value => Math.max(0, Math.min(100, Number(value || 0)));
 const nowIso = () => new Date().toISOString();
 const clampUnit = value => Math.max(0, Math.min(1, Number(value || 0)));
 
-const ROLLOUT_STARLINK_CONNECT = clampPercent(
-  process.env.STARLINK_CONNECT_ROLLOUT_PERCENT || 100,
-);
-const ROLLOUT_STARLINK_TUNNEL = clampPercent(
-  process.env.STARLINK_TUNNEL_ROLLOUT_PERCENT || 0,
-);
-const ROLLOUT_STARLINK_EXCLUSIVE = clampPercent(
-  process.env.STARLINK_EXCLUSIVE_ROLLOUT_PERCENT || 100,
-);
-const PREMIUM_DEFAULT =
-  String(process.env.ALERT_PREMIUM_DEFAULT || '').toLowerCase() === 'true';
-const PREMIUM_USERS = new Set(
-  String(process.env.ALERT_PREMIUM_USERS || '')
-    .split(',')
-    .map(item => item.trim())
-    .filter(Boolean),
-);
-const GUARDIANS_CONVERSATION_ID =
-  String(process.env.GUARDIANS_CONVERSATION_ID || 'guardians-group').trim() ||
-  'guardians-group';
+const GUARDIANS_CONVERSATION_ID = runtimeConfig.guardians.conversationId;
+const RELAY_SECRET = runtimeConfig.relay.hmacSecret;
+const RELAY_TOKEN_TTL_SEC = runtimeConfig.relay.tokenTtlSec;
+const RELAY_MAX_CLOCK_SKEW_MS = runtimeConfig.relay.maxClockSkewMs;
 
-const RELAY_SECRET = process.env.RELAY_HMAC_SECRET || 'alert-relay-dev-secret';
-const RELAY_TOKEN_TTL_SEC = Number(process.env.RELAY_TOKEN_TTL_SEC || 900);
-const RELAY_MAX_CLOCK_SKEW_MS = 2 * 60 * 1000;
+const sendSosFanoutPush = payload =>
+  admin.messaging().sendEachForMulticast(buildSosPushMessage(payload));
+
+let sosFanoutQueue = null;
+try {
+  const sosQueueBootstrap = createExternalSosFanoutQueue({
+    sendMulticast: sendSosFanoutPush,
+    logger: console,
+  });
+  sosFanoutQueue = sosQueueBootstrap.queue;
+  serviceAvailability.sosFanoutQueue = Boolean(sosQueueBootstrap.enabled);
+  serviceAvailability.sosFanoutQueueDriver = sosQueueBootstrap.driver;
+  serviceAvailability.sosFanoutQueueReason = sosQueueBootstrap.reason;
+} catch (error) {
+  serviceAvailability.sosFanoutQueue = false;
+  serviceAvailability.sosFanoutQueueDriver = 'bullmq';
+  serviceAvailability.sosFanoutQueueReason = error?.message || 'queue_bootstrap_failed';
+  console.error('[sos/fanout] external queue unavailable', error);
+  if (process.env.ALERT_REQUIRE_EXTERNAL_INFRA === 'true') {
+    process.exit(1);
+  }
+}
+
+const sosFanoutDispatcher = createSosFanoutDispatcher({
+  queue: sosFanoutQueue,
+  sendInline: sendSosFanoutPush,
+  logger: console,
+});
 
 const relayRateWindow = new Map();
 const replayNonceWindow = new Map();
@@ -269,30 +330,6 @@ const relayMetrics = {
   alertsPull: { total: 0, success: 0, failed: 0, totalLatencyMs: 0 },
   chatSend: { total: 0, success: 0, failed: 0, totalLatencyMs: 0 },
   chatMessages: { total: 0, success: 0, failed: 0, totalLatencyMs: 0 },
-};
-
-const stableBucket = seed => {
-  const hash = crypto
-    .createHash('sha256')
-    .update(String(seed || ''))
-    .digest();
-  return hash.readUInt32BE(0) % 100;
-};
-
-const firestoreTimeToMillis = value => {
-  if (!value) return null;
-  if (typeof value === 'number') return value;
-  if (typeof value === 'string') {
-    const parsed = Date.parse(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  if (typeof value.toDate === 'function') {
-    return value.toDate().getTime();
-  }
-  if (typeof value.seconds === 'number') {
-    return value.seconds * 1000;
-  }
-  return null;
 };
 
 const base64Url = value =>
@@ -411,6 +448,57 @@ const decodeRelayPayload = rawBody => {
   return rawBody;
 };
 
+const normalizeRelaySosContacts = contacts =>
+  (Array.isArray(contacts) ? contacts : [])
+    .map(item => ({
+      id:
+        item && typeof item.id === 'string' && item.id.trim().length > 0
+          ? item.id.trim()
+          : '',
+      phone:
+        item && typeof item.phone === 'string' && item.phone.trim().length > 0
+          ? item.phone.trim()
+          : '',
+      name:
+        item && typeof item.name === 'string' && item.name.trim().length > 0
+          ? item.name.trim()
+          : '',
+      channel:
+        item && (item.channel === 'guardian' || item.channel === 'contact')
+          ? item.channel
+          : 'contact',
+    }))
+    .filter(item => item.id || item.phone || item.name)
+    .sort((left, right) => {
+      const a = `${left.channel}|${left.id}|${left.phone}|${left.name}`;
+      const b = `${right.channel}|${right.id}|${right.phone}|${right.name}`;
+      return a.localeCompare(b);
+    });
+
+const buildRelaySosIntegritySource = payload =>
+  JSON.stringify({
+    id: typeof payload?.id === 'string' ? payload.id : '',
+    location: {
+      latitude: Number(payload?.location?.latitude ?? 0),
+      longitude: Number(payload?.location?.longitude ?? 0),
+    },
+    contacts: normalizeRelaySosContacts(payload?.contacts),
+    userName:
+      typeof payload?.userName === 'string' ? payload.userName.trim() : '',
+    createdAt:
+      typeof payload?.createdAt === 'string' ? payload.createdAt.trim() : '',
+    priority:
+      typeof payload?.priority === 'string' && payload.priority.trim().length > 0
+        ? payload.priority.trim()
+        : 'high',
+  });
+
+const computeRelaySosIntegrityDigest = payload =>
+  crypto
+    .createHash('sha256')
+    .update(buildRelaySosIntegritySource(payload))
+    .digest('hex');
+
 const markRelayMetric = (key, ok, latencyMs) => {
   const target = relayMetrics[key];
   if (!target) return;
@@ -463,50 +551,7 @@ const relayAuthMiddleware = (req, res, next) => {
   }
 };
 
-const resolveIdentity = req => {
-  const query = req.query || {};
-  const body = req.body || {};
-  const userIdRaw =
-    query.userId ||
-    body.userId ||
-    req.headers['x-alert-user-id'] ||
-    req.headers['x-alert-device-id'];
-  const deviceIdRaw =
-    query.deviceId ||
-    body.deviceId ||
-    req.headers['x-alert-device-id'] ||
-    req.headers['x-device-id'];
-
-  const userId = String(userIdRaw || '').trim();
-  const deviceId = String(deviceIdRaw || '').trim();
-
-  return {
-    userId: userId || deviceId || `anon-${Date.now()}`,
-    deviceId: deviceId || userId || `anon-device-${Date.now()}`,
-  };
-};
-
-const fetchPremiumStatus = async userId => {
-  if (!db) {
-    return Boolean(PREMIUM_USERS.has(userId) || PREMIUM_DEFAULT);
-  }
-
-  try {
-    const entitlementDoc = await db
-      .collection('entitlements')
-      .doc(userId)
-      .get();
-    const data = entitlementDoc.exists ? entitlementDoc.data() || {} : {};
-    const plan = String(data.plan || '').toLowerCase();
-    const expiresAtRaw = firestoreTimeToMillis(data.expiresAt);
-    const notExpired = !expiresAtRaw || expiresAtRaw > Date.now();
-    const fromDoc = plan === 'premium' && notExpired;
-
-    return Boolean(fromDoc || PREMIUM_USERS.has(userId) || PREMIUM_DEFAULT);
-  } catch {
-    return Boolean(PREMIUM_USERS.has(userId) || PREMIUM_DEFAULT);
-  }
-};
+const resolveIdentity = resolveRequestIdentity;
 
 const sanitizeLimit = (value, fallback = 20, max = 50) => {
   const n = Number(value);
@@ -905,44 +950,6 @@ app.post('/api/chat/ack', async (req, res) => {
   }
 });
 
-app.get('/api/me/entitlements', async (req, res) => {
-  try {
-    const identity = resolveIdentity(req);
-    const isPremium = await fetchPremiumStatus(identity.userId);
-    const bucket = stableBucket(identity.userId);
-    const platform = String(req.query.platform || '').toLowerCase();
-    const starlinkConnectFlag = isPremium && bucket < ROLLOUT_STARLINK_CONNECT;
-    const starlinkTunnelFlag =
-      isPremium && bucket < ROLLOUT_STARLINK_TUNNEL && platform === 'android';
-    const starlinkExclusiveFlag =
-      isPremium &&
-      bucket < ROLLOUT_STARLINK_EXCLUSIVE &&
-      platform === 'android';
-
-    return res.json({
-      userId: identity.userId,
-      plan: isPremium ? 'premium' : 'free',
-      entitlements: {
-        premium: isPremium,
-      },
-      featureFlags: {
-        starlinkConnect: starlinkConnectFlag,
-        starlinkTunnelBeta: starlinkTunnelFlag,
-        starlinkExclusive: starlinkExclusiveFlag,
-      },
-      rollout: {
-        starlinkConnectPercent: ROLLOUT_STARLINK_CONNECT,
-        starlinkTunnelPercent: ROLLOUT_STARLINK_TUNNEL,
-        starlinkExclusivePercent: ROLLOUT_STARLINK_EXCLUSIVE,
-      },
-      expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
-    });
-  } catch (error) {
-    console.error('[entitlements]', error);
-    return res.status(500).json({ error: 'internal' });
-  }
-});
-
 app.post('/api/relay/token', async (req, res) => {
   try {
     const identity = resolveIdentity(req);
@@ -993,6 +1000,10 @@ app.post('/api/relay/sos', relayAuthMiddleware, async (req, res) => {
   try {
     const payload = decodeRelayPayload(req.body);
     const metadata = req.body?.metadata || {};
+    const integrity =
+      payload?.integrity && typeof payload.integrity === 'object'
+        ? payload.integrity
+        : null;
 
     if (
       !payload ||
@@ -1002,6 +1013,28 @@ app.post('/api/relay/sos', relayAuthMiddleware, async (req, res) => {
     ) {
       markRelayMetric('sos', false, Date.now() - startedAt);
       return res.status(400).json({ error: 'invalid_payload' });
+    }
+
+    let integrityRecord = null;
+    if (integrity) {
+      const alg = String(integrity.alg || '').trim().toLowerCase();
+      const version = Number(integrity.version || 0);
+      const digest = String(integrity.digest || '').trim().toLowerCase();
+      if (alg !== 'sha256' || version !== 1 || !digest) {
+        markRelayMetric('sos', false, Date.now() - startedAt);
+        return res.status(400).json({ error: 'invalid_integrity' });
+      }
+      const expectedDigest = computeRelaySosIntegrityDigest(payload);
+      if (digest !== expectedDigest) {
+        markRelayMetric('sos', false, Date.now() - startedAt);
+        return res.status(400).json({ error: 'integrity_mismatch' });
+      }
+      integrityRecord = {
+        verified: true,
+        alg,
+        version,
+        digest,
+      };
     }
 
     const docRef = db.collection('relay_sos').doc();
@@ -1018,6 +1051,7 @@ app.post('/api/relay/sos', relayAuthMiddleware, async (req, res) => {
           : 0,
         userName: String(payload.userName || ''),
         priority: String(payload.priority || 'high'),
+        integrity: integrityRecord,
       },
       transport: {
         networkType: String(metadata.networkType || 'unknown'),
@@ -1206,6 +1240,40 @@ app.get('/api/relay/metrics', (_req, res) => {
   });
 });
 
+app.get('/v1/ops/summary', (_req, res) => {
+  const normalize = item => ({
+    ...item,
+    deliveryRate:
+      item.total > 0 ? Number((item.success / item.total).toFixed(4)) : 0,
+    avgLatencyMs:
+      item.total > 0 ? Math.round(item.totalLatencyMs / item.total) : null,
+  });
+
+  return res.json({
+    ok: true,
+    generatedAt: nowIso(),
+    backend: {
+      firebaseAvailable: serviceAvailability.firebase,
+      degraded: !serviceAvailability.firebase,
+      modules: {
+        stripeBilling: serviceAvailability.stripeBilling,
+        appleBilling: serviceAvailability.appleBilling,
+        appStoreNotifications: serviceAvailability.appStoreNotifications,
+        sosFanoutQueue: serviceAvailability.sosFanoutQueue,
+        sosFanoutQueueDriver: serviceAvailability.sosFanoutQueueDriver,
+        sosFanoutQueueReason: serviceAvailability.sosFanoutQueueReason,
+      },
+    },
+    relay: {
+      sos: normalize(relayMetrics.sos),
+      alertsPull: normalize(relayMetrics.alertsPull),
+      chatSend: normalize(relayMetrics.chatSend),
+      chatMessages: normalize(relayMetrics.chatMessages),
+    },
+    providers: getProviderFetchMetrics(),
+  });
+});
+
 app.post('/api/guardian/request', async (req, res) => {
   try {
     const { fromId, fromName, fromPhone, toId, toPhone } = req.body || {};
@@ -1307,35 +1375,35 @@ app.post('/api/sos', async (req, res) => {
       const token = doc.data()?.fcmToken;
       if (token) tokens.push(token);
     }
+    let fanoutResult = {
+      mode: 'none',
+      queued: false,
+      sentInline: false,
+      tokenCount: 0,
+    };
     if (tokens.length > 0) {
-      await admin.messaging().sendEachForMulticast({
+      fanoutResult = await sosFanoutDispatcher.dispatch({
+        fromId,
+        fromName: fromName || 'Guardiao',
+        message: message || '',
+        location: location || null,
+        targets,
         tokens,
-        data: {
-          type: 'sos',
-          senderName: fromName || 'Guardiao',
-          message: message || '',
-          location: location ? JSON.stringify(location) : '',
-          timestamp: now,
-        },
-        notification: {
-          title: 'SOS Alert',
-          body: `${fromName || 'Guardiao'} solicitou ajuda agora.`,
-        },
-        android: {
-          notification: {
-            channelId: 'alert_sos_channel',
-            sound: 'alert_sos',
-          },
-        },
-        apns: {
-          payload: {
-            aps: { sound: 'alert_sos.wav' },
-          },
-        },
+        timestamp: now,
       });
     }
 
-    return res.json({ ok: true });
+    return res.json({
+      ok: true,
+      fanout: {
+        mode: fanoutResult.mode,
+        queued: fanoutResult.queued,
+        deduped: Boolean(fanoutResult.deduped),
+        sentInline: fanoutResult.sentInline,
+        jobId: fanoutResult.jobId || null,
+        tokenCount: fanoutResult.tokenCount,
+      },
+    });
   } catch (e) {
     console.error(e);
     return res.status(500).json({ error: 'internal' });
@@ -1406,41 +1474,6 @@ app.post('/api/checkin', async (req, res) => {
     }
 
     return res.json({ ok: true });
-  } catch (e) {
-    console.error(e);
-    return res.status(500).json({ error: 'internal' });
-  }
-});
-
-app.get('/v1/meta/countries', (_req, res) => {
-  try {
-    const payload = getMetaCountries();
-    return res.json(payload);
-  } catch (e) {
-    console.error(e);
-    return res.status(500).json({ error: 'internal' });
-  }
-});
-
-app.get('/v1/epidemic/feed', async (req, res) => {
-  try {
-    const { country, admin1, city, disease, metric, window, normalize } =
-      req.query || {};
-    if (!country || !/^[A-Z]{2}$/.test(String(country))) {
-      return res
-        .status(400)
-        .json({ error: 'country must be ISO 3166-1 alpha-2' });
-    }
-    const payload = await getEpidemicFeed({
-      country: String(country),
-      admin1: admin1 ? String(admin1) : '',
-      city: city ? String(city) : '',
-      disease: disease ? String(disease) : 'covid19',
-      metric: metric ? String(metric) : 'cases',
-      window: window ? String(window) : '7d',
-      normalize: normalize ? String(normalize) : 'count',
-    });
-    return res.json(payload);
   } catch (e) {
     console.error(e);
     return res.status(500).json({ error: 'internal' });
@@ -2448,8 +2481,8 @@ app.get('/v1/providers/status', (_req, res) => {
   }
 });
 
-const port = process.env.PORT || 5005;
-const host = '0.0.0.0';
+const port = runtimeConfig.server.port;
+const host = runtimeConfig.server.host;
 const server = app.listen(port, host, () => {
   console.log(`Alert backend running on ${host}:${port}`);
 });
