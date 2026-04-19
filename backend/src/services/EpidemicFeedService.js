@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const http = require('http');
+const { getRuntimeConfig } = require('../config/runtime');
 
 const DATA_DIR = path.join(__dirname, '..', '..', 'data');
 const ISO_DIR = path.join(DATA_DIR, 'iso3166');
@@ -19,10 +20,6 @@ const DATA_USER_AGENT = 'AlertApp/1.0 (contact: support@alertapp.com)';
 const NY_FLU_RESOURCE_URL = 'https://health.data.ny.gov/resource/jr8b-6gh6.json';
 const CA_RV_RESOURCE_ID = '00a147ba-0410-4699-9e34-fd18bbb7017d';
 const CA_RV_API_BASE = 'https://data.chhs.ca.gov/api/3/action/datastore_search';
-
-const NOTIFICA_BASE_URL = 'https://notifica-prd-es.saude.gov.br';
-const NOTIFICA_BASIC = 'user-public-notificacoes:Za4qNXdyQNSa9YaA';
-const NOTIFICA_AUTH_HEADER = `Basic ${Buffer.from(NOTIFICA_BASIC, 'utf8').toString('base64')}`;
 
 const BRAZIL_UF_BY_STATE_KEY = {
   acre: 'ac',
@@ -620,12 +617,28 @@ const buildBrazilQuery = params => {
   return { bool: { filter: filters } };
 };
 
-const notificaFetchCount = async (index, query) => {
+const getNotificaConfig = config => {
+  const runtimeConfig = config || getRuntimeConfig();
+  const basicAuth = String(runtimeConfig?.epidemic?.notificaBasicAuth || '').trim();
+  if (!basicAuth) {
+    return null;
+  }
+  return {
+    baseUrl: String(runtimeConfig?.epidemic?.notificaBaseUrl || '').trim(),
+    authHeader: `Basic ${Buffer.from(basicAuth, 'utf8').toString('base64')}`,
+  };
+};
+
+const notificaFetchCount = async (index, query, config) => {
+  const providerConfig = getNotificaConfig(config);
+  if (!providerConfig?.baseUrl || !providerConfig?.authHeader) {
+    return null;
+  }
   try {
-    const json = await fetchJson(`${NOTIFICA_BASE_URL}/${index}/_count`, {
+    const json = await fetchJson(`${providerConfig.baseUrl}/${index}/_count`, {
       method: 'POST',
       headers: {
-        Authorization: NOTIFICA_AUTH_HEADER,
+        Authorization: providerConfig.authHeader,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ query }),
@@ -636,7 +649,7 @@ const notificaFetchCount = async (index, query) => {
   }
 };
 
-const buildBrazilFeed = async ctx => {
+const buildBrazilFeed = async (ctx, config) => {
   const fetchedAt = new Date();
   const end = fetchedAt;
   const asOf = end.toISOString();
@@ -648,29 +661,45 @@ const buildBrazilFeed = async ctx => {
   const stateName = ctx.admin1 || null;
   const municipalName = ctx.city || null;
 
+  if (!getNotificaConfig(config)) {
+    return buildUnavailable(ctx, 'missing_env_epidemic_br_notifica_basic_auth');
+  }
+
   const countryCases = await notificaFetchCount(
     nationalIndex,
     buildBrazilQuery({ window: ctx.window, end, kind: 'cases' }),
+    config,
   );
   const countryDeaths = await notificaFetchCount(
     nationalIndex,
     buildBrazilQuery({ window: ctx.window, end, kind: 'deaths' }),
+    config,
   );
 
   const stateCases = stateIndex
-    ? await notificaFetchCount(stateIndex, buildBrazilQuery({ window: ctx.window, end, kind: 'cases' }))
+    ? await notificaFetchCount(
+        stateIndex,
+        buildBrazilQuery({ window: ctx.window, end, kind: 'cases' }),
+        config,
+      )
     : stateName
       ? await notificaFetchCount(
           nationalIndex,
           buildBrazilQuery({ window: ctx.window, end, stateName, kind: 'cases' }),
+          config,
         )
       : null;
   const stateDeaths = stateIndex
-    ? await notificaFetchCount(stateIndex, buildBrazilQuery({ window: ctx.window, end, kind: 'deaths' }))
+    ? await notificaFetchCount(
+        stateIndex,
+        buildBrazilQuery({ window: ctx.window, end, kind: 'deaths' }),
+        config,
+      )
     : stateName
       ? await notificaFetchCount(
           nationalIndex,
           buildBrazilQuery({ window: ctx.window, end, stateName, kind: 'deaths' }),
+          config,
         )
       : null;
 
@@ -679,11 +708,13 @@ const buildBrazilFeed = async ctx => {
       ? await notificaFetchCount(
           stateIndex,
           buildBrazilQuery({ window: ctx.window, end, municipalName, kind: 'cases' }),
+          config,
         )
       : stateName && municipalName
         ? await notificaFetchCount(
             nationalIndex,
             buildBrazilQuery({ window: ctx.window, end, stateName, municipalName, kind: 'cases' }),
+            config,
           )
         : null;
 
@@ -692,11 +723,13 @@ const buildBrazilFeed = async ctx => {
       ? await notificaFetchCount(
           stateIndex,
           buildBrazilQuery({ window: ctx.window, end, municipalName, kind: 'deaths' }),
+          config,
         )
       : stateName && municipalName
         ? await notificaFetchCount(
             nationalIndex,
             buildBrazilQuery({ window: ctx.window, end, stateName, municipalName, kind: 'deaths' }),
+            config,
           )
         : null;
 
@@ -963,7 +996,8 @@ const getMetaCountries = () => {
   };
 };
 
-const getEpidemicFeed = async params => {
+const getEpidemicFeed = async (params, options = {}) => {
+  const config = options.config || getRuntimeConfig();
   const ctx = buildContext(params);
   if (!/^[A-Z]{2}$/.test(ctx.country)) {
     return buildUnavailable(ctx, 'invalid_country');
@@ -983,7 +1017,7 @@ const getEpidemicFeed = async params => {
         sources?.subnational?.some(item => item.enabled) ||
         sources?.municipal?.some(item => item.enabled);
       if (hasBrConnector) {
-        const brFeed = await buildBrazilFeed(ctx);
+        const brFeed = await buildBrazilFeed(ctx, config);
         if (brFeed.available) return validateEpidemicFeed(brFeed);
       }
     }
