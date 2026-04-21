@@ -19,10 +19,22 @@ const MODE_TO_SPEED_KMH = {
 
 const normalizeMode = value => {
   const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'car' || normalized === 'drive' || normalized === 'driving') {
+    return 'car';
+  }
   if (normalized === 'bus') return 'bus';
   if (normalized === 'motorcycle') return 'motorcycle';
-  if (normalized === 'bike') return 'bike';
-  if (normalized === 'walk') return 'walk';
+  if (normalized === 'bike' || normalized === 'bicycle' || normalized === 'cycling') {
+    return 'bike';
+  }
+  if (
+    normalized === 'walk' ||
+    normalized === 'walking' ||
+    normalized === 'pedestrian' ||
+    normalized === 'foot'
+  ) {
+    return 'walk';
+  }
   return 'car';
 };
 
@@ -76,6 +88,7 @@ const buildProviderSnapshot = payload => ({
   id: String(payload?.providerId || 'osrm'),
   available: Boolean(payload?.ok),
   degraded: Boolean(!payload?.ok || payload?.degraded),
+  stale: Boolean(payload?.stale),
   reasonCode: payload?.reasonCode || payload?.error || null,
   retryable: Boolean(payload?.retryable),
   circuitState: String(payload?.meta?.circuitState || 'closed'),
@@ -132,11 +145,13 @@ const buildSuccessPayload = providerPayload => ({
   degraded: Boolean(providerPayload?.degraded),
   reasonCode: providerPayload?.reasonCode || null,
   retryable: Boolean(providerPayload?.retryable),
-  fallbackUsed: false,
+  fallbackUsed: Boolean(providerPayload?.stale),
   routeMode: ROUTE_MODE_PROVIDER,
   precision: PRECISION_HIGH,
-  providerAvailable: true,
-  advisory: null,
+  providerAvailable: !providerPayload?.stale,
+  advisory: providerPayload?.stale
+    ? buildAdvisory('route_advisory_stale_provider_snapshot')
+    : null,
   routes: Array.isArray(providerPayload?.routes) ? providerPayload.routes : [],
   source: SOURCE_NAME,
   updatedAt: providerPayload?.updatedAt || nowIso(),

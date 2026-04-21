@@ -15,6 +15,58 @@ const MAX_FAILURE_RATE = Math.max(
   Math.min(1, Number(process.env.ALERT_LOAD_MAX_FAILURE_RATE || 0.05)),
 );
 
+const parseBaseUrl = value => {
+  try {
+    return new URL(value);
+  } catch (_error) {
+    return null;
+  }
+};
+
+const isLoopbackHostname = hostname =>
+  ['127.0.0.1', 'localhost', '::1'].includes(
+    String(hostname || '').toLowerCase(),
+  );
+
+const BASE_URL_OBJECT = parseBaseUrl(BASE_URL);
+const BASE_URL_SCOPE =
+  BASE_URL_OBJECT && isLoopbackHostname(BASE_URL_OBJECT.hostname)
+    ? 'local'
+    : 'remote';
+
+const resolveExternalInfraClassification = () => {
+  const explicit = String(
+    process.env.ALERT_LOAD_EXTERNAL_INFRA_CLASSIFICATION || '',
+  ).trim();
+  if (explicit) return explicit;
+  if (BASE_URL_SCOPE === 'remote') {
+    return 'remote_target_http_only';
+  }
+  return process.env.ALERT_REDIS_URL
+    ? 'implemented_not_proven_here'
+    : 'blocked_by_missing_external_infra';
+};
+
+const buildProofClassification = () => {
+  if (BASE_URL_SCOPE === 'remote') {
+    return {
+      localBackendLoad: 'not_run_in_this_invocation',
+      remoteStagingHttpLoad: 'proven',
+      multiEndpointHotPathMix: 'proven_against_remote_http_target',
+      distributedInternetLoad: 'not_proven_here',
+      multiRegionRuntime: 'not_proven_here_remote_single_origin',
+    };
+  }
+
+  return {
+    localBackendLoad: 'proven',
+    remoteStagingHttpLoad: 'not_run_in_this_invocation',
+    multiEndpointHotPathMix: 'proven_locally',
+    distributedInternetLoad: 'not_proven_here',
+    multiRegionRuntime: 'modeled_requires_multi_region',
+  };
+};
+
 const REGIONS = [
   {
     id: 'sa-east-1-sao-paulo',
@@ -130,6 +182,15 @@ const endpointCatalog = [
   },
 ];
 
+const CRITICAL_ENDPOINT_NAMES = new Set([
+  'ops_summary',
+  'events_hot_path',
+  'risk_feed',
+  'weather_feed',
+  'maps_routes',
+  'provider_pressure_events',
+]);
+
 const percentile = (values, p) => {
   if (values.length === 0) return null;
   const sorted = values.slice().sort((a, b) => a - b);
@@ -188,6 +249,15 @@ const summarizeBy = (rows, key) =>
       summarize(rows.filter(row => row[key] === value)),
     ]),
   );
+
+const evaluateCriticalEndpoints = byEndpoint =>
+  Object.entries(byEndpoint)
+    .filter(([name]) => CRITICAL_ENDPOINT_NAMES.has(name))
+    .map(([name, summary]) => ({
+      name,
+      failureRate: summary.failureRate,
+      withinBudget: summary.failureRate <= MAX_FAILURE_RATE,
+    }));
 
 const requestOnce = async index => {
   const region = pickRegion(index);
@@ -251,6 +321,18 @@ const main = async () => {
 
   const durationSec = Math.max(0.001, (performance.now() - startedAt) / 1000);
   const overall = summarize(results);
+  const byEndpoint = summarizeBy(results, 'endpoint');
+  const byRegion = summarizeBy(results, 'region');
+  const hotPaths = summarize(results.filter(row => row.hotPath));
+  const providerPressure = summarize(results.filter(row => row.providerPressure));
+  const criticalEndpoints = evaluateCriticalEndpoints(byEndpoint);
+  const endpointsOverBudget = criticalEndpoints.filter(
+    endpoint => !endpoint.withinBudget,
+  );
+  const hotPathsWithinBudget = hotPaths.failureRate <= MAX_FAILURE_RATE;
+  const providerPressureWithinBudget =
+    providerPressure.failureRate <= MAX_FAILURE_RATE;
+  const overallWithinBudget = overall.failureRate <= MAX_FAILURE_RATE;
   const output = {
     generatedAt: new Date().toISOString(),
     scenario: SCENARIO,
@@ -261,28 +343,34 @@ const main = async () => {
     durationSec: round(durationSec),
     rps: round(results.length / durationSec),
     regions: REGIONS.map(region => region.id),
+    target: {
+      scope: BASE_URL_SCOPE,
+      hostname: BASE_URL_OBJECT?.hostname || null,
+    },
     externalInfra: {
       redisUrlConfigured: Boolean(process.env.ALERT_REDIS_URL),
       jobQueueDriver: process.env.ALERT_JOB_QUEUE_DRIVER || 'memory',
       cacheDriver: process.env.ALERT_CACHE_DRIVER || 'memory',
-      classification: process.env.ALERT_REDIS_URL
-        ? 'implemented_not_proven_here'
-        : 'blocked_by_missing_external_infra',
+      classification: resolveExternalInfraClassification(),
     },
-    proofClassification: {
-      localBackendLoad: 'proven',
-      multiEndpointHotPathMix: 'proven_locally',
-      distributedInternetLoad: 'not_proven_here',
-      multiRegionRuntime: 'modeled_requires_multi_region',
-    },
+    proofClassification: buildProofClassification(),
     overall,
-    byEndpoint: summarizeBy(results, 'endpoint'),
-    byRegion: summarizeBy(results, 'region'),
-    hotPaths: summarize(results.filter(row => row.hotPath)),
-    providerPressure: summarize(results.filter(row => row.providerPressure)),
+    byEndpoint,
+    byRegion,
+    hotPaths,
+    providerPressure,
     failureBudget: {
       maxFailureRate: MAX_FAILURE_RATE,
-      withinBudget: overall.failureRate <= MAX_FAILURE_RATE,
+      overallWithinBudget,
+      hotPathsWithinBudget,
+      providerPressureWithinBudget,
+      criticalEndpoints,
+      endpointsOverBudget,
+      withinBudget:
+        overallWithinBudget &&
+        hotPathsWithinBudget &&
+        providerPressureWithinBudget &&
+        endpointsOverBudget.length === 0,
     },
   };
 

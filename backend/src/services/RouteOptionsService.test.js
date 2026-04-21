@@ -140,3 +140,61 @@ test('route options service rejects invalid coordinates without fallback noise',
   assert.equal(payload.advisory?.code, 'route_advisory_unavailable');
   assert.equal(payload.routes.length, 0);
 });
+
+test('route options service preserves walking alias and marks stale provider snapshot as degraded provider route', async () => {
+  const payload = await getRouteOptionsSnapshot(
+    {
+      fromLat: -3.73,
+      fromLon: -38.52,
+      toLat: -3.74,
+      toLon: -38.5,
+      transportMode: 'walking',
+    },
+    {
+      logger: silentLogger,
+      config: {
+        weather: { userAgent: 'AlertBackend/Tests' },
+        routing: { timeoutMs: 2600 },
+      },
+      routingProvider: async () => ({
+        ok: true,
+        degraded: true,
+        stale: true,
+        reasonCode: 'routing_provider_stale_snapshot',
+        retryable: true,
+        routes: [
+          {
+            id: 'provider-route',
+            title: 'Fastest',
+            distanceMeters: 1800,
+            durationSec: 240,
+            geometry: [
+              [-38.52, -3.73],
+              [-38.5, -3.74],
+            ],
+            trafficLevel: 'unknown',
+          },
+        ],
+        updatedAt: '2026-04-21T18:00:00.000Z',
+        providerId: 'osrm',
+        transportMode: 'walking',
+        meta: {
+          circuitState: 'open',
+          attempts: 1,
+          cacheHit: true,
+          latencyMs: 1500,
+          timeoutMs: 1400,
+        },
+      }),
+    },
+  );
+
+  assert.equal(payload.available, true);
+  assert.equal(payload.routeMode, 'provider');
+  assert.equal(payload.transportMode, 'walk');
+  assert.equal(payload.degraded, true);
+  assert.equal(payload.fallbackUsed, true);
+  assert.equal(payload.providerAvailable, false);
+  assert.equal(payload.advisory?.code, 'route_advisory_stale_provider_snapshot');
+  assert.equal(payload.provider.stale, true);
+});
