@@ -116,24 +116,40 @@ const buildRuntimeConfig = (env = process.env) => ({
     ),
     timeoutMs: Math.max(
       900,
-      readNumberEnv('ROUTING_PROVIDER_TIMEOUT_MS', 2600, env),
+      readNumberEnv('ROUTING_PROVIDER_TIMEOUT_MS', 1400, env),
     ),
-    retries: Math.max(0, readNumberEnv('ROUTING_PROVIDER_RETRIES', 1, env)),
+    retries: Math.max(0, readNumberEnv('ROUTING_PROVIDER_RETRIES', 0, env)),
     retryDelayMs: Math.max(
       80,
-      readNumberEnv('ROUTING_PROVIDER_RETRY_DELAY_MS', 180, env),
+      readNumberEnv('ROUTING_PROVIDER_RETRY_DELAY_MS', 120, env),
+    ),
+    maxTotalWaitMs: Math.max(
+      1_000,
+      readNumberEnv('ROUTING_PROVIDER_MAX_TOTAL_WAIT_MS', 1_600, env),
     ),
     cooldownMs: Math.max(
       5_000,
-      readNumberEnv('ROUTING_PROVIDER_COOLDOWN_MS', 45_000, env),
+      readNumberEnv('ROUTING_PROVIDER_COOLDOWN_MS', 30_000, env),
     ),
     failureThreshold: Math.max(
       2,
-      readNumberEnv('ROUTING_PROVIDER_FAILURE_THRESHOLD', 3, env),
+      readNumberEnv('ROUTING_PROVIDER_FAILURE_THRESHOLD', 2, env),
+    ),
+    maxConcurrentRequests: Math.max(
+      1,
+      readNumberEnv('ROUTING_PROVIDER_MAX_CONCURRENT_REQUESTS', 2, env),
     ),
     cacheTtlMs: Math.max(
       30_000,
-      readNumberEnv('ROUTING_PROVIDER_CACHE_TTL_MS', 2 * 60 * 1000, env),
+      readNumberEnv('ROUTING_PROVIDER_CACHE_TTL_MS', 5 * 60 * 1000, env),
+    ),
+    staleRouteTtlMs: Math.max(
+      60_000,
+      readNumberEnv('ROUTING_PROVIDER_STALE_ROUTE_TTL_MS', 15 * 60 * 1000, env),
+    ),
+    staleRouteMaxEntries: Math.max(
+      100,
+      readNumberEnv('ROUTING_PROVIDER_STALE_ROUTE_MAX_ENTRIES', 1000, env),
     ),
     maxPerMinute: Math.max(
       30,

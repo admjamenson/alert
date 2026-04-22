@@ -198,3 +198,47 @@ test('route options service preserves walking alias and marks stale provider sna
   assert.equal(payload.advisory?.code, 'route_advisory_stale_provider_snapshot');
   assert.equal(payload.provider.stale, true);
 });
+
+test('route options service uses fast estimated fallback when the route provider is saturated', async () => {
+  const payload = await getRouteOptionsSnapshot(
+    {
+      fromLat: -3.73,
+      fromLon: -38.52,
+      toLat: -3.74,
+      toLon: -38.5,
+      transportMode: 'walking',
+    },
+    {
+      logger: silentLogger,
+      config: {
+        weather: { userAgent: 'AlertBackend/Tests' },
+        routing: { timeoutMs: 1400 },
+      },
+      routingProvider: async () => ({
+        ok: false,
+        degraded: true,
+        reasonCode: 'routing_provider_saturated',
+        retryable: true,
+        routes: [],
+        updatedAt: '2026-04-21T18:00:00.000Z',
+        providerId: 'osrm',
+        transportMode: 'walking',
+        meta: {
+          circuitState: 'saturated',
+          attempts: 0,
+          cacheHit: false,
+          latencyMs: 0,
+          timeoutMs: 1400,
+        },
+      }),
+    },
+  );
+
+  assert.equal(payload.available, true);
+  assert.equal(payload.routeMode, 'estimated_straight_line');
+  assert.equal(payload.transportMode, 'walk');
+  assert.equal(payload.degraded, true);
+  assert.equal(payload.fallbackUsed, true);
+  assert.equal(payload.providerAvailable, false);
+  assert.equal(payload.reasonCode, 'routing_provider_saturated');
+});

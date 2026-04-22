@@ -14,6 +14,14 @@ const MAX_FAILURE_RATE = Math.max(
   0,
   Math.min(1, Number(process.env.ALERT_LOAD_MAX_FAILURE_RATE || 0.05)),
 );
+const MAPS_ROUTES_P95_MAX_MS = Math.max(
+  500,
+  Number(process.env.ALERT_LOAD_MAPS_ROUTES_P95_MAX_MS || 1800),
+);
+const MAPS_ROUTES_DEGRADED_RATE_MAX = Math.max(
+  0,
+  Math.min(1, Number(process.env.ALERT_LOAD_MAPS_ROUTES_DEGRADED_RATE_MAX || 0.5)),
+);
 
 const parseBaseUrl = value => {
   try {
@@ -191,6 +199,13 @@ const CRITICAL_ENDPOINT_NAMES = new Set([
   'provider_pressure_events',
 ]);
 
+const ENDPOINT_LATENCY_BUDGETS = {
+  maps_routes: {
+    p95Ms: MAPS_ROUTES_P95_MAX_MS,
+    degradedRateMax: MAPS_ROUTES_DEGRADED_RATE_MAX,
+  },
+};
+
 const percentile = (values, p) => {
   if (values.length === 0) return null;
   const sorted = values.slice().sort((a, b) => a - b);
@@ -221,6 +236,8 @@ const summarize = rows => {
   const latencies = rows.map(row => row.durationMs);
   const ok = rows.filter(row => row.ok).length;
   const failed = rows.length - ok;
+  const degraded = rows.filter(row => row.degraded).length;
+  const fallbackUsed = rows.filter(row => row.fallbackUsed).length;
   const statuses = rows.reduce((acc, row) => {
     const key = String(row.status);
     acc[key] = (acc[key] || 0) + 1;
@@ -232,6 +249,9 @@ const summarize = rows => {
     ok,
     failed,
     failureRate: rows.length > 0 ? round(failed / rows.length) : 0,
+    degraded,
+    degradedRate: rows.length > 0 ? round(degraded / rows.length) : 0,
+    fallbackUsed,
     statuses,
     latencyMs: {
       p50: percentile(latencies, 50),
@@ -253,11 +273,34 @@ const summarizeBy = (rows, key) =>
 const evaluateCriticalEndpoints = byEndpoint =>
   Object.entries(byEndpoint)
     .filter(([name]) => CRITICAL_ENDPOINT_NAMES.has(name))
-    .map(([name, summary]) => ({
-      name,
-      failureRate: summary.failureRate,
-      withinBudget: summary.failureRate <= MAX_FAILURE_RATE,
-    }));
+    .map(([name, summary]) => {
+      const budget = ENDPOINT_LATENCY_BUDGETS[name] || {};
+      const p95Ms = summary?.latencyMs?.p95;
+      const degradedRate = Number(summary?.degradedRate || 0);
+      const withinLatencyBudget =
+        !Number.isFinite(budget.p95Ms) || !Number.isFinite(p95Ms)
+          ? true
+          : p95Ms <= budget.p95Ms;
+      const withinDegradedBudget =
+        !Number.isFinite(budget.degradedRateMax)
+          ? true
+          : degradedRate <= budget.degradedRateMax;
+      return {
+        name,
+        failureRate: summary.failureRate,
+        degradedRate,
+        p95Ms,
+        p95BudgetMs: budget.p95Ms ?? null,
+        degradedRateBudget: budget.degradedRateMax ?? null,
+        withinFailureBudget: summary.failureRate <= MAX_FAILURE_RATE,
+        withinLatencyBudget,
+        withinDegradedBudget,
+        withinBudget:
+          summary.failureRate <= MAX_FAILURE_RATE &&
+          withinLatencyBudget &&
+          withinDegradedBudget,
+      };
+    });
 
 const requestOnce = async index => {
   const region = pickRegion(index);
@@ -276,7 +319,13 @@ const requestOnce = async index => {
         'x-alert-load-scenario': SCENARIO,
       },
     });
-    await res.arrayBuffer();
+    const contentType = String(res.headers.get('content-type') || '').toLowerCase();
+    let payload = null;
+    if (contentType.includes('application/json')) {
+      payload = await res.json();
+    } else {
+      await res.arrayBuffer();
+    }
     return {
       ok: res.ok,
       status: res.status,
@@ -285,6 +334,10 @@ const requestOnce = async index => {
       region: region.id,
       hotPath: endpoint.hotPath,
       providerPressure: endpoint.providerPressure,
+      degraded: Boolean(payload?.degraded),
+      fallbackUsed: Boolean(payload?.fallbackUsed),
+      routeMode: payload?.routeMode || null,
+      providerReasonCode: payload?.provider?.reasonCode || payload?.reasonCode || null,
     };
   } catch (error) {
     return {
@@ -295,6 +348,8 @@ const requestOnce = async index => {
       region: region.id,
       hotPath: endpoint.hotPath,
       providerPressure: endpoint.providerPressure,
+      degraded: false,
+      fallbackUsed: false,
       error: error?.name || 'request_error',
     };
   } finally {

@@ -184,6 +184,7 @@ const ESTIMATED_ROUTE_REASON_CODES = new Set([
   'routing_provider_unavailable',
   'routing_provider_rate_limited',
   'routing_provider_circuit_open',
+  'routing_provider_saturated',
 ]);
 
 const logDegradedRouting = (logger, payload) => {

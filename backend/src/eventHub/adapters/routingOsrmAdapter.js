@@ -2,11 +2,15 @@ const { fetchJsonWithRetry } = require('../fetcher');
 
 const ROUTING_PROVIDER_ID = 'osrm';
 const DEFAULT_ROUTE_BASE_URL = 'https://router.project-osrm.org/route/v1';
-const DEFAULT_FAILURE_THRESHOLD = 3;
-const DEFAULT_COOLDOWN_MS = 45_000;
-const DEFAULT_MAX_TOTAL_WAIT_MS = 3_000;
-const DEFAULT_STALE_ROUTE_TTL_MS = 10 * 60 * 1000;
-const DEFAULT_STALE_ROUTE_MAX_ENTRIES = 500;
+const DEFAULT_FAILURE_THRESHOLD = 2;
+const DEFAULT_COOLDOWN_MS = 30_000;
+const DEFAULT_MAX_TOTAL_WAIT_MS = 1_600;
+const DEFAULT_STALE_ROUTE_TTL_MS = 15 * 60 * 1000;
+const DEFAULT_STALE_ROUTE_MAX_ENTRIES = 1000;
+const DEFAULT_MAX_CONCURRENT_REQUESTS = 2;
+const DEFAULT_TIMEOUT_MS = 1_400;
+const DEFAULT_RETRY_DELAY_MS = 120;
+const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000;
 
 const MODE_TO_PROFILE = {
   car: 'driving',
@@ -21,6 +25,7 @@ const providerState = {
   openUntil: 0,
   lastReasonCode: null,
   lastFailureAt: null,
+  activeRequests: 0,
 };
 const STALE_ROUTE_CACHE = new Map();
 
@@ -79,6 +84,7 @@ const resetCircuit = () => {
   providerState.openUntil = 0;
   providerState.lastReasonCode = null;
   providerState.lastFailureAt = null;
+  providerState.activeRequests = 0;
 };
 
 const buildMeta = params => ({
@@ -193,6 +199,15 @@ const readStaleRouteMaxEntries = config =>
     ),
   );
 
+const readMaxConcurrentRequests = config =>
+  Math.max(
+    1,
+    Number(
+      config?.routing?.maxConcurrentRequests ||
+        DEFAULT_MAX_CONCURRENT_REQUESTS,
+    ),
+  );
+
 const buildRouteCacheKey = ({
   mode,
   originLat,
@@ -234,6 +249,34 @@ const readStaleRouteSnapshot = cacheKey => {
   }
   return row.payload;
 };
+
+const buildStaleSnapshotResponse = ({
+  staleSnapshot,
+  mode,
+  circuitState,
+  attempts = 0,
+  latencyMs = 0,
+  timeoutMs = 0,
+}) => ({
+  ok: true,
+  status: 200,
+  error: null,
+  reasonCode: 'routing_provider_stale_snapshot',
+  retryable: true,
+  degraded: true,
+  stale: true,
+  routes: staleSnapshot.routes,
+  updatedAt: staleSnapshot.updatedAt || new Date().toISOString(),
+  providerId: ROUTING_PROVIDER_ID,
+  transportMode: mode,
+  meta: buildMeta({
+    circuitState,
+    attempts,
+    cacheHit: true,
+    latencyMs,
+    timeoutMs,
+  }),
+});
 
 const computeRetryBudget = ({
   configuredRetries,
@@ -312,10 +355,16 @@ const fetchRouteOptions = async (
 
   const mode = normalizeMode(transportMode);
   const routingConfig = config?.routing || {};
-  const timeoutMs = Math.max(900, Number(routingConfig.timeoutMs || 2600));
-  const retryDelayMs = Math.max(80, Number(routingConfig.retryDelayMs || 180));
+  const timeoutMs = Math.max(
+    900,
+    Number(routingConfig.timeoutMs || DEFAULT_TIMEOUT_MS),
+  );
+  const retryDelayMs = Math.max(
+    80,
+    Number(routingConfig.retryDelayMs || DEFAULT_RETRY_DELAY_MS),
+  );
   const retries = computeRetryBudget({
-    configuredRetries: Number(routingConfig.retries || 1),
+    configuredRetries: Number(routingConfig.retries || 0),
     timeoutMs,
     retryDelayMs,
     maxTotalWaitMs: Number(
@@ -323,8 +372,32 @@ const fetchRouteOptions = async (
     ),
   });
   const circuitState = readCircuitState(startedAt);
+  const cacheKey = buildRouteCacheKey({
+    mode,
+    originLat,
+    originLon,
+    destinationLat,
+    destinationLon,
+  });
+  const staleSnapshot = readStaleRouteSnapshot(cacheKey);
 
   if (circuitState === 'open') {
+    if (staleSnapshot) {
+      logProviderEvent(logger, 'warn', 'stale_snapshot_preferred', {
+        providerId: ROUTING_PROVIDER_ID,
+        transportMode: mode,
+        reasonCode:
+          providerState.lastReasonCode || 'routing_provider_circuit_open',
+        circuitState,
+      });
+      return buildStaleSnapshotResponse({
+        staleSnapshot,
+        mode,
+        circuitState,
+        timeoutMs,
+      });
+    }
+
     logProviderEvent(logger, 'warn', 'short_circuit', {
       providerId: ROUTING_PROVIDER_ID,
       reasonCode: providerState.lastReasonCode || 'routing_provider_circuit_open',
@@ -351,15 +424,50 @@ const fetchRouteOptions = async (
     };
   }
 
+  const maxConcurrentRequests = readMaxConcurrentRequests(config);
+  if (providerState.activeRequests >= maxConcurrentRequests) {
+    if (staleSnapshot) {
+      logProviderEvent(logger, 'warn', 'provider_saturated_stale_snapshot', {
+        providerId: ROUTING_PROVIDER_ID,
+        transportMode: mode,
+        activeRequests: providerState.activeRequests,
+        maxConcurrentRequests,
+      });
+      return buildStaleSnapshotResponse({
+        staleSnapshot,
+        mode,
+        circuitState: 'saturated',
+        timeoutMs,
+      });
+    }
+
+    logProviderEvent(logger, 'warn', 'provider_saturated', {
+      providerId: ROUTING_PROVIDER_ID,
+      transportMode: mode,
+      activeRequests: providerState.activeRequests,
+      maxConcurrentRequests,
+    });
+    return {
+      ok: false,
+      status: 503,
+      error: 'routing_provider_saturated',
+      reasonCode: 'routing_provider_saturated',
+      retryable: true,
+      degraded: true,
+      routes: [],
+      updatedAt: new Date(startedAt).toISOString(),
+      providerId: ROUTING_PROVIDER_ID,
+      transportMode: mode,
+      meta: buildMeta({
+        circuitState: 'saturated',
+        attempts: 0,
+        timeoutMs,
+      }),
+    };
+  }
+
   const profile = MODE_TO_PROFILE[mode] || MODE_TO_PROFILE.car;
   const alternatives = profile === 'driving' ? 'true' : 'false';
-  const cacheKey = buildRouteCacheKey({
-    mode,
-    originLat,
-    originLon,
-    destinationLat,
-    destinationLon,
-  });
   const routeBaseUrl = String(
     routingConfig.providerBaseUrl || DEFAULT_ROUTE_BASE_URL,
   ).replace(/\/+$/, '');
@@ -370,26 +478,31 @@ const fetchRouteOptions = async (
     `?overview=full&geometries=geojson&alternatives=${alternatives}` +
     '&steps=false&annotations=false';
 
-  const response = await fetchJson(url, {
-    cacheKey,
-    cacheTtlMs: Math.max(
-      30_000,
-      Number(routingConfig.cacheTtlMs || 2 * 60 * 1000),
-    ),
-    retries,
-    retryDelayMs,
-    timeoutMs,
-    rateLimitKey: `maps-route:${mode}`,
-    maxPerMinute: Math.max(30, Number(routingConfig.maxPerMinute || 120)),
-    headers: {
-      'User-Agent': userAgent,
-    },
-  });
+  providerState.activeRequests += 1;
+  let response;
+  try {
+    response = await fetchJson(url, {
+      cacheKey,
+      cacheTtlMs: Math.max(
+        30_000,
+        Number(routingConfig.cacheTtlMs || DEFAULT_CACHE_TTL_MS),
+      ),
+      retries,
+      retryDelayMs,
+      timeoutMs,
+      rateLimitKey: `maps-route:${mode}`,
+      maxPerMinute: Math.max(30, Number(routingConfig.maxPerMinute || 120)),
+      headers: {
+        'User-Agent': userAgent,
+      },
+    });
+  } finally {
+    providerState.activeRequests = Math.max(0, providerState.activeRequests - 1);
+  }
 
   if (!response.ok) {
     const failure = classifyFailure(response);
     const nextCircuitState = registerFailure(failure, config, now());
-    const staleSnapshot = readStaleRouteSnapshot(cacheKey);
     logProviderEvent(logger, 'warn', 'provider_failure', {
       providerId: ROUTING_PROVIDER_ID,
       transportMode: mode,
@@ -416,26 +529,14 @@ const fetchRouteOptions = async (
         reasonCode: failure.reasonCode,
         circuitState: nextCircuitState,
       });
-      return {
-        ok: true,
-        status: 200,
-        error: null,
-        reasonCode: 'routing_provider_stale_snapshot',
-        retryable: true,
-        degraded: true,
-        stale: true,
-        routes: staleSnapshot.routes,
-        updatedAt: staleSnapshot.updatedAt || new Date().toISOString(),
-        providerId: ROUTING_PROVIDER_ID,
-        transportMode: mode,
-        meta: buildMeta({
-          circuitState: nextCircuitState,
-          attempts: Number(response.attempts || 0),
-          cacheHit: true,
-          latencyMs: Number(response.durationMs || 0),
-          timeoutMs,
-        }),
-      };
+      return buildStaleSnapshotResponse({
+        staleSnapshot,
+        mode,
+        circuitState: nextCircuitState,
+        attempts: Number(response.attempts || 0),
+        latencyMs: Number(response.durationMs || 0),
+        timeoutMs,
+      });
     }
 
     return {

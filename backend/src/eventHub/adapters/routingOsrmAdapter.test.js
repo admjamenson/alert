@@ -111,7 +111,7 @@ test('routing adapter opens the circuit after repeated transient failures', asyn
 
   assert.equal(shortCircuited.reasonCode, 'routing_provider_circuit_open');
   assert.equal(shortCircuited.meta.circuitState, 'open');
-  assert.equal(calls, 3);
+  assert.equal(calls, 2);
 });
 
 test('routing adapter categorizes invalid provider payload without crashing', async () => {
@@ -296,4 +296,151 @@ test('routing adapter serves stale route snapshot on provider timeout after a pr
   assert.equal(stalePayload.reasonCode, 'routing_provider_stale_snapshot');
   assert.equal(stalePayload.transportMode, 'walk');
   assert.equal(stalePayload.routes.length, 1);
+});
+
+test('routing adapter serves stale route snapshot immediately when the circuit is already open', async () => {
+  const baseParams = {
+    fromLat: -3.73,
+    fromLon: -38.52,
+    toLat: -3.74,
+    toLon: -38.5,
+    transportMode: 'walking',
+  };
+
+  await fetchRouteOptions(baseParams, {
+    logger: silentLogger,
+    fetchJson: async () => ({
+      ok: true,
+      status: 200,
+      json: {
+        routes: [
+          {
+            distance: 1500,
+            duration: 900,
+            geometry: {
+              coordinates: [
+                [-38.52, -3.73],
+                [-38.5, -3.74],
+              ],
+            },
+          },
+        ],
+      },
+      cached: false,
+      fetchedAt: '2026-04-21T18:00:00.000Z',
+      attempts: 1,
+      durationMs: 35,
+    }),
+  });
+
+  const failingFetch = async () => ({
+    ok: false,
+    status: 0,
+    error: 'network_error',
+    errorType: 'timeout',
+    fetchedAt: '2026-04-21T18:02:00.000Z',
+    attempts: 1,
+    durationMs: 1400,
+  });
+
+  await fetchRouteOptions(baseParams, {
+    logger: silentLogger,
+    now: () => 5_000,
+    config: { routing: { failureThreshold: 2, timeoutMs: 1400 } },
+    fetchJson: failingFetch,
+  });
+  await fetchRouteOptions(baseParams, {
+    logger: silentLogger,
+    now: () => 5_001,
+    config: { routing: { failureThreshold: 2, timeoutMs: 1400 } },
+    fetchJson: failingFetch,
+  });
+
+  let providerCalled = false;
+  const circuitPayload = await fetchRouteOptions(baseParams, {
+    logger: silentLogger,
+    now: () => 5_002,
+    config: { routing: { failureThreshold: 2, timeoutMs: 1400 } },
+    fetchJson: async () => {
+      providerCalled = true;
+      return failingFetch();
+    },
+  });
+
+  assert.equal(providerCalled, false);
+  assert.equal(circuitPayload.ok, true);
+  assert.equal(circuitPayload.stale, true);
+  assert.equal(circuitPayload.reasonCode, 'routing_provider_stale_snapshot');
+});
+
+test('routing adapter fails fast with provider_saturated when global route concurrency is exhausted', async () => {
+  let releaseFetch;
+  const blocker = new Promise(resolve => {
+    releaseFetch = resolve;
+  });
+
+  const firstCall = fetchRouteOptions(
+    {
+      fromLat: -3.73,
+      fromLon: -38.52,
+      toLat: -3.74,
+      toLon: -38.5,
+      transportMode: 'walking',
+    },
+    {
+      logger: silentLogger,
+      config: { routing: { maxConcurrentRequests: 1, timeoutMs: 1400 } },
+      fetchJson: async () => {
+        await blocker;
+        return {
+          ok: true,
+          status: 200,
+          json: {
+            routes: [
+              {
+                distance: 1500,
+                duration: 900,
+                geometry: {
+                  coordinates: [
+                    [-38.52, -3.73],
+                    [-38.5, -3.74],
+                  ],
+                },
+              },
+            ],
+          },
+          cached: false,
+          fetchedAt: '2026-04-21T18:00:00.000Z',
+          attempts: 1,
+          durationMs: 35,
+        };
+      },
+    },
+  );
+
+  await new Promise(resolve => setImmediate(resolve));
+
+  const secondCall = await fetchRouteOptions(
+    {
+      fromLat: 40.7128,
+      fromLon: -74.006,
+      toLat: 40.758,
+      toLon: -73.9855,
+      transportMode: 'walking',
+    },
+    {
+      logger: silentLogger,
+      config: { routing: { maxConcurrentRequests: 1, timeoutMs: 1400 } },
+      fetchJson: async () => {
+        throw new Error('should_not_run_when_saturated');
+      },
+    },
+  );
+
+  releaseFetch();
+  await firstCall;
+
+  assert.equal(secondCall.ok, false);
+  assert.equal(secondCall.reasonCode, 'routing_provider_saturated');
+  assert.equal(secondCall.meta.attempts, 0);
 });

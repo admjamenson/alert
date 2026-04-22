@@ -71,6 +71,31 @@ test('provider URL helper preserves explicit overrides', () => {
   );
 });
 
+test('runtime config exposes routing max total wait budget for fast fail-soft', () => {
+  const config = buildRuntimeConfig({
+    ...baseEnv,
+    ROUTING_PROVIDER_MAX_TOTAL_WAIT_MS: '2800',
+  });
+
+  assert.equal(config.routing.maxTotalWaitMs, 2800);
+});
+
+test('runtime config hardens route provider defaults for burst protection', () => {
+  const config = buildRuntimeConfig({
+    ...baseEnv,
+  });
+
+  assert.equal(config.routing.timeoutMs, 1400);
+  assert.equal(config.routing.retries, 0);
+  assert.equal(config.routing.retryDelayMs, 120);
+  assert.equal(config.routing.maxTotalWaitMs, 1600);
+  assert.equal(config.routing.failureThreshold, 2);
+  assert.equal(config.routing.maxConcurrentRequests, 2);
+  assert.equal(config.routing.cacheTtlMs, 5 * 60 * 1000);
+  assert.equal(config.routing.staleRouteTtlMs, 15 * 60 * 1000);
+  assert.equal(config.routing.staleRouteMaxEntries, 1000);
+});
+
 let failed = 0;
 for (const { name, fn } of tests) {
   try {
