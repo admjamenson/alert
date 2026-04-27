@@ -20,19 +20,29 @@ const MODE_TO_PROFILE = {
   walk: 'walking',
 };
 
-const providerState = {
-  consecutiveFailures: 0,
-  openUntil: 0,
-  lastReasonCode: null,
-  lastFailureAt: null,
-  activeRequests: 0,
-};
+const PROVIDER_STATES = new Map();
 const STALE_ROUTE_CACHE = new Map();
 
 const silentLogger = {
   info: () => {},
   warn: () => {},
   error: () => {},
+};
+
+const buildEmptyProviderState = () => ({
+  consecutiveFailures: 0,
+  openUntil: 0,
+  lastReasonCode: null,
+  lastFailureAt: null,
+  activeRequests: 0,
+});
+
+const getProviderState = targetId => {
+  const key = String(targetId || `${ROUTING_PROVIDER_ID}:primary`);
+  if (!PROVIDER_STATES.has(key)) {
+    PROVIDER_STATES.set(key, buildEmptyProviderState());
+  }
+  return PROVIDER_STATES.get(key);
 };
 
 const normalizeMode = value => {
@@ -56,6 +66,105 @@ const normalizeMode = value => {
   return 'car';
 };
 
+const normalizeRegionHint = value =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, '-');
+
+const sanitizeProviderTargetId = value =>
+  String(value || 'unknown')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9:-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '') || 'unknown';
+
+const buildProviderTarget = ({ source, baseUrl, regionKey }) => {
+  const normalizedSource = String(source || 'primary').trim().toLowerCase();
+  const normalizedRegionKey = normalizeRegionHint(regionKey);
+  let targetId = `${ROUTING_PROVIDER_ID}:${normalizedSource}`;
+  if (normalizedSource === 'region' && normalizedRegionKey) {
+    targetId = `${ROUTING_PROVIDER_ID}:region:${normalizedRegionKey}`;
+  }
+  return {
+    source: normalizedSource,
+    baseUrl: String(baseUrl || '').trim(),
+    regionKey: normalizedRegionKey || null,
+    targetId: sanitizeProviderTargetId(targetId),
+  };
+};
+
+const resolveRegionalProviderBaseUrl = (regionHint, routingConfig) => {
+  const normalizedRegionHint = normalizeRegionHint(regionHint);
+  if (!normalizedRegionHint) return null;
+  const configuredMap =
+    routingConfig && typeof routingConfig.regionProviderBaseUrls === 'object'
+      ? routingConfig.regionProviderBaseUrls
+      : {};
+  if (configuredMap[normalizedRegionHint]) {
+    return {
+      regionKey: normalizedRegionHint,
+      baseUrl: configuredMap[normalizedRegionHint],
+    };
+  }
+
+  let bestMatch = null;
+  for (const [configuredRegionKey, baseUrl] of Object.entries(configuredMap)) {
+    const normalizedConfiguredKey = normalizeRegionHint(configuredRegionKey);
+    if (
+      normalizedConfiguredKey &&
+      (normalizedRegionHint === normalizedConfiguredKey ||
+        normalizedRegionHint.startsWith(`${normalizedConfiguredKey}-`))
+    ) {
+      if (
+        !bestMatch ||
+        normalizedConfiguredKey.length > bestMatch.regionKey.length
+      ) {
+        bestMatch = {
+          regionKey: normalizedConfiguredKey,
+          baseUrl,
+        };
+      }
+    }
+  }
+  return bestMatch;
+};
+
+const resolveProviderTargets = (routingConfig, regionHint) => {
+  const targets = [];
+  const seenBaseUrls = new Set();
+  const appendTarget = params => {
+    const next = buildProviderTarget(params);
+    if (!next.baseUrl) return;
+    const dedupeKey = next.baseUrl.replace(/\/+$/, '');
+    if (seenBaseUrls.has(dedupeKey)) return;
+    seenBaseUrls.add(dedupeKey);
+    targets.push(next);
+  };
+
+  const regionalTarget = resolveRegionalProviderBaseUrl(regionHint, routingConfig);
+  if (regionalTarget) {
+    appendTarget({
+      source: 'region',
+      baseUrl: regionalTarget.baseUrl,
+      regionKey: regionalTarget.regionKey,
+    });
+  }
+
+  appendTarget({
+    source: 'primary',
+    baseUrl: routingConfig?.providerBaseUrl || DEFAULT_ROUTE_BASE_URL,
+  });
+
+  appendTarget({
+    source: 'fallback',
+    baseUrl: routingConfig?.fallbackProviderBaseUrl || '',
+  });
+
+  return targets;
+};
+
 const isStrictFiniteNumber = value => {
   if (value === null || value === undefined) return false;
   if (typeof value === 'string' && value.trim().length === 0) return false;
@@ -67,7 +176,7 @@ const buildTitle = (index, mode) => {
   return `${String(mode || 'route').toUpperCase()} ${index + 1}`;
 };
 
-const readCircuitState = nowMs => {
+const readCircuitState = (providerState, nowMs) => {
   if (providerState.openUntil > nowMs) return 'open';
   if (
     providerState.openUntil > 0 &&
@@ -79,7 +188,7 @@ const readCircuitState = nowMs => {
   return 'closed';
 };
 
-const resetCircuit = () => {
+const resetCircuit = providerState => {
   providerState.consecutiveFailures = 0;
   providerState.openUntil = 0;
   providerState.lastReasonCode = null;
@@ -88,12 +197,15 @@ const resetCircuit = () => {
 };
 
 const buildMeta = params => ({
+  providerTargetId: params?.providerTargetId || `${ROUTING_PROVIDER_ID}:primary`,
+  providerSource: params?.providerSource || 'primary',
+  providerRegionKey: params?.providerRegionKey || null,
   circuitState: params?.circuitState || 'closed',
   attempts: Number.isFinite(params?.attempts) ? params.attempts : 0,
   cacheHit: Boolean(params?.cacheHit),
   latencyMs: Number.isFinite(params?.latencyMs) ? params.latencyMs : 0,
   timeoutMs: Number.isFinite(params?.timeoutMs) ? params.timeoutMs : 0,
-  lastFailureAt: providerState.lastFailureAt,
+  lastFailureAt: params?.lastFailureAt || null,
 });
 
 const logProviderEvent = (logger, level, event, payload) => {
@@ -138,8 +250,8 @@ const classifyFailure = response => {
   };
 };
 
-const registerFailure = (failure, config, nowMs) => {
-  if (!failure?.transient) return readCircuitState(nowMs);
+const registerFailure = (providerState, failure, config, nowMs) => {
+  if (!failure?.transient) return readCircuitState(providerState, nowMs);
 
   providerState.consecutiveFailures += 1;
   providerState.lastReasonCode = failure.reasonCode || 'routing_provider_unavailable';
@@ -157,11 +269,11 @@ const registerFailure = (failure, config, nowMs) => {
     providerState.openUntil = nowMs + cooldownMs;
   }
 
-  return readCircuitState(nowMs);
+  return readCircuitState(providerState, nowMs);
 };
 
-const registerSuccess = () => {
-  resetCircuit();
+const registerSuccess = providerState => {
+  resetCircuit(providerState);
 };
 
 const toBackendRoute = (route, index, mode) => {
@@ -253,6 +365,7 @@ const readStaleRouteSnapshot = cacheKey => {
 const buildStaleSnapshotResponse = ({
   staleSnapshot,
   mode,
+  providerTarget,
   circuitState,
   attempts = 0,
   latencyMs = 0,
@@ -268,13 +381,61 @@ const buildStaleSnapshotResponse = ({
   routes: staleSnapshot.routes,
   updatedAt: staleSnapshot.updatedAt || new Date().toISOString(),
   providerId: ROUTING_PROVIDER_ID,
+  providerTargetId: providerTarget?.targetId || `${ROUTING_PROVIDER_ID}:primary`,
+  providerSource: providerTarget?.source || 'primary',
+  providerRegionKey: providerTarget?.regionKey || null,
   transportMode: mode,
   meta: buildMeta({
+    providerTargetId: providerTarget?.targetId,
+    providerSource: providerTarget?.source,
+    providerRegionKey: providerTarget?.regionKey,
     circuitState,
     attempts,
     cacheHit: true,
     latencyMs,
     timeoutMs,
+    lastFailureAt: null,
+  }),
+});
+
+const buildProviderFailurePayload = ({
+  mode,
+  providerTarget,
+  circuitState,
+  attempts = 0,
+  latencyMs = 0,
+  timeoutMs = 0,
+  status = 503,
+  error = 'routing_provider_unavailable',
+  reasonCode = 'routing_provider_unavailable',
+  retryable = true,
+  degraded = true,
+  updatedAt,
+  lastFailureAt = null,
+}) => ({
+  ok: false,
+  status,
+  error,
+  reasonCode,
+  retryable,
+  degraded,
+  routes: [],
+  updatedAt: updatedAt || new Date().toISOString(),
+  providerId: ROUTING_PROVIDER_ID,
+  providerTargetId: providerTarget?.targetId || `${ROUTING_PROVIDER_ID}:primary`,
+  providerSource: providerTarget?.source || 'primary',
+  providerRegionKey: providerTarget?.regionKey || null,
+  transportMode: mode,
+  meta: buildMeta({
+    providerTargetId: providerTarget?.targetId,
+    providerSource: providerTarget?.source,
+    providerRegionKey: providerTarget?.regionKey,
+    circuitState,
+    attempts,
+    cacheHit: false,
+    latencyMs,
+    timeoutMs,
+    lastFailureAt,
   }),
 });
 
@@ -310,8 +471,14 @@ const computeRetryBudget = ({
   return allowedRetries;
 };
 
+const MIN_PROVIDER_ATTEMPT_BUDGET_MS = 500;
+
+const canTryAnotherProviderTarget = (targets, currentIndex, remainingBudgetMs) =>
+  currentIndex < targets.length - 1 &&
+  Number(remainingBudgetMs || 0) >= MIN_PROVIDER_ATTEMPT_BUDGET_MS;
+
 const fetchRouteOptions = async (
-  { fromLat, fromLon, toLat, toLon, transportMode },
+  { fromLat, fromLon, toLat, toLon, transportMode, regionHint },
   {
     userAgent,
     config,
@@ -346,9 +513,14 @@ const fetchRouteOptions = async (
       routes: [],
       updatedAt: new Date(startedAt).toISOString(),
       providerId: ROUTING_PROVIDER_ID,
+      providerTargetId: `${ROUTING_PROVIDER_ID}:primary`,
+      providerSource: 'primary',
+      providerRegionKey: normalizeRegionHint(regionHint) || null,
       transportMode: normalizeMode(transportMode),
       meta: buildMeta({
-        circuitState: readCircuitState(startedAt),
+        providerRegionKey: normalizeRegionHint(regionHint) || null,
+        circuitState: 'closed',
+        lastFailureAt: null,
       }),
     };
   }
@@ -363,15 +535,16 @@ const fetchRouteOptions = async (
     80,
     Number(routingConfig.retryDelayMs || DEFAULT_RETRY_DELAY_MS),
   );
+  const maxTotalWaitMs = Math.max(
+    timeoutMs,
+    Number(routingConfig.maxTotalWaitMs || DEFAULT_MAX_TOTAL_WAIT_MS),
+  );
   const retries = computeRetryBudget({
     configuredRetries: Number(routingConfig.retries || 0),
     timeoutMs,
     retryDelayMs,
-    maxTotalWaitMs: Number(
-      routingConfig.maxTotalWaitMs || DEFAULT_MAX_TOTAL_WAIT_MS,
-    ),
+    maxTotalWaitMs,
   });
-  const circuitState = readCircuitState(startedAt);
   const cacheKey = buildRouteCacheKey({
     mode,
     originLat,
@@ -380,279 +553,444 @@ const fetchRouteOptions = async (
     destinationLon,
   });
   const staleSnapshot = readStaleRouteSnapshot(cacheKey);
+  const providerTargets = resolveProviderTargets(routingConfig, regionHint);
+  const profile = MODE_TO_PROFILE[mode] || MODE_TO_PROFILE.car;
+  const alternatives = profile === 'driving' ? 'true' : 'false';
+  const maxConcurrentRequests = readMaxConcurrentRequests(config);
+  const deadlineMs = startedAt + maxTotalWaitMs;
+  let lastFailurePayload = null;
 
-  if (circuitState === 'open') {
-    if (staleSnapshot) {
-      logProviderEvent(logger, 'warn', 'stale_snapshot_preferred', {
+  for (let targetIndex = 0; targetIndex < providerTargets.length; targetIndex += 1) {
+    const providerTarget = providerTargets[targetIndex];
+    const providerState = getProviderState(providerTarget.targetId);
+    const attemptStartedAt = now();
+    const remainingBudgetMs = Math.max(
+      0,
+      deadlineMs - Number(attemptStartedAt || Date.now()),
+    );
+    const currentCircuitState = readCircuitState(providerState, attemptStartedAt);
+    const lastFailureAt = providerState.lastFailureAt;
+
+    if (remainingBudgetMs < MIN_PROVIDER_ATTEMPT_BUDGET_MS) {
+      if (staleSnapshot) {
+        logProviderEvent(logger, 'warn', 'stale_snapshot_preferred', {
+          providerId: ROUTING_PROVIDER_ID,
+          providerTargetId: providerTarget.targetId,
+          providerSource: providerTarget.source,
+          providerRegionKey: providerTarget.regionKey,
+          transportMode: mode,
+          reasonCode: 'routing_provider_budget_exhausted',
+          circuitState: currentCircuitState,
+        });
+        return buildStaleSnapshotResponse({
+          staleSnapshot,
+          mode,
+          providerTarget,
+          circuitState: currentCircuitState,
+          timeoutMs,
+        });
+      }
+      lastFailurePayload = buildProviderFailurePayload({
+        mode,
+        providerTarget,
+        circuitState: currentCircuitState,
+        timeoutMs,
+        status: 503,
+        error: 'routing_provider_budget_exhausted',
+        reasonCode: 'routing_provider_budget_exhausted',
+        retryable: true,
+        degraded: true,
+        lastFailureAt,
+      });
+      break;
+    }
+
+    if (currentCircuitState === 'open') {
+      logProviderEvent(logger, 'warn', 'short_circuit', {
         providerId: ROUTING_PROVIDER_ID,
-        transportMode: mode,
+        providerTargetId: providerTarget.targetId,
+        providerSource: providerTarget.source,
+        providerRegionKey: providerTarget.regionKey,
+        providerBaseUrl: providerTarget.baseUrl,
         reasonCode:
           providerState.lastReasonCode || 'routing_provider_circuit_open',
-        circuitState,
+        transportMode: mode,
+        circuitState: currentCircuitState,
+        retryable: true,
       });
-      return buildStaleSnapshotResponse({
-        staleSnapshot,
+
+      if (canTryAnotherProviderTarget(providerTargets, targetIndex, remainingBudgetMs)) {
+        logProviderEvent(logger, 'warn', 'provider_fallback_next', {
+          providerId: ROUTING_PROVIDER_ID,
+          providerTargetId: providerTarget.targetId,
+          providerSource: providerTarget.source,
+          providerRegionKey: providerTarget.regionKey,
+          nextProviderTargetId: providerTargets[targetIndex + 1]?.targetId || null,
+          reasonCode:
+            providerState.lastReasonCode || 'routing_provider_circuit_open',
+          transportMode: mode,
+        });
+        continue;
+      }
+
+      if (staleSnapshot) {
+        return buildStaleSnapshotResponse({
+          staleSnapshot,
+          mode,
+          providerTarget,
+          circuitState: currentCircuitState,
+          timeoutMs,
+        });
+      }
+
+      return buildProviderFailurePayload({
         mode,
-        circuitState,
+        providerTarget,
+        circuitState: currentCircuitState,
         timeoutMs,
+        status: 503,
+        error: 'routing_provider_circuit_open',
+        reasonCode: 'routing_provider_circuit_open',
+        retryable: true,
+        degraded: true,
+        lastFailureAt,
       });
     }
 
-    logProviderEvent(logger, 'warn', 'short_circuit', {
-      providerId: ROUTING_PROVIDER_ID,
-      reasonCode: providerState.lastReasonCode || 'routing_provider_circuit_open',
-      transportMode: mode,
-      circuitState,
-      retryable: true,
-    });
-
-    return {
-      ok: false,
-      status: 503,
-      error: 'routing_provider_circuit_open',
-      reasonCode: 'routing_provider_circuit_open',
-      retryable: true,
-      degraded: true,
-      routes: [],
-      updatedAt: new Date(startedAt).toISOString(),
-      providerId: ROUTING_PROVIDER_ID,
-      transportMode: mode,
-      meta: buildMeta({
-        circuitState,
-        timeoutMs,
-      }),
-    };
-  }
-
-  const maxConcurrentRequests = readMaxConcurrentRequests(config);
-  if (providerState.activeRequests >= maxConcurrentRequests) {
-    if (staleSnapshot) {
-      logProviderEvent(logger, 'warn', 'provider_saturated_stale_snapshot', {
+    if (providerState.activeRequests >= maxConcurrentRequests) {
+      logProviderEvent(logger, 'warn', 'provider_saturated', {
         providerId: ROUTING_PROVIDER_ID,
+        providerTargetId: providerTarget.targetId,
+        providerSource: providerTarget.source,
+        providerRegionKey: providerTarget.regionKey,
+        providerBaseUrl: providerTarget.baseUrl,
         transportMode: mode,
         activeRequests: providerState.activeRequests,
         maxConcurrentRequests,
       });
-      return buildStaleSnapshotResponse({
-        staleSnapshot,
+
+      if (canTryAnotherProviderTarget(providerTargets, targetIndex, remainingBudgetMs)) {
+        logProviderEvent(logger, 'warn', 'provider_fallback_next', {
+          providerId: ROUTING_PROVIDER_ID,
+          providerTargetId: providerTarget.targetId,
+          providerSource: providerTarget.source,
+          providerRegionKey: providerTarget.regionKey,
+          nextProviderTargetId: providerTargets[targetIndex + 1]?.targetId || null,
+          reasonCode: 'routing_provider_saturated',
+          transportMode: mode,
+        });
+        continue;
+      }
+
+      if (staleSnapshot) {
+        logProviderEvent(logger, 'warn', 'provider_saturated_stale_snapshot', {
+          providerId: ROUTING_PROVIDER_ID,
+          providerTargetId: providerTarget.targetId,
+          providerSource: providerTarget.source,
+          providerRegionKey: providerTarget.regionKey,
+          transportMode: mode,
+          activeRequests: providerState.activeRequests,
+          maxConcurrentRequests,
+        });
+        return buildStaleSnapshotResponse({
+          staleSnapshot,
+          mode,
+          providerTarget,
+          circuitState: 'saturated',
+          timeoutMs,
+        });
+      }
+
+      return buildProviderFailurePayload({
         mode,
+        providerTarget,
         circuitState: 'saturated',
         timeoutMs,
+        status: 503,
+        error: 'routing_provider_saturated',
+        reasonCode: 'routing_provider_saturated',
+        retryable: true,
+        degraded: true,
+        lastFailureAt,
       });
     }
 
-    logProviderEvent(logger, 'warn', 'provider_saturated', {
-      providerId: ROUTING_PROVIDER_ID,
-      transportMode: mode,
-      activeRequests: providerState.activeRequests,
-      maxConcurrentRequests,
-    });
-    return {
-      ok: false,
-      status: 503,
-      error: 'routing_provider_saturated',
-      reasonCode: 'routing_provider_saturated',
-      retryable: true,
-      degraded: true,
-      routes: [],
-      updatedAt: new Date(startedAt).toISOString(),
-      providerId: ROUTING_PROVIDER_ID,
-      transportMode: mode,
-      meta: buildMeta({
-        circuitState: 'saturated',
-        attempts: 0,
-        timeoutMs,
-      }),
-    };
-  }
+    const routeBaseUrl = String(providerTarget.baseUrl || DEFAULT_ROUTE_BASE_URL).replace(
+      /\/+$/,
+      '',
+    );
+    const url =
+      `${routeBaseUrl}/${profile}/` +
+      `${destinationSafe(originLon)},${destinationSafe(originLat)};` +
+      `${destinationSafe(destinationLon)},${destinationSafe(destinationLat)}` +
+      `?overview=full&geometries=geojson&alternatives=${alternatives}` +
+      '&steps=false&annotations=false';
+    const effectiveTimeoutMs = Math.max(
+      900,
+      Math.min(timeoutMs, remainingBudgetMs),
+    );
 
-  const profile = MODE_TO_PROFILE[mode] || MODE_TO_PROFILE.car;
-  const alternatives = profile === 'driving' ? 'true' : 'false';
-  const routeBaseUrl = String(
-    routingConfig.providerBaseUrl || DEFAULT_ROUTE_BASE_URL,
-  ).replace(/\/+$/, '');
-  const url =
-    `${routeBaseUrl}/${profile}/` +
-    `${destinationSafe(originLon)},${destinationSafe(originLat)};` +
-    `${destinationSafe(destinationLon)},${destinationSafe(destinationLat)}` +
-    `?overview=full&geometries=geojson&alternatives=${alternatives}` +
-    '&steps=false&annotations=false';
-
-  providerState.activeRequests += 1;
-  let response;
-  try {
-    response = await fetchJson(url, {
-      cacheKey,
-      cacheTtlMs: Math.max(
-        30_000,
-        Number(routingConfig.cacheTtlMs || DEFAULT_CACHE_TTL_MS),
-      ),
+    logProviderEvent(logger, 'info', 'provider_selected', {
+      providerId: ROUTING_PROVIDER_ID,
+      providerTargetId: providerTarget.targetId,
+      providerSource: providerTarget.source,
+      providerRegionKey: providerTarget.regionKey,
+      providerBaseUrl: providerTarget.baseUrl,
+      transportMode: mode,
+      timeoutMs: effectiveTimeoutMs,
       retries,
-      retryDelayMs,
-      timeoutMs,
-      rateLimitKey: `maps-route:${mode}`,
-      maxPerMinute: Math.max(30, Number(routingConfig.maxPerMinute || 120)),
-      headers: {
-        'User-Agent': userAgent,
-      },
-    });
-  } finally {
-    providerState.activeRequests = Math.max(0, providerState.activeRequests - 1);
-  }
-
-  if (!response.ok) {
-    const failure = classifyFailure(response);
-    const nextCircuitState = registerFailure(failure, config, now());
-    logProviderEvent(logger, 'warn', 'provider_failure', {
-      providerId: ROUTING_PROVIDER_ID,
-      transportMode: mode,
-      reasonCode: failure.reasonCode,
-      retryable: failure.retryable,
-      circuitState: nextCircuitState,
-      statusCode: Number(response.status || 0),
-      attempts: Number(response.attempts || 0),
-      latencyMs: Number(response.durationMs || 0),
+      remainingBudgetMs,
+      circuitState: currentCircuitState,
     });
 
-    if (
-      staleSnapshot &&
-      [
-        'routing_provider_timeout',
-        'routing_provider_unavailable',
-        'routing_provider_rate_limited',
-        'routing_provider_circuit_open',
-      ].includes(failure.reasonCode)
-    ) {
-      logProviderEvent(logger, 'warn', 'stale_snapshot_used', {
+    providerState.activeRequests += 1;
+    let response;
+    try {
+      response = await fetchJson(url, {
+        cacheKey,
+        cacheTtlMs: Math.max(
+          30_000,
+          Number(routingConfig.cacheTtlMs || DEFAULT_CACHE_TTL_MS),
+        ),
+        providerId: `maps-route:${mode}`,
+        retries,
+        retryDelayMs,
+        timeoutMs: effectiveTimeoutMs,
+        rateLimitKey: `maps-route:${mode}:${providerTarget.targetId}`,
+        maxPerMinute: Math.max(30, Number(routingConfig.maxPerMinute || 120)),
+        headers: {
+          'User-Agent': userAgent,
+        },
+      });
+    } finally {
+      providerState.activeRequests = Math.max(0, providerState.activeRequests - 1);
+    }
+
+    if (!response.ok) {
+      const failure = classifyFailure(response);
+      const nextCircuitState = registerFailure(
+        providerState,
+        failure,
+        config,
+        now(),
+      );
+      logProviderEvent(logger, 'warn', 'provider_failure', {
         providerId: ROUTING_PROVIDER_ID,
+        providerTargetId: providerTarget.targetId,
+        providerSource: providerTarget.source,
+        providerRegionKey: providerTarget.regionKey,
+        providerBaseUrl: providerTarget.baseUrl,
         transportMode: mode,
         reasonCode: failure.reasonCode,
+        retryable: failure.retryable,
         circuitState: nextCircuitState,
+        statusCode: Number(response.status || 0),
+        attempts: Number(response.attempts || 0),
+        latencyMs: Number(response.durationMs || 0),
       });
-      return buildStaleSnapshotResponse({
-        staleSnapshot,
+
+      lastFailurePayload = buildProviderFailurePayload({
         mode,
+        providerTarget,
         circuitState: nextCircuitState,
         attempts: Number(response.attempts || 0),
         latencyMs: Number(response.durationMs || 0),
-        timeoutMs,
+        timeoutMs: effectiveTimeoutMs,
+        status: response.status || 0,
+        error: response.error || failure.reasonCode,
+        reasonCode: failure.reasonCode,
+        retryable: failure.retryable,
+        degraded: true,
+        updatedAt: response.fetchedAt || new Date().toISOString(),
+        lastFailureAt: providerState.lastFailureAt,
       });
+
+      if (canTryAnotherProviderTarget(providerTargets, targetIndex, remainingBudgetMs)) {
+        logProviderEvent(logger, 'warn', 'provider_fallback_next', {
+          providerId: ROUTING_PROVIDER_ID,
+          providerTargetId: providerTarget.targetId,
+          providerSource: providerTarget.source,
+          providerRegionKey: providerTarget.regionKey,
+          nextProviderTargetId: providerTargets[targetIndex + 1]?.targetId || null,
+          reasonCode: failure.reasonCode,
+          transportMode: mode,
+        });
+        continue;
+      }
+
+      if (
+        staleSnapshot &&
+        [
+          'routing_provider_timeout',
+          'routing_provider_unavailable',
+          'routing_provider_rate_limited',
+          'routing_provider_circuit_open',
+          'routing_provider_budget_exhausted',
+        ].includes(failure.reasonCode)
+      ) {
+        logProviderEvent(logger, 'warn', 'stale_snapshot_used', {
+          providerId: ROUTING_PROVIDER_ID,
+          providerTargetId: providerTarget.targetId,
+          providerSource: providerTarget.source,
+          providerRegionKey: providerTarget.regionKey,
+          transportMode: mode,
+          reasonCode: failure.reasonCode,
+          circuitState: nextCircuitState,
+        });
+        return buildStaleSnapshotResponse({
+          staleSnapshot,
+          mode,
+          providerTarget,
+          circuitState: nextCircuitState,
+          attempts: Number(response.attempts || 0),
+          latencyMs: Number(response.durationMs || 0),
+          timeoutMs: effectiveTimeoutMs,
+        });
+      }
+
+      return lastFailurePayload;
     }
 
-    return {
-      ok: false,
-      status: response.status || 0,
-      error: response.error || failure.reasonCode,
-      reasonCode: failure.reasonCode,
-      retryable: failure.retryable,
-      degraded: true,
-      routes: [],
-      updatedAt: response.fetchedAt || new Date().toISOString(),
-      providerId: ROUTING_PROVIDER_ID,
-      transportMode: mode,
-      meta: buildMeta({
+    const rawRoutes = Array.isArray(response.json?.routes) ? response.json.routes : [];
+    const routes = rawRoutes
+      .map((route, index) => toBackendRoute(route, index, mode))
+      .filter(Boolean);
+
+    if (routes.length === 0) {
+      const reasonCode =
+        rawRoutes.length > 0 ? 'routing_invalid_payload' : 'routing_no_route';
+      const nextCircuitState =
+        reasonCode === 'routing_invalid_payload'
+          ? registerFailure(
+              providerState,
+              {
+                reasonCode,
+                retryable: false,
+                transient: true,
+              },
+              config,
+              now(),
+            )
+          : readCircuitState(providerState, now());
+
+      if (reasonCode === 'routing_invalid_payload') {
+        logProviderEvent(logger, 'warn', 'invalid_payload', {
+          providerId: ROUTING_PROVIDER_ID,
+          providerTargetId: providerTarget.targetId,
+          providerSource: providerTarget.source,
+          providerRegionKey: providerTarget.regionKey,
+          providerBaseUrl: providerTarget.baseUrl,
+          transportMode: mode,
+          circuitState: nextCircuitState,
+          attempts: Number(response.attempts || 0),
+        });
+      }
+
+      lastFailurePayload = buildProviderFailurePayload({
+        mode,
+        providerTarget,
         circuitState: nextCircuitState,
         attempts: Number(response.attempts || 0),
-        cacheHit: Boolean(response.cached),
         latencyMs: Number(response.durationMs || 0),
-        timeoutMs,
-      }),
-    };
-  }
+        timeoutMs: effectiveTimeoutMs,
+        status: reasonCode === 'routing_no_route' ? 404 : 502,
+        error: reasonCode,
+        reasonCode,
+        retryable: reasonCode !== 'routing_invalid_payload',
+        degraded: reasonCode !== 'routing_no_route',
+        updatedAt: response.fetchedAt || new Date().toISOString(),
+        lastFailureAt: providerState.lastFailureAt,
+      });
 
-  const rawRoutes = Array.isArray(response.json?.routes) ? response.json.routes : [];
-  const routes = rawRoutes
-    .map((route, index) => toBackendRoute(route, index, mode))
-    .filter(Boolean);
+      if (
+        reasonCode === 'routing_no_route' &&
+        canTryAnotherProviderTarget(providerTargets, targetIndex, remainingBudgetMs)
+      ) {
+        logProviderEvent(logger, 'warn', 'provider_fallback_next', {
+          providerId: ROUTING_PROVIDER_ID,
+          providerTargetId: providerTarget.targetId,
+          providerSource: providerTarget.source,
+          providerRegionKey: providerTarget.regionKey,
+          nextProviderTargetId: providerTargets[targetIndex + 1]?.targetId || null,
+          reasonCode,
+          transportMode: mode,
+        });
+        continue;
+      }
 
-  if (routes.length === 0) {
-    const reasonCode =
-      rawRoutes.length > 0 ? 'routing_invalid_payload' : 'routing_no_route';
-    const nextCircuitState =
-      reasonCode === 'routing_invalid_payload'
-        ? registerFailure(
-            {
-              reasonCode,
-              retryable: false,
-              transient: true,
-            },
-            config,
-            now(),
-          )
-        : readCircuitState(now());
+      return lastFailurePayload;
+    }
 
-    if (reasonCode === 'routing_invalid_payload') {
-      logProviderEvent(logger, 'warn', 'invalid_payload', {
-        providerId: ROUTING_PROVIDER_ID,
+    registerSuccess(providerState);
+    const completedCircuitState = readCircuitState(providerState, now());
+    writeStaleRouteSnapshot(
+      cacheKey,
+      {
+        routes,
+        updatedAt: response.fetchedAt || new Date().toISOString(),
         transportMode: mode,
-        circuitState: nextCircuitState,
-        attempts: Number(response.attempts || 0),
-      });
-    }
+      },
+      config,
+    );
 
     return {
-      ok: false,
-      status: reasonCode === 'routing_no_route' ? 404 : 502,
-      error: reasonCode,
-      reasonCode,
-      retryable: reasonCode !== 'routing_invalid_payload',
-      degraded: reasonCode !== 'routing_no_route',
-      routes: [],
-      updatedAt: response.fetchedAt || new Date().toISOString(),
-      providerId: ROUTING_PROVIDER_ID,
-      transportMode: mode,
-      meta: buildMeta({
-        circuitState: nextCircuitState,
-        attempts: Number(response.attempts || 0),
-        cacheHit: Boolean(response.cached),
-        latencyMs: Number(response.durationMs || 0),
-        timeoutMs,
-      }),
-    };
-  }
-
-  registerSuccess();
-  const completedCircuitState = readCircuitState(now());
-  writeStaleRouteSnapshot(
-    cacheKey,
-    {
+      ok: true,
+      status: 200,
+      error: null,
+      reasonCode: null,
+      retryable: false,
+      degraded:
+        completedCircuitState === 'half_open' || Number(response.attempts || 0) > 1,
       routes,
       updatedAt: response.fetchedAt || new Date().toISOString(),
+      providerId: ROUTING_PROVIDER_ID,
+      providerTargetId: providerTarget.targetId,
+      providerSource: providerTarget.source,
+      providerRegionKey: providerTarget.regionKey,
       transportMode: mode,
-    },
-    config,
-  );
+      meta: buildMeta({
+        providerTargetId: providerTarget.targetId,
+        providerSource: providerTarget.source,
+        providerRegionKey: providerTarget.regionKey,
+        circuitState: completedCircuitState,
+        attempts: Number(response.attempts || 0),
+        cacheHit: Boolean(response.cached),
+        latencyMs: Number(response.durationMs || 0),
+        timeoutMs: effectiveTimeoutMs,
+        lastFailureAt: providerState.lastFailureAt,
+      }),
+    };
+  }
 
-  return {
-    ok: true,
-    status: 200,
-    error: null,
-    reasonCode: null,
-    retryable: false,
-    degraded:
-      completedCircuitState === 'half_open' || Number(response.attempts || 0) > 1,
-    routes,
-    updatedAt: response.fetchedAt || new Date().toISOString(),
-    providerId: ROUTING_PROVIDER_ID,
-    transportMode: mode,
-    meta: buildMeta({
-      circuitState: completedCircuitState,
-      attempts: Number(response.attempts || 0),
-      cacheHit: Boolean(response.cached),
-      latencyMs: Number(response.durationMs || 0),
+  return (
+    lastFailurePayload ||
+    buildProviderFailurePayload({
+      mode,
+      providerTarget: providerTargets[0],
+      circuitState: 'closed',
       timeoutMs,
-    }),
-  };
+      status: 503,
+      error: 'routing_provider_unavailable',
+      reasonCode: 'routing_provider_unavailable',
+      retryable: true,
+      degraded: true,
+    })
+  );
 };
 
 module.exports = {
   fetchRouteOptions,
-  __dangerousResetRoutingProviderStateForTests: resetCircuit,
+  __dangerousResetRoutingProviderStateForTests: () => {
+    PROVIDER_STATES.clear();
+  },
   __dangerousResetStaleRouteCacheForTests: () => {
     STALE_ROUTE_CACHE.clear();
   },
   __dangerousGetRoutingProviderStateForTests: () => ({
-    ...providerState,
-    circuitState: readCircuitState(Date.now()),
+    providers: Array.from(PROVIDER_STATES.entries()).map(([targetId, state]) => ({
+      targetId,
+      ...state,
+      circuitState: readCircuitState(state, Date.now()),
+    })),
   }),
 };

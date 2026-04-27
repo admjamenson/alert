@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 
 const {
   buildRuntimeConfig,
+  readRegionalProviderBaseUrls,
   readProviderBaseUrl,
 } = require('./runtime');
 
@@ -48,6 +49,12 @@ test('runtime config accepts explicit provider URLs in production', () => {
     ALERT_ALLOW_PUBLIC_PROVIDER_DEFAULTS: 'false',
     EPIDEMIC_BR_NOTIFICA_BASE_URL: 'https://providers.alert.example/notifica',
     ROUTING_OSRM_BASE_URL: 'https://providers.alert.example/route/v1',
+    ROUTING_OSRM_FALLBACK_BASE_URL:
+      'https://providers.alert.example/route-fallback/v1',
+    ROUTING_OSRM_REGION_BASE_URLS_JSON: JSON.stringify({
+      'sa-east-1': 'https://sa-route.alert.example/route/v1',
+      'us-east-1': 'https://us-route.alert.example/route/v1',
+    }),
   });
 
   assert.equal(config.app.environment, 'production');
@@ -60,6 +67,14 @@ test('runtime config accepts explicit provider URLs in production', () => {
     config.routing.providerBaseUrl,
     'https://providers.alert.example/route/v1',
   );
+  assert.equal(
+    config.routing.fallbackProviderBaseUrl,
+    'https://providers.alert.example/route-fallback/v1',
+  );
+  assert.deepEqual(config.routing.regionProviderBaseUrls, {
+    'sa-east-1': 'https://sa-route.alert.example/route/v1',
+    'us-east-1': 'https://us-route.alert.example/route/v1',
+  });
 });
 
 test('provider URL helper preserves explicit overrides', () => {
@@ -68,6 +83,21 @@ test('provider URL helper preserves explicit overrides', () => {
       ROUTING_OSRM_BASE_URL: 'https://route.alert.example',
     }),
     'https://route.alert.example',
+  );
+});
+
+test('regional provider URL helper ignores invalid rows and normalizes keys', () => {
+  assert.deepEqual(
+    readRegionalProviderBaseUrls('ROUTING_OSRM_REGION_BASE_URLS_JSON', {
+      ROUTING_OSRM_REGION_BASE_URLS_JSON: JSON.stringify({
+        ' SA-EAST-1 ': 'https://sa-route.alert.example/route/v1',
+        '': 'https://invalid.example/route/v1',
+        'us-east-1': '',
+      }),
+    }),
+    {
+      'sa-east-1': 'https://sa-route.alert.example/route/v1',
+    },
   );
 });
 

@@ -121,6 +121,10 @@ const registerMapsRoutes = (app, deps = {}) => {
           toLat,
           toLon,
           transportMode: req.query?.mode || req.query?.transportMode,
+          regionHint:
+            req.get('x-alert-region') ||
+            req.query?.region ||
+            req.query?.regionHint,
         },
         {
           config,

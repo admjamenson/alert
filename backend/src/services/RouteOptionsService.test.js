@@ -64,6 +64,8 @@ test('route options service returns online payload when provider succeeds', asyn
   assert.equal(payload.advisory, null);
   assert.equal(payload.routes.length, 1);
   assert.equal(payload.provider.id, 'osrm');
+  assert.equal(payload.provider.targetId, 'osrm:primary');
+  assert.equal(payload.provider.source, 'primary');
 });
 
 test('route options service falls back safely when provider times out', async () => {
@@ -241,4 +243,56 @@ test('route options service uses fast estimated fallback when the route provider
   assert.equal(payload.fallbackUsed, true);
   assert.equal(payload.providerAvailable, false);
   assert.equal(payload.reasonCode, 'routing_provider_saturated');
+  assert.equal(payload.provider.targetId, 'osrm:primary');
+  assert.equal(payload.provider.source, 'primary');
+});
+
+test('route options service keeps provider target metadata on a dedicated regional fallback', async () => {
+  const payload = await getRouteOptionsSnapshot(
+    {
+      fromLat: -23.5505,
+      fromLon: -46.6333,
+      toLat: -23.5617,
+      toLon: -46.6559,
+      transportMode: 'walking',
+      regionHint: 'sa-east-1-sao-paulo',
+    },
+    {
+      logger: silentLogger,
+      config: {
+        weather: { userAgent: 'AlertBackend/Tests' },
+        routing: { timeoutMs: 1400 },
+      },
+      routingProvider: async () => ({
+        ok: false,
+        degraded: true,
+        reasonCode: 'routing_provider_budget_exhausted',
+        retryable: true,
+        routes: [],
+        updatedAt: '2026-04-27T15:00:00.000Z',
+        providerId: 'osrm',
+        providerTargetId: 'osrm:region:sa-east-1',
+        providerSource: 'region',
+        providerRegionKey: 'sa-east-1',
+        transportMode: 'walking',
+        meta: {
+          providerTargetId: 'osrm:region:sa-east-1',
+          providerSource: 'region',
+          providerRegionKey: 'sa-east-1',
+          circuitState: 'open',
+          attempts: 0,
+          cacheHit: false,
+          latencyMs: 0,
+          timeoutMs: 1400,
+        },
+      }),
+    },
+  );
+
+  assert.equal(payload.available, true);
+  assert.equal(payload.routeMode, 'estimated_straight_line');
+  assert.equal(payload.provider.targetId, 'osrm:region:sa-east-1');
+  assert.equal(payload.provider.source, 'region');
+  assert.equal(payload.provider.regionKey, 'sa-east-1');
+  assert.equal(payload.reasonCode, 'routing_provider_budget_exhausted');
 });

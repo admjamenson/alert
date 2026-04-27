@@ -86,6 +86,14 @@ const buildFallbackRoute = params => {
 
 const buildProviderSnapshot = payload => ({
   id: String(payload?.providerId || 'osrm'),
+  targetId: String(
+    payload?.providerTargetId || payload?.meta?.providerTargetId || 'osrm:primary',
+  ),
+  source: String(
+    payload?.providerSource || payload?.meta?.providerSource || 'primary',
+  ),
+  regionKey:
+    payload?.providerRegionKey || payload?.meta?.providerRegionKey || null,
   available: Boolean(payload?.ok),
   degraded: Boolean(!payload?.ok || payload?.degraded),
   stale: Boolean(payload?.stale),
@@ -185,6 +193,7 @@ const ESTIMATED_ROUTE_REASON_CODES = new Set([
   'routing_provider_rate_limited',
   'routing_provider_circuit_open',
   'routing_provider_saturated',
+  'routing_provider_budget_exhausted',
 ]);
 
 const logDegradedRouting = (logger, payload) => {
@@ -192,6 +201,9 @@ const logDegradedRouting = (logger, payload) => {
   if (!target) return;
   target('[routing/service] degraded_route_snapshot', {
     providerId: payload?.provider?.id || 'osrm',
+    providerTargetId: payload?.provider?.targetId || 'osrm:primary',
+    providerSource: payload?.provider?.source || 'primary',
+    providerRegionKey: payload?.provider?.regionKey || null,
     routeMode: payload?.routeMode || ROUTE_MODE_UNAVAILABLE,
     degraded: Boolean(payload?.degraded),
     reasonCode: payload?.reasonCode || null,

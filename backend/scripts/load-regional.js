@@ -337,6 +337,10 @@ const requestOnce = async index => {
       degraded: Boolean(payload?.degraded),
       fallbackUsed: Boolean(payload?.fallbackUsed),
       routeMode: payload?.routeMode || null,
+      providerId: payload?.provider?.id || null,
+      providerTargetId: payload?.provider?.targetId || null,
+      providerSource: payload?.provider?.source || null,
+      providerRegionKey: payload?.provider?.regionKey || null,
       providerReasonCode: payload?.provider?.reasonCode || payload?.reasonCode || null,
     };
   } catch (error) {
@@ -378,6 +382,10 @@ const main = async () => {
   const overall = summarize(results);
   const byEndpoint = summarizeBy(results, 'endpoint');
   const byRegion = summarizeBy(results, 'region');
+  const byRouteProviderTarget = summarizeBy(
+    results.filter(row => row.endpoint === 'maps_routes' && row.providerTargetId),
+    'providerTargetId',
+  );
   const hotPaths = summarize(results.filter(row => row.hotPath));
   const providerPressure = summarize(results.filter(row => row.providerPressure));
   const criticalEndpoints = evaluateCriticalEndpoints(byEndpoint);
@@ -412,6 +420,7 @@ const main = async () => {
     overall,
     byEndpoint,
     byRegion,
+    byRouteProviderTarget,
     hotPaths,
     providerPressure,
     failureBudget: {

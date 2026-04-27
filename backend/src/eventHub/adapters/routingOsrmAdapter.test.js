@@ -242,6 +242,142 @@ test('routing adapter accepts walking alias as walk profile', async () => {
   assert.match(capturedCacheKey, /^maps-route:walk:/);
 });
 
+test('routing adapter prefers a regional provider target when region hint matches', async () => {
+  let capturedUrl = null;
+
+  const payload = await fetchRouteOptions(
+    {
+      fromLat: -23.5505,
+      fromLon: -46.6333,
+      toLat: -23.5617,
+      toLon: -46.6559,
+      transportMode: 'walking',
+      regionHint: 'sa-east-1-sao-paulo',
+    },
+    {
+      logger: silentLogger,
+      config: {
+        routing: {
+          providerBaseUrl: 'https://route-primary.alert.example/route/v1',
+          regionProviderBaseUrls: {
+            'sa-east-1': 'https://route-sa.alert.example/route/v1',
+          },
+        },
+      },
+      fetchJson: async url => {
+        capturedUrl = url;
+        return {
+          ok: true,
+          status: 200,
+          json: {
+            routes: [
+              {
+                distance: 1500,
+                duration: 900,
+                geometry: {
+                  coordinates: [
+                    [-46.6333, -23.5505],
+                    [-46.6559, -23.5617],
+                  ],
+                },
+              },
+            ],
+          },
+          cached: false,
+          fetchedAt: '2026-04-27T15:00:00.000Z',
+          attempts: 1,
+          durationMs: 44,
+        };
+      },
+    },
+  );
+
+  assert.equal(payload.ok, true);
+  assert.match(capturedUrl, /^https:\/\/route-sa\.alert\.example\/route\/v1\/walking\//);
+  assert.equal(payload.providerTargetId, 'osrm:region:sa-east-1');
+  assert.equal(payload.providerSource, 'region');
+  assert.equal(payload.providerRegionKey, 'sa-east-1');
+});
+
+test('routing adapter falls back from a degraded regional provider to the primary provider within budget', async () => {
+  const urls = [];
+
+  const payload = await fetchRouteOptions(
+    {
+      fromLat: 40.7128,
+      fromLon: -74.006,
+      toLat: 40.758,
+      toLon: -73.9855,
+      transportMode: 'walking',
+      regionHint: 'us-east-1-new-york',
+    },
+    {
+      logger: silentLogger,
+      now: (() => {
+        let current = 10_000;
+        return () => {
+          current += 150;
+          return current;
+        };
+      })(),
+      config: {
+        routing: {
+          providerBaseUrl: 'https://route-primary.alert.example/route/v1',
+          regionProviderBaseUrls: {
+            'us-east-1': 'https://route-use1.alert.example/route/v1',
+          },
+          timeoutMs: 1400,
+          retries: 0,
+          maxTotalWaitMs: 2200,
+        },
+      },
+      fetchJson: async url => {
+        urls.push(url);
+        if (url.startsWith('https://route-use1.alert.example/route/v1/')) {
+          return {
+            ok: false,
+            status: 0,
+            error: 'network_error',
+            errorType: 'timeout',
+            fetchedAt: '2026-04-27T15:00:00.000Z',
+            attempts: 1,
+            durationMs: 700,
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: {
+            routes: [
+              {
+                distance: 3200,
+                duration: 1200,
+                geometry: {
+                  coordinates: [
+                    [-74.006, 40.7128],
+                    [-73.9855, 40.758],
+                  ],
+                },
+              },
+            ],
+          },
+          cached: false,
+          fetchedAt: '2026-04-27T15:00:01.000Z',
+          attempts: 1,
+          durationMs: 420,
+        };
+      },
+    },
+  );
+
+  assert.equal(payload.ok, true);
+  assert.equal(urls.length, 2);
+  assert.match(urls[0], /^https:\/\/route-use1\.alert\.example\/route\/v1\/walking\//);
+  assert.match(urls[1], /^https:\/\/route-primary\.alert\.example\/route\/v1\/walking\//);
+  assert.equal(payload.providerTargetId, 'osrm:primary');
+  assert.equal(payload.providerSource, 'primary');
+});
+
 test('routing adapter serves stale route snapshot on provider timeout after a prior success', async () => {
   const baseParams = {
     fromLat: -3.73,

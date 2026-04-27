@@ -36,6 +36,20 @@ const readNumberEnv = (key, defaultValue, env = process.env) => {
   return Number.isFinite(parsed) ? parsed : defaultValue;
 };
 
+const readJsonObjectEnv = (key, env = process.env) => {
+  const raw = readOptionalEnv(key, env);
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {};
+    }
+    return parsed;
+  } catch (_error) {
+    return {};
+  }
+};
+
 const readAppEnv = (env = process.env) =>
   (readOptionalEnv('APP_ENV', env) ||
     readOptionalEnv('NODE_ENV', env) ||
@@ -59,6 +73,19 @@ const readProviderBaseUrl = (key, fallback, env = process.env) => {
     throw error;
   }
   return fallback;
+};
+
+const readRegionalProviderBaseUrls = (key, env = process.env) => {
+  const configured = readJsonObjectEnv(key, env);
+  return Object.entries(configured).reduce((accumulator, [regionKey, baseUrl]) => {
+    const normalizedRegionKey = String(regionKey || '').trim().toLowerCase();
+    const normalizedBaseUrl = String(baseUrl || '').trim();
+    if (!normalizedRegionKey || !normalizedBaseUrl) {
+      return accumulator;
+    }
+    accumulator[normalizedRegionKey] = normalizedBaseUrl;
+    return accumulator;
+  }, {});
 };
 
 const buildRuntimeConfig = (env = process.env) => ({
@@ -112,6 +139,14 @@ const buildRuntimeConfig = (env = process.env) => ({
     providerBaseUrl: readProviderBaseUrl(
       'ROUTING_OSRM_BASE_URL',
       'https://router.project-osrm.org/route/v1',
+      env,
+    ),
+    fallbackProviderBaseUrl: readOptionalEnv(
+      'ROUTING_OSRM_FALLBACK_BASE_URL',
+      env,
+    ),
+    regionProviderBaseUrls: readRegionalProviderBaseUrls(
+      'ROUTING_OSRM_REGION_BASE_URLS_JSON',
       env,
     ),
     timeoutMs: Math.max(
@@ -176,9 +211,11 @@ module.exports = {
   readBooleanEnv,
   readCsvSet,
   readNumberEnv,
+  readJsonObjectEnv,
   readAppEnv,
   allowPublicProviderDefaults,
   readProviderBaseUrl,
+  readRegionalProviderBaseUrls,
   buildRuntimeConfig,
   getRuntimeConfig,
   validateRuntimeConfig,
