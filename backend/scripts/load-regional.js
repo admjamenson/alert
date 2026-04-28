@@ -22,6 +22,10 @@ const MAPS_ROUTES_DEGRADED_RATE_MAX = Math.max(
   0,
   Math.min(1, Number(process.env.ALERT_LOAD_MAPS_ROUTES_DEGRADED_RATE_MAX || 0.5)),
 );
+const RISK_FEED_P95_MAX_MS = Math.max(
+  500,
+  Number(process.env.ALERT_LOAD_RISK_FEED_P95_MAX_MS || 1800),
+);
 
 const parseBaseUrl = value => {
   try {
@@ -200,6 +204,9 @@ const CRITICAL_ENDPOINT_NAMES = new Set([
 ]);
 
 const ENDPOINT_LATENCY_BUDGETS = {
+  risk_feed: {
+    p95Ms: RISK_FEED_P95_MAX_MS,
+  },
   maps_routes: {
     p95Ms: MAPS_ROUTES_P95_MAX_MS,
     degradedRateMax: MAPS_ROUTES_DEGRADED_RATE_MAX,

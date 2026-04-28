@@ -67,12 +67,30 @@ const resolveCityFromReverse = reverseData => {
   const result = Array.isArray(reverseData?.results)
     ? reverseData.results[0]
     : null;
+  if (result) {
+    return pickFirst(
+      result?.name,
+      result?.locality,
+      result?.admin2,
+      result?.admin1,
+      result?.country,
+    );
+  }
+
+  const address = reverseData?.address || {};
   return pickFirst(
-    result?.name,
-    result?.locality,
-    result?.admin2,
-    result?.admin1,
-    result?.country,
+    address.city,
+    address.town,
+    address.village,
+    address.hamlet,
+    address.municipality,
+    address.county,
+    address.city_district,
+    address.suburb,
+    address.neighbourhood,
+    reverseData?.name,
+    address.state,
+    address.country,
   );
 };
 

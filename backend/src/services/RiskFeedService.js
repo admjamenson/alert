@@ -1,6 +1,42 @@
 const { EventHubService } = require('../eventHub/EventHubService');
 const { bboxFromPoint, nowIso } = require('../eventHub/utils');
 
+const DEFAULT_RISK_FEED_TYPES = [
+  'sos',
+  'earthquake',
+  'flood',
+  'cyclone',
+  'hurricane',
+  'storm',
+  'wildfire',
+  'volcano',
+  'tsunami',
+  'drought',
+  'high_tide',
+  'rogue_waves',
+  'sandstorm',
+  'dust_devils',
+  'downdraft',
+  'heat',
+  'heatwave',
+  'snowstorm',
+  'lightning',
+  'hail',
+  'gale',
+  'wind',
+  'wind_gust_10',
+  'wind_gust_50',
+  'energy_outage',
+  'water_outage',
+];
+
+const RISK_FEED_CACHE = new Map();
+const RISK_FEED_INFLIGHT = new Map();
+const MAX_RISK_FEED_CACHE_ENTRIES = Math.max(
+  50,
+  Number(process.env.ALERT_RISK_FEED_CACHE_MAX_ENTRIES || 250),
+);
+
 const parseFiniteNumber = value => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
@@ -19,8 +55,77 @@ const clampLimit = value => {
 };
 
 const readRiskFeedTimeoutMs = () => {
-  const parsed = Number(process.env.ALERT_RISK_FEED_TIMEOUT_MS || 2200);
-  return Number.isFinite(parsed) ? Math.max(500, Math.round(parsed)) : 2200;
+  const parsed = Number(process.env.ALERT_RISK_FEED_TIMEOUT_MS || 1800);
+  return Number.isFinite(parsed) ? Math.max(500, Math.round(parsed)) : 1800;
+};
+
+const readRiskFeedCacheTtlMs = () => {
+  const parsed = Number(process.env.ALERT_RISK_FEED_CACHE_TTL_MS || 60_000);
+  return Number.isFinite(parsed) ? Math.max(250, Math.round(parsed)) : 60_000;
+};
+
+const readRiskFeedStaleTtlMs = () => {
+  const parsed = Number(process.env.ALERT_RISK_FEED_STALE_TTL_MS || 5 * 60_000);
+  return Number.isFinite(parsed) ? Math.max(readRiskFeedCacheTtlMs(), Math.round(parsed)) : 5 * 60_000;
+};
+
+const readRiskFeedTypes = () => {
+  const raw = String(process.env.ALERT_RISK_FEED_TYPES || '').trim();
+  const items = (raw ? raw.split(',') : DEFAULT_RISK_FEED_TYPES)
+    .map(item => String(item || '').trim().toLowerCase())
+    .filter(Boolean);
+  return Array.from(new Set(items));
+};
+
+const cloneRiskFeedPayload = payload => JSON.parse(JSON.stringify(payload));
+
+const riskFeedCacheKeyFor = ({
+  latitude,
+  longitude,
+  radiusKm,
+  limit,
+  sosPublicOptIn,
+  riskFeedTypes,
+}) =>
+  JSON.stringify({
+    latitude: Number(latitude).toFixed(3),
+    longitude: Number(longitude).toFixed(3),
+    radiusKm: clampRadiusKm(radiusKm),
+    limit: clampLimit(limit),
+    sosPublicOptIn: Boolean(sosPublicOptIn),
+    riskFeedTypes,
+  });
+
+const pruneRiskFeedCache = () => {
+  while (RISK_FEED_CACHE.size > MAX_RISK_FEED_CACHE_ENTRIES) {
+    const oldestKey = RISK_FEED_CACHE.keys().next().value;
+    if (!oldestKey) break;
+    RISK_FEED_CACHE.delete(oldestKey);
+  }
+};
+
+const readRiskFeedCacheEntry = key => {
+  const row = RISK_FEED_CACHE.get(key);
+  if (!row) return null;
+  const now = Date.now();
+  if (row.staleExpiresAt <= now) {
+    RISK_FEED_CACHE.delete(key);
+    return null;
+  }
+  return {
+    payload: cloneRiskFeedPayload(row.payload),
+    fresh: row.expiresAt > now,
+  };
+};
+
+const writeRiskFeedCacheEntry = (key, payload) => {
+  RISK_FEED_CACHE.delete(key);
+  RISK_FEED_CACHE.set(key, {
+    payload: cloneRiskFeedPayload(payload),
+    expiresAt: Date.now() + readRiskFeedCacheTtlMs(),
+    staleExpiresAt: Date.now() + readRiskFeedStaleTtlMs(),
+  });
+  pruneRiskFeedCache();
 };
 
 const withTimeout = async (promise, timeoutMs) => {
@@ -108,6 +213,25 @@ const shouldPreAlert = (alerts, riskScore) => {
   );
 };
 
+const buildRiskFeedTimeoutPayload = ({ riskFeedTypes }) => ({
+  alerts: [],
+  providers: [],
+  preAlert: {
+    shouldNotify: false,
+    reasonCodes: ['risk_feed_timeout'],
+  },
+  meta: {
+    generatedAt: nowIso(),
+    failClosed: true,
+    cacheHit: false,
+    hubAvailable: false,
+    degraded: true,
+    reason: 'risk_feed_timeout',
+    timeoutMs: readRiskFeedTimeoutMs(),
+    types: riskFeedTypes,
+  },
+});
+
 const getRiskFeed = async (
   { latitude, longitude, radiusKm, limit, riskScore, sosPublicOptIn },
   { db } = {},
@@ -132,65 +256,132 @@ const getRiskFeed = async (
   }
 
   const bbox = bboxFromPoint(lat, lon, clampRadiusKm(radiusKm));
-  const payload = await withTimeout(
-    EventHubService.getEvents(
-      {
-        bbox: [
-          bbox.minLon.toFixed(4),
-          bbox.minLat.toFixed(4),
-          bbox.maxLon.toFixed(4),
-          bbox.maxLat.toFixed(4),
-        ].join(','),
-        limit: clampLimit(limit),
-        sosPublicOptIn,
-      },
-      { db },
-    ),
-    readRiskFeedTimeoutMs(),
-  );
-
-  if (payload?.timedOut) {
+  const riskFeedTypes = readRiskFeedTypes();
+  const cacheKey = riskFeedCacheKeyFor({
+    latitude: lat,
+    longitude: lon,
+    radiusKm,
+    limit,
+    sosPublicOptIn,
+    riskFeedTypes,
+  });
+  const cached = readRiskFeedCacheEntry(cacheKey);
+  if (cached?.fresh) {
     return {
-      alerts: [],
-      providers: [],
+      ...cached.payload,
       preAlert: {
-        shouldNotify: false,
-        reasonCodes: ['risk_feed_timeout'],
+        shouldNotify: shouldPreAlert(cached.payload.alerts, riskScore),
+        reasonCodes: shouldPreAlert(cached.payload.alerts, riskScore)
+          ? ['elevated_risk_signal']
+          : [],
       },
       meta: {
+        ...cached.payload.meta,
         generatedAt: nowIso(),
-        failClosed: true,
-        cacheHit: false,
-        hubAvailable: false,
-        degraded: true,
-        reason: 'risk_feed_timeout',
-        timeoutMs: readRiskFeedTimeoutMs(),
+        cacheHit: true,
+        cacheLayer: 'risk_feed',
+        stale: false,
+        coalesced: false,
       },
     };
   }
 
-  const alerts = Array.isArray(payload?.events)
-    ? payload.events.map(toAlertNotification).filter(alert => alert.id)
-    : [];
-  const notify = shouldPreAlert(alerts, riskScore);
+  const existing = RISK_FEED_INFLIGHT.get(cacheKey);
+  if (existing) {
+    const payload = await existing;
+    return {
+      ...payload,
+      meta: {
+        ...payload.meta,
+        generatedAt: nowIso(),
+        coalesced: true,
+      },
+    };
+  }
 
-  return {
-    alerts,
-    providers: Array.isArray(payload?.providers) ? payload.providers : [],
-    preAlert: {
-      shouldNotify: notify,
-      reasonCodes: notify ? ['elevated_risk_signal'] : [],
-    },
-    meta: {
-      generatedAt: payload?.meta?.generatedAt || nowIso(),
-      failClosed: Boolean(payload?.meta?.failClosed ?? true),
-      cacheHit: Boolean(payload?.meta?.cacheHit),
-      hubAvailable: true,
-    },
-  };
+  const request = (async () => {
+    const payload = await withTimeout(
+      EventHubService.getEvents(
+        {
+          bbox: [
+            bbox.minLon.toFixed(4),
+            bbox.minLat.toFixed(4),
+            bbox.maxLon.toFixed(4),
+            bbox.maxLat.toFixed(4),
+          ].join(','),
+          types: riskFeedTypes.join(','),
+          limit: clampLimit(limit),
+          sosPublicOptIn,
+        },
+        { db },
+      ),
+      readRiskFeedTimeoutMs(),
+    );
+
+    if (payload?.timedOut) {
+      if (cached?.payload) {
+        return {
+          ...cached.payload,
+          preAlert: {
+            shouldNotify: shouldPreAlert(cached.payload.alerts, riskScore),
+            reasonCodes: ['risk_feed_timeout_stale'],
+          },
+          meta: {
+            ...cached.payload.meta,
+            generatedAt: nowIso(),
+            cacheHit: true,
+            cacheLayer: 'risk_feed',
+            stale: true,
+            hubAvailable: false,
+            degraded: true,
+            reason: 'risk_feed_timeout_stale',
+            timeoutMs: readRiskFeedTimeoutMs(),
+            types: riskFeedTypes,
+          },
+        };
+      }
+      return buildRiskFeedTimeoutPayload({ riskFeedTypes });
+    }
+
+    const alerts = Array.isArray(payload?.events)
+      ? payload.events.map(toAlertNotification).filter(alert => alert.id)
+      : [];
+    const notify = shouldPreAlert(alerts, riskScore);
+
+    const result = {
+      alerts,
+      providers: Array.isArray(payload?.providers) ? payload.providers : [],
+      preAlert: {
+        shouldNotify: notify,
+        reasonCodes: notify ? ['elevated_risk_signal'] : [],
+      },
+      meta: {
+        generatedAt: payload?.meta?.generatedAt || nowIso(),
+        failClosed: Boolean(payload?.meta?.failClosed ?? true),
+        cacheHit: Boolean(payload?.meta?.cacheHit),
+        cacheLayer: payload?.meta?.cacheHit ? payload?.meta?.cacheDriver || 'event_hub' : 'none',
+        hubAvailable: true,
+        stale: false,
+        coalesced: false,
+        types: riskFeedTypes,
+      },
+    };
+    writeRiskFeedCacheEntry(cacheKey, result);
+    return result;
+  })();
+
+  RISK_FEED_INFLIGHT.set(cacheKey, request);
+  try {
+    return await request;
+  } finally {
+    RISK_FEED_INFLIGHT.delete(cacheKey);
+  }
 };
 
 module.exports = {
   getRiskFeed,
+  readRiskFeedCacheTtlMs,
+  readRiskFeedStaleTtlMs,
   readRiskFeedTimeoutMs,
+  readRiskFeedTypes,
 };

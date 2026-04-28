@@ -1,7 +1,11 @@
 const { fetchJsonWithRetry } = require('../fetcher');
 const { bboxFromPoint, createUnifiedEvent, nowIso, toIso } = require('../utils');
 
-const GDACS_URL = 'https://www.gdacs.org/gdacsapi/api/events/geteventlist/';
+const GDACS_SEARCH_URL =
+  'https://www.gdacs.org/gdacsapi/api/events/geteventlist/SEARCH';
+const GDACS_EVENT_LIST = 'FL;TC;WF;VO;TS;DR';
+const GDACS_ALERT_LEVELS = 'green;orange;red';
+const GDACS_LOOKBACK_DAYS = 60;
 const OPEN_METEO_URL = 'https://api.open-meteo.com/v1/forecast';
 const WEATHER_NOWCAST_REFERENCE_URL = 'https://open-meteo.com/';
 const NOWCAST_EVENT_RADIUS_KM = 12;
@@ -44,6 +48,38 @@ const gdacsTypeToCategories = (eventType, title) => {
   return ['storm'];
 };
 
+const formatDateOnly = value => {
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : '';
+};
+
+const buildGdacsSearchUrl = (now = new Date()) => {
+  const endDate = now instanceof Date ? now : new Date(now);
+  const startDate = new Date(
+    endDate.getTime() - GDACS_LOOKBACK_DAYS * 24 * 60 * 60 * 1000,
+  );
+  const params = new URLSearchParams({
+    eventlist: GDACS_EVENT_LIST,
+    fromdate: formatDateOnly(startDate),
+    todate: formatDateOnly(endDate),
+    alertlevel: GDACS_ALERT_LEVELS,
+    pagesize: '100',
+  });
+  return `${GDACS_SEARCH_URL}?${params.toString()}`;
+};
+
+const resolveGdacsReferenceUrl = props => {
+  if (typeof props?.url === 'string' && props.url.trim()) {
+    return props.url.trim();
+  }
+  if (props?.url && typeof props.url === 'object') {
+    return String(
+      props.url.report || props.url.details || props.url.geometry || 'https://www.gdacs.org',
+    ).trim();
+  }
+  return 'https://www.gdacs.org';
+};
+
 const createGdacsEventsForItem = (item, provider) => {
   const props = item?.properties || item || {};
   const geometry = item?.geometry;
@@ -53,7 +89,9 @@ const createGdacsEventsForItem = (item, provider) => {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return [];
 
   const gdacsType = String(props.eventtype || props.type || '').toUpperCase();
-  const title = String(props.eventname || props.title || 'Global hazard alert');
+  const title = String(
+    props.eventname || props.name || props.title || props.description || 'Global hazard alert',
+  );
   const severity = levelToSeverity(props.alertlevel);
   const confidence = levelToConfidence(props.alertlevel);
   const categories = gdacsTypeToCategories(gdacsType, title);
@@ -61,7 +99,7 @@ const createGdacsEventsForItem = (item, provider) => {
   const updatedAt =
     toIso(props.todate || props.eventdate || props.fromdate || props.lastupdate) || nowIso();
   const startTime = toIso(props.fromdate || props.eventdate || updatedAt) || updatedAt;
-  const referenceUrl = String(props.url || 'https://www.gdacs.org');
+  const referenceUrl = resolveGdacsReferenceUrl(props);
   const country = String(props.country || props.iso3 || '').toUpperCase() || null;
 
   return categories.map((category, idx) =>
@@ -361,8 +399,9 @@ const createNowcastEvents = ({ json, provider, bbox }) => {
 
 const fetchMeteoGdacsEvents = async ({ provider }) => {
   const startedAt = Date.now();
-  const result = await fetchJsonWithRetry(GDACS_URL, {
-    cacheKey: `gdacs:${GDACS_URL}`,
+  const gdacsUrl = buildGdacsSearchUrl();
+  const result = await fetchJsonWithRetry(gdacsUrl, {
+    cacheKey: `gdacs:${gdacsUrl}`,
     cacheTtlMs: provider.cacheTTLms,
     retries: 2,
     retryDelayMs: 260,
@@ -527,6 +566,8 @@ module.exports = {
   fetchMeteoGdacsEvents,
   fetchMeteoNowcastEvents,
   __test__: {
+    buildGdacsSearchUrl,
+    createGdacsEventsForItem,
     createNowcastEvents,
     inferNowcastEventTypes,
     mapNowcastSeverity,
