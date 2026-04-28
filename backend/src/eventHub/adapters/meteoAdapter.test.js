@@ -3,18 +3,45 @@ const assert = require('node:assert/strict');
 
 const { __test__ } = require('./meteoAdapter');
 
-test('GDACS search URL uses the current SEARCH endpoint with bounded filters', () => {
-  const url = __test__.buildGdacsSearchUrl(new Date('2026-04-28T00:00:00.000Z'));
+test('GDACS item filter keeps only supported recent hazard types', () => {
+  const now = new Date('2026-04-28T00:00:00.000Z');
 
   assert.equal(
-    url.startsWith(
-      'https://www.gdacs.org/gdacsapi/api/events/geteventlist/SEARCH?',
+    __test__.includeGdacsItem(
+      {
+        properties: {
+          eventtype: 'FL',
+          todate: '2026-04-25T10:00:00Z',
+        },
+      },
+      now,
     ),
     true,
   );
-  assert.equal(url.includes('eventlist=FL%3BTC%3BWF%3BVO%3BTS%3BDR'), true);
-  assert.equal(url.includes('alertlevel=green%3Borange%3Bred'), true);
-  assert.equal(url.includes('pagesize=100'), true);
+  assert.equal(
+    __test__.includeGdacsItem(
+      {
+        properties: {
+          eventtype: 'EQ',
+          todate: '2026-04-25T10:00:00Z',
+        },
+      },
+      now,
+    ),
+    false,
+  );
+  assert.equal(
+    __test__.includeGdacsItem(
+      {
+        properties: {
+          eventtype: 'FL',
+          todate: '2025-12-01T10:00:00Z',
+        },
+      },
+      now,
+    ),
+    false,
+  );
 });
 
 test('GDACS event parsing prefers structured report URLs and human titles', () => {

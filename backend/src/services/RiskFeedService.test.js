@@ -2,13 +2,18 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { EventHubService } = require('../eventHub/EventHubService');
-const { getRiskFeed, readRiskFeedTypes } = require('./RiskFeedService');
+const {
+  getRiskFeed,
+  readRiskFeedTypes,
+  __dangerousResetRiskFeedCacheForTests,
+} = require('./RiskFeedService');
 
 test.afterEach(() => {
   delete process.env.ALERT_RISK_FEED_TYPES;
   delete process.env.ALERT_RISK_FEED_TIMEOUT_MS;
   delete process.env.ALERT_RISK_FEED_CACHE_TTL_MS;
   delete process.env.ALERT_RISK_FEED_STALE_TTL_MS;
+  __dangerousResetRiskFeedCacheForTests();
 });
 
 test('risk feed returns fail-soft payload for invalid location', async () => {
@@ -141,10 +146,76 @@ test('risk feed serves stale cached payload when provider fan-in times out after
 
     assert.equal(first.alerts.length, 1);
     assert.equal(second.alerts.length, 1);
-    assert.equal(second.meta.reason, 'risk_feed_timeout_stale');
+    assert.equal(second.meta.reason, 'risk_feed_stale_revalidate');
     assert.equal(second.meta.stale, true);
     assert.equal(second.meta.cacheHit, true);
-    assert.deepEqual(second.preAlert.reasonCodes, ['risk_feed_timeout_stale']);
+    assert.deepEqual(second.preAlert.reasonCodes, ['risk_feed_stale_revalidate']);
+  } finally {
+    EventHubService.getEvents = original;
+  }
+});
+
+test('risk feed returns stale payload immediately and refreshes in background after cache expiry', async () => {
+  const original = EventHubService.getEvents;
+  process.env.ALERT_RISK_FEED_TIMEOUT_MS = '500';
+  process.env.ALERT_RISK_FEED_CACHE_TTL_MS = '250';
+  process.env.ALERT_RISK_FEED_STALE_TTL_MS = '60000';
+  let calls = 0;
+  EventHubService.getEvents = async () => {
+    calls += 1;
+    if (calls === 1) {
+      return {
+        events: [
+          {
+            id: 'storm-2',
+            type: 'storm',
+            updatedAt: '2026-04-27T12:00:00.000Z',
+            severity: 'Severe',
+            source: { name: 'GDACS', trustTier: 'B' },
+            geometry: { coordinates: [-46.63, -23.55] },
+            recommendedActions: ['Fique atento'],
+          },
+        ],
+        providers: [],
+        meta: {},
+      };
+    }
+    return new Promise(resolve => {
+      setTimeout(
+        () =>
+          resolve({
+            events: [],
+            providers: [],
+            meta: {},
+          }),
+        800,
+      );
+    });
+  };
+
+  try {
+    await getRiskFeed({
+      latitude: -23.55,
+      longitude: -46.63,
+      radiusKm: 35,
+      limit: 80,
+    });
+    await new Promise(resolve => setTimeout(resolve, 550));
+
+    const startedAt = Date.now();
+    const second = await getRiskFeed({
+      latitude: -23.55,
+      longitude: -46.63,
+      radiusKm: 35,
+      limit: 80,
+    });
+    const durationMs = Date.now() - startedAt;
+
+    assert.equal(second.alerts.length, 1);
+    assert.equal(second.meta.reason, 'risk_feed_stale_revalidate');
+    assert.equal(second.meta.stale, true);
+    assert.equal(second.meta.refreshing, true);
+    assert.equal(durationMs < 300, true);
   } finally {
     EventHubService.getEvents = original;
   }

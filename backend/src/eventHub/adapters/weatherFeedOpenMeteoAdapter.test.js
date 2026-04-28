@@ -88,7 +88,7 @@ test('weather feed keeps forecast available when reverse geocoding times out', a
   }
 });
 
-test('weather feed reverse geocoding targets the Nominatim reverse endpoint', async () => {
+test('weather feed reverse geocoding targets the BigDataCloud reverse endpoint', async () => {
   const originalFetch = global.fetch;
   const seenUrls = [];
   global.fetch = url => {
@@ -112,11 +112,10 @@ test('weather feed reverse geocoding targets the Nominatim reverse endpoint', as
       status: 200,
       async json() {
         return {
-          address: {
-            city: 'Sao Paulo',
-            state: 'Sao Paulo',
-            country: 'Brazil',
-          },
+          city: 'Regiao Metropolitana de Sao Paulo',
+          locality: 'Sao Paulo',
+          principalSubdivision: 'Sao Paulo',
+          countryName: 'Brasil',
         };
       },
     });
@@ -135,7 +134,7 @@ test('weather feed reverse geocoding targets the Nominatim reverse endpoint', as
     assert.equal(result.forecastResult.ok, true);
     assert.equal(result.reverseResult.ok, true);
     assert.equal(
-      seenUrls.some(url => url.startsWith('https://nominatim.openstreetmap.org/reverse?')),
+      seenUrls.some(url => url.startsWith('https://api-bdc.io/data/reverse-geocode-client?')),
       true,
     );
   } finally {

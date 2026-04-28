@@ -1,10 +1,9 @@
 const { fetchJsonWithRetry } = require('../fetcher');
 const { bboxFromPoint, createUnifiedEvent, nowIso, toIso } = require('../utils');
 
-const GDACS_SEARCH_URL =
-  'https://www.gdacs.org/gdacsapi/api/events/geteventlist/SEARCH';
-const GDACS_EVENT_LIST = 'FL;TC;WF;VO;TS;DR';
-const GDACS_ALERT_LEVELS = 'green;orange;red';
+const GDACS_EVENTS4APP_URL =
+  'https://www.gdacs.org/gdacsapi/api/events/geteventlist/events4app';
+const GDACS_ALLOWED_EVENT_TYPES = new Set(['FL', 'TC', 'WF', 'VO', 'TS', 'DR']);
 const GDACS_LOOKBACK_DAYS = 60;
 const OPEN_METEO_URL = 'https://api.open-meteo.com/v1/forecast';
 const WEATHER_NOWCAST_REFERENCE_URL = 'https://open-meteo.com/';
@@ -48,24 +47,28 @@ const gdacsTypeToCategories = (eventType, title) => {
   return ['storm'];
 };
 
-const formatDateOnly = value => {
-  const date = value instanceof Date ? value : new Date(value);
-  return Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : '';
+const readGdacsTimestampMs = value => {
+  const parsed = Date.parse(String(value || ''));
+  return Number.isFinite(parsed) ? parsed : null;
 };
 
-const buildGdacsSearchUrl = (now = new Date()) => {
-  const endDate = now instanceof Date ? now : new Date(now);
-  const startDate = new Date(
-    endDate.getTime() - GDACS_LOOKBACK_DAYS * 24 * 60 * 60 * 1000,
-  );
-  const params = new URLSearchParams({
-    eventlist: GDACS_EVENT_LIST,
-    fromdate: formatDateOnly(startDate),
-    todate: formatDateOnly(endDate),
-    alertlevel: GDACS_ALERT_LEVELS,
-    pagesize: '100',
-  });
-  return `${GDACS_SEARCH_URL}?${params.toString()}`;
+const includeGdacsItem = (item, now = new Date()) => {
+  const props = item?.properties || item || {};
+  const eventType = String(props.eventtype || props.type || '')
+    .trim()
+    .toUpperCase();
+  if (!GDACS_ALLOWED_EVENT_TYPES.has(eventType)) {
+    return false;
+  }
+
+  const endDateMs = readGdacsTimestampMs(props.todate || props.eventdate || props.fromdate);
+  if (!Number.isFinite(endDateMs)) {
+    return false;
+  }
+
+  const nowMs = now instanceof Date ? now.getTime() : Date.parse(String(now || ''));
+  const lookbackMs = GDACS_LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
+  return endDateMs >= nowMs - lookbackMs;
 };
 
 const resolveGdacsReferenceUrl = props => {
@@ -399,9 +402,8 @@ const createNowcastEvents = ({ json, provider, bbox }) => {
 
 const fetchMeteoGdacsEvents = async ({ provider }) => {
   const startedAt = Date.now();
-  const gdacsUrl = buildGdacsSearchUrl();
-  const result = await fetchJsonWithRetry(gdacsUrl, {
-    cacheKey: `gdacs:${gdacsUrl}`,
+  const result = await fetchJsonWithRetry(GDACS_EVENTS4APP_URL, {
+    cacheKey: 'gdacs:events4app',
     cacheTtlMs: provider.cacheTTLms,
     retries: 2,
     retryDelayMs: 260,
@@ -433,13 +435,14 @@ const fetchMeteoGdacsEvents = async ({ provider }) => {
     };
   }
 
-  const rows = Array.isArray(result.json?.features)
+  const rows = (Array.isArray(result.json?.features)
     ? result.json.features
     : Array.isArray(result.json?.events)
       ? result.json.events
       : Array.isArray(result.json?.result)
         ? result.json.result
-        : [];
+        : [])
+    .filter(item => includeGdacsItem(item, new Date()));
 
   const events = rows.flatMap(item => createGdacsEventsForItem(item, provider));
 
@@ -566,8 +569,8 @@ module.exports = {
   fetchMeteoGdacsEvents,
   fetchMeteoNowcastEvents,
   __test__: {
-    buildGdacsSearchUrl,
     createGdacsEventsForItem,
+    includeGdacsItem,
     createNowcastEvents,
     inferNowcastEventTypes,
     mapNowcastSeverity,

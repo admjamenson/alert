@@ -64,6 +64,18 @@ const mapWmoToIcon = (code, isDay) => {
 };
 
 const resolveCityFromReverse = reverseData => {
+  if (reverseData && typeof reverseData === 'object') {
+    const direct = pickFirst(
+      reverseData.city,
+      reverseData.locality,
+      reverseData.principalSubdivision,
+      reverseData.countryName,
+    );
+    if (direct) {
+      return direct;
+    }
+  }
+
   const result = Array.isArray(reverseData?.results)
     ? reverseData.results[0]
     : null;

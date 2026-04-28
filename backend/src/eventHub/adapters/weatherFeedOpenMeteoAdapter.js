@@ -1,7 +1,8 @@
 const { fetchJsonWithRetry } = require('../fetcher');
 
 const OPEN_METEO_URL = 'https://api.open-meteo.com/v1/forecast';
-const NOMINATIM_REVERSE_URL = 'https://nominatim.openstreetmap.org/reverse';
+const BIG_DATA_CLOUD_REVERSE_URL =
+  'https://api-bdc.io/data/reverse-geocode-client';
 
 const readPositiveInteger = (value, fallback, minValue) => {
   const parsed = Number(value);
@@ -51,10 +52,9 @@ const fetchWeatherFeedOpenMeteo = async (
     '&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max,sunrise,sunset' +
     '&forecast_days=4&timezone=auto';
   const reverseUrl =
-    `${NOMINATIM_REVERSE_URL}?format=jsonv2&zoom=10` +
-    `&lat=${lat.toFixed(5)}` +
-    `&lon=${lon.toFixed(5)}` +
-    '&addressdetails=1';
+    `${BIG_DATA_CLOUD_REVERSE_URL}?latitude=${lat.toFixed(5)}` +
+    `&longitude=${lon.toFixed(5)}` +
+    `&localityLanguage=${encodeURIComponent(safeLocale.split('-')[0] || 'en')}`;
 
   const [forecastSettled, reverseSettled] = await Promise.allSettled([
     fetchJsonWithRetry(weatherUrl, {
