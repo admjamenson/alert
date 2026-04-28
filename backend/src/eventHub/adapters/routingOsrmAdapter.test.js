@@ -786,3 +786,139 @@ test('routing adapter fails fast with provider_saturated when global route concu
   assert.equal(secondCall.reasonCode, 'routing_provider_saturated');
   assert.equal(secondCall.meta.attempts, 0);
 });
+
+test('routing adapter keeps multi-region burst responses healthy with the restored concurrency budget', async () => {
+  const requests = [
+    {
+      fromLat: -23.5505,
+      fromLon: -46.6333,
+      toLat: -23.5617,
+      toLon: -46.6559,
+      regionHint: 'sa-east-1-sao-paulo',
+    },
+    {
+      fromLat: 40.7128,
+      fromLon: -74.006,
+      toLat: 40.758,
+      toLon: -73.9855,
+      regionHint: 'us-east-1-new-york',
+    },
+    {
+      fromLat: 51.5072,
+      fromLon: -0.1276,
+      toLat: 51.5155,
+      toLon: -0.1419,
+      regionHint: 'eu-west-2-london',
+    },
+    {
+      fromLat: 35.6762,
+      fromLon: 139.6503,
+      toLat: 35.6895,
+      toLon: 139.6917,
+      regionHint: 'ap-northeast-1-tokyo',
+    },
+    {
+      fromLat: 1.3521,
+      fromLon: 103.8198,
+      toLat: 1.2834,
+      toLon: 103.8607,
+      regionHint: 'ap-southeast-1-singapore',
+    },
+    {
+      fromLat: -23.5505,
+      fromLon: -46.6333,
+      toLat: -23.5618,
+      toLon: -46.6558,
+      regionHint: 'sa-east-1-sao-paulo',
+    },
+    {
+      fromLat: 40.7128,
+      fromLon: -74.006,
+      toLat: 40.7581,
+      toLon: -73.9854,
+      regionHint: 'us-east-1-new-york',
+    },
+    {
+      fromLat: 51.5072,
+      fromLon: -0.1276,
+      toLat: 51.5156,
+      toLon: -0.1418,
+      regionHint: 'eu-west-2-london',
+    },
+  ];
+  const observedUrls = [];
+
+  const results = await Promise.all(
+    requests.map(routeRequest =>
+      fetchRouteOptions(
+        {
+          ...routeRequest,
+          transportMode: 'walking',
+        },
+        {
+          logger: silentLogger,
+          config: {
+            routing: {
+              providerBaseUrl: 'https://route-primary.alert.example/route/v1',
+              fallbackProviderBaseUrl:
+                'https://route-fallback.alert.example/route/v1',
+              maxConcurrentRequests: 4,
+              timeoutMs: 900,
+              retries: 0,
+              maxTotalWaitMs: 1400,
+            },
+          },
+          fetchJson: async url => {
+            observedUrls.push(url);
+            await new Promise(resolve => setTimeout(resolve, 20));
+            return {
+              ok: true,
+              status: 200,
+              json: {
+                routes: [
+                  {
+                    distance: 2200,
+                    duration: 860,
+                    geometry: {
+                      coordinates: [
+                        [routeRequest.fromLon, routeRequest.fromLat],
+                        [routeRequest.toLon, routeRequest.toLat],
+                      ],
+                    },
+                  },
+                ],
+              },
+              cached: false,
+              fetchedAt: '2026-04-28T17:40:00.000Z',
+              attempts: 1,
+              durationMs: 20,
+            };
+          },
+        },
+      ),
+    ),
+  );
+
+  assert.equal(results.filter(result => result.ok).length, 8);
+  assert.equal(results.filter(result => result.degraded).length, 0);
+  assert.equal(
+    results.filter(result => result.providerTargetId === 'osrm:primary').length,
+    4,
+  );
+  assert.equal(
+    results.filter(result => result.providerTargetId === 'osrm:fallback').length,
+    4,
+  );
+  assert.equal(
+    observedUrls.filter(url =>
+      url.startsWith('https://route-primary.alert.example/route/v1/'),
+    ).length,
+    4,
+  );
+  assert.equal(
+    observedUrls.filter(url =>
+      url.startsWith('https://route-fallback.alert.example/route/v1/'),
+    ).length,
+    4,
+  );
+});

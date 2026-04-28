@@ -120,7 +120,7 @@ test('runtime config hardens route provider defaults for burst protection', () =
   assert.equal(config.routing.retryDelayMs, 120);
   assert.equal(config.routing.maxTotalWaitMs, 1600);
   assert.equal(config.routing.failureThreshold, 2);
-  assert.equal(config.routing.maxConcurrentRequests, 2);
+  assert.equal(config.routing.maxConcurrentRequests, 4);
   assert.equal(config.routing.cacheTtlMs, 5 * 60 * 1000);
   assert.equal(config.routing.staleRouteTtlMs, 15 * 60 * 1000);
   assert.equal(config.routing.staleRouteMaxEntries, 1000);
