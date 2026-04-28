@@ -378,6 +378,84 @@ test('routing adapter falls back from a degraded regional provider to the primar
   assert.equal(payload.providerSource, 'primary');
 });
 
+test('routing adapter gives a secondary provider a short recovery window before declaring budget exhausted', async () => {
+  const urls = [];
+
+  const payload = await fetchRouteOptions(
+    {
+      fromLat: 40.7128,
+      fromLon: -74.006,
+      toLat: 40.758,
+      toLon: -73.9855,
+      transportMode: 'walking',
+      regionHint: 'us-east-1-new-york',
+    },
+    {
+      logger: silentLogger,
+      now: (() => {
+        const values = [10_000, 10_000, 10_910, 11_020, 11_140];
+        let index = 0;
+        return () => {
+          const value = values[Math.min(index, values.length - 1)];
+          index += 1;
+          return value;
+        };
+      })(),
+      config: {
+        routing: {
+          providerBaseUrl: 'https://route-primary.alert.example/route/v1',
+          fallbackProviderBaseUrl: 'https://route-fallback.alert.example/route/v1',
+          timeoutMs: 900,
+          retries: 0,
+          maxTotalWaitMs: 1400,
+        },
+      },
+      fetchJson: async (url, options = {}) => {
+        urls.push({ url, timeoutMs: options.timeoutMs });
+        if (url.startsWith('https://route-primary.alert.example/route/v1/')) {
+          return {
+            ok: false,
+            status: 0,
+            error: 'network_error',
+            errorType: 'timeout',
+            fetchedAt: '2026-04-28T19:30:00.000Z',
+            attempts: 1,
+            durationMs: 900,
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: {
+            routes: [
+              {
+                distance: 3200,
+                duration: 1200,
+                geometry: {
+                  coordinates: [
+                    [-74.006, 40.7128],
+                    [-73.9855, 40.758],
+                  ],
+                },
+              },
+            ],
+          },
+          cached: false,
+          fetchedAt: '2026-04-28T19:30:01.000Z',
+          attempts: 1,
+          durationMs: 120,
+        };
+      },
+    },
+  );
+
+  assert.equal(payload.ok, true);
+  assert.equal(payload.providerTargetId, 'osrm:fallback');
+  assert.equal(urls.length, 2);
+  assert.equal(urls[0].timeoutMs, 900);
+  assert.equal(urls[1].timeoutMs, 380);
+});
+
 test('routing adapter isolates circuit state by region so one bad region does not poison another', async () => {
   const config = {
     routing: {

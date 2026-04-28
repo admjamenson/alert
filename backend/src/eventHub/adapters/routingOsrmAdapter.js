@@ -558,11 +558,17 @@ const computeRetryBudget = ({
   return allowedRetries;
 };
 
-const MIN_PROVIDER_ATTEMPT_BUDGET_MS = 500;
+const PRIMARY_PROVIDER_MIN_TIMEOUT_MS = 900;
+const ALTERNATE_PROVIDER_MIN_TIMEOUT_MS = 250;
+
+const readMinimumAttemptTimeoutMs = targetIndex =>
+  targetIndex > 0
+    ? ALTERNATE_PROVIDER_MIN_TIMEOUT_MS
+    : PRIMARY_PROVIDER_MIN_TIMEOUT_MS;
 
 const canTryAnotherProviderTarget = (targets, currentIndex, remainingBudgetMs) =>
   currentIndex < targets.length - 1 &&
-  Number(remainingBudgetMs || 0) >= MIN_PROVIDER_ATTEMPT_BUDGET_MS;
+  Number(remainingBudgetMs || 0) >= readMinimumAttemptTimeoutMs(currentIndex + 1);
 
 const fetchRouteOptions = async (
   { fromLat, fromLon, toLat, toLon, transportMode, regionHint },
@@ -659,7 +665,7 @@ const fetchRouteOptions = async (
     const currentCircuitState = readCircuitState(providerState, attemptStartedAt);
     const lastFailureAt = providerState.lastFailureAt;
 
-    if (remainingBudgetMs < MIN_PROVIDER_ATTEMPT_BUDGET_MS) {
+    if (remainingBudgetMs < readMinimumAttemptTimeoutMs(targetIndex)) {
       if (staleSnapshot) {
         logProviderEvent(logger, 'warn', 'stale_snapshot_preferred', {
           providerId: ROUTING_PROVIDER_ID,
@@ -815,7 +821,7 @@ const fetchRouteOptions = async (
       `?overview=full&geometries=geojson&alternatives=${alternatives}` +
       '&steps=false&annotations=false';
     const effectiveTimeoutMs = Math.max(
-      900,
+      readMinimumAttemptTimeoutMs(targetIndex),
       Math.min(timeoutMs, remainingBudgetMs),
     );
 
