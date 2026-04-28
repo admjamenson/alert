@@ -378,6 +378,212 @@ test('routing adapter falls back from a degraded regional provider to the primar
   assert.equal(payload.providerSource, 'primary');
 });
 
+test('routing adapter isolates circuit state by region so one bad region does not poison another', async () => {
+  const config = {
+    routing: {
+      providerBaseUrl: 'https://route-primary.alert.example/route/v1',
+      timeoutMs: 1400,
+      retries: 0,
+      failureThreshold: 2,
+    },
+  };
+  const failingFetch = async () => ({
+    ok: false,
+    status: 0,
+    error: 'network_error',
+    errorType: 'timeout',
+    fetchedAt: '2026-04-27T16:00:00.000Z',
+    attempts: 1,
+    durationMs: 700,
+  });
+
+  await fetchRouteOptions(
+    {
+      fromLat: -23.5505,
+      fromLon: -46.6333,
+      toLat: -23.5617,
+      toLon: -46.6559,
+      transportMode: 'walking',
+      regionHint: 'sa-east-1-sao-paulo',
+    },
+    {
+      logger: silentLogger,
+      config,
+      now: () => 5_000,
+      fetchJson: failingFetch,
+    },
+  );
+
+  await fetchRouteOptions(
+    {
+      fromLat: -23.5505,
+      fromLon: -46.6333,
+      toLat: -23.5617,
+      toLon: -46.6559,
+      transportMode: 'walking',
+      regionHint: 'sa-east-1-sao-paulo',
+    },
+    {
+      logger: silentLogger,
+      config,
+      now: () => 5_001,
+      fetchJson: failingFetch,
+    },
+  );
+
+  let healthyRegionCalled = false;
+  const healthyPayload = await fetchRouteOptions(
+    {
+      fromLat: 40.7128,
+      fromLon: -74.006,
+      toLat: 40.758,
+      toLon: -73.9855,
+      transportMode: 'walking',
+      regionHint: 'us-east-1-new-york',
+    },
+    {
+      logger: silentLogger,
+      config,
+      now: () => 5_002,
+      fetchJson: async () => {
+        healthyRegionCalled = true;
+        return {
+          ok: true,
+          status: 200,
+          json: {
+            routes: [
+              {
+                distance: 3200,
+                duration: 1200,
+                geometry: {
+                  coordinates: [
+                    [-74.006, 40.7128],
+                    [-73.9855, 40.758],
+                  ],
+                },
+              },
+            ],
+          },
+          cached: false,
+          fetchedAt: '2026-04-27T16:00:02.000Z',
+          attempts: 1,
+          durationMs: 420,
+        };
+      },
+    },
+  );
+
+  assert.equal(healthyRegionCalled, true);
+  assert.equal(healthyPayload.ok, true);
+  assert.equal(healthyPayload.providerTargetId, 'osrm:primary');
+});
+
+test('routing adapter remembers the last successful provider target for the same region and mode', async () => {
+  const urls = [];
+  const config = {
+    routing: {
+      providerBaseUrl: 'https://route-primary.alert.example/route/v1',
+      fallbackProviderBaseUrl: 'https://route-fallback.alert.example/route/v1',
+      timeoutMs: 1400,
+      retries: 0,
+      maxTotalWaitMs: 2200,
+    },
+  };
+  const params = {
+    fromLat: 51.5072,
+    fromLon: -0.1276,
+    toLat: 51.5155,
+    toLon: -0.1419,
+    transportMode: 'walking',
+    regionHint: 'eu-west-2-london',
+  };
+
+  const firstPayload = await fetchRouteOptions(params, {
+    logger: silentLogger,
+    config,
+    now: (() => {
+      let current = 20_000;
+      return () => {
+        current += 120;
+        return current;
+      };
+    })(),
+    fetchJson: async url => {
+      urls.push(url);
+      if (url.startsWith('https://route-primary.alert.example/route/v1/')) {
+        return {
+          ok: false,
+          status: 0,
+          error: 'network_error',
+          errorType: 'timeout',
+          fetchedAt: '2026-04-27T16:02:00.000Z',
+          attempts: 1,
+          durationMs: 650,
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: {
+          routes: [
+            {
+              distance: 2400,
+              duration: 860,
+              geometry: {
+                coordinates: [
+                  [-0.1276, 51.5072],
+                  [-0.1419, 51.5155],
+                ],
+              },
+            },
+          ],
+        },
+        cached: false,
+        fetchedAt: '2026-04-27T16:02:01.000Z',
+        attempts: 1,
+        durationMs: 410,
+      };
+    },
+  });
+
+  assert.equal(firstPayload.ok, true);
+  assert.equal(firstPayload.providerTargetId, 'osrm:fallback');
+
+  urls.length = 0;
+  const secondPayload = await fetchRouteOptions(params, {
+    logger: silentLogger,
+    config,
+    fetchJson: async url => {
+      urls.push(url);
+      return {
+        ok: true,
+        status: 200,
+        json: {
+          routes: [
+            {
+              distance: 2400,
+              duration: 860,
+              geometry: {
+                coordinates: [
+                  [-0.1276, 51.5072],
+                  [-0.1419, 51.5155],
+                ],
+              },
+            },
+          ],
+        },
+        cached: false,
+        fetchedAt: '2026-04-27T16:02:02.000Z',
+        attempts: 1,
+        durationMs: 300,
+      };
+    },
+  });
+
+  assert.equal(secondPayload.ok, true);
+  assert.match(urls[0], /^https:\/\/route-fallback\.alert\.example\/route\/v1\/walking\//);
+});
+
 test('routing adapter serves stale route snapshot on provider timeout after a prior success', async () => {
   const baseParams = {
     fromLat: -3.73,

@@ -20,7 +20,9 @@ const MODE_TO_PROFILE = {
   walk: 'walking',
 };
 
-const PROVIDER_STATES = new Map();
+const PROVIDER_CIRCUIT_STATES = new Map();
+const PROVIDER_ACTIVE_REQUESTS = new Map();
+const PROVIDER_TARGET_PREFERENCES = new Map();
 const STALE_ROUTE_CACHE = new Map();
 
 const silentLogger = {
@@ -34,16 +36,66 @@ const buildEmptyProviderState = () => ({
   openUntil: 0,
   lastReasonCode: null,
   lastFailureAt: null,
-  activeRequests: 0,
 });
 
-const getProviderState = targetId => {
-  const key = String(targetId || `${ROUTING_PROVIDER_ID}:primary`);
-  if (!PROVIDER_STATES.has(key)) {
-    PROVIDER_STATES.set(key, buildEmptyProviderState());
+const resolveRegionScope = (regionHint, providerTarget) =>
+  normalizeRegionHint(regionHint) ||
+  normalizeRegionHint(providerTarget?.regionKey) ||
+  'global';
+
+const buildProviderHealthKey = (providerTarget, mode, regionHint) =>
+  sanitizeProviderTargetId(
+    `${providerTarget?.targetId || `${ROUTING_PROVIDER_ID}:primary`}:${normalizeMode(
+      mode,
+    )}:${resolveRegionScope(regionHint, providerTarget)}`,
+  );
+
+const getProviderCircuitState = healthKey => {
+  const key = String(healthKey || `${ROUTING_PROVIDER_ID}:primary:car:global`);
+  if (!PROVIDER_CIRCUIT_STATES.has(key)) {
+    PROVIDER_CIRCUIT_STATES.set(key, buildEmptyProviderState());
   }
-  return PROVIDER_STATES.get(key);
+  return PROVIDER_CIRCUIT_STATES.get(key);
 };
+
+const getActiveRequestCount = targetId =>
+  Math.max(0, Number(PROVIDER_ACTIVE_REQUESTS.get(String(targetId || 'unknown')) || 0));
+
+const incrementActiveRequestCount = targetId => {
+  const key = String(targetId || 'unknown');
+  PROVIDER_ACTIVE_REQUESTS.set(key, getActiveRequestCount(key) + 1);
+};
+
+const decrementActiveRequestCount = targetId => {
+  const key = String(targetId || 'unknown');
+  const nextValue = Math.max(0, getActiveRequestCount(key) - 1);
+  if (nextValue <= 0) {
+    PROVIDER_ACTIVE_REQUESTS.delete(key);
+    return;
+  }
+  PROVIDER_ACTIVE_REQUESTS.set(key, nextValue);
+};
+
+const buildProviderPreferenceKey = (mode, regionHint, providerTarget) =>
+  `${normalizeMode(mode)}:${resolveRegionScope(regionHint, providerTarget)}`;
+
+const rememberPreferredProviderTarget = (mode, regionHint, providerTarget) => {
+  PROVIDER_TARGET_PREFERENCES.set(
+    buildProviderPreferenceKey(mode, regionHint, providerTarget),
+    sanitizeProviderTargetId(providerTarget?.targetId || `${ROUTING_PROVIDER_ID}:primary`),
+  );
+};
+
+const clearPreferredProviderTarget = (mode, regionHint, providerTarget) => {
+  PROVIDER_TARGET_PREFERENCES.delete(
+    buildProviderPreferenceKey(mode, regionHint, providerTarget),
+  );
+};
+
+const readPreferredProviderTargetId = (mode, regionHint, providerTarget) =>
+  PROVIDER_TARGET_PREFERENCES.get(
+    buildProviderPreferenceKey(mode, regionHint, providerTarget),
+  ) || null;
 
 const normalizeMode = value => {
   const normalized = String(value || '').trim().toLowerCase();
@@ -131,7 +183,7 @@ const resolveRegionalProviderBaseUrl = (regionHint, routingConfig) => {
   return bestMatch;
 };
 
-const resolveProviderTargets = (routingConfig, regionHint) => {
+const resolveProviderTargets = (routingConfig, regionHint, mode) => {
   const targets = [];
   const seenBaseUrls = new Set();
   const appendTarget = params => {
@@ -162,7 +214,22 @@ const resolveProviderTargets = (routingConfig, regionHint) => {
     baseUrl: routingConfig?.fallbackProviderBaseUrl || '',
   });
 
-  return targets;
+  const preferredTargetId = readPreferredProviderTargetId(mode, regionHint, {
+    regionKey: resolveRegionalProviderBaseUrl(regionHint, routingConfig)?.regionKey || null,
+  });
+  if (!preferredTargetId) {
+    return targets;
+  }
+
+  return targets.sort((left, right) => {
+    if (left.targetId === preferredTargetId && right.targetId !== preferredTargetId) {
+      return -1;
+    }
+    if (right.targetId === preferredTargetId && left.targetId !== preferredTargetId) {
+      return 1;
+    }
+    return 0;
+  });
 };
 
 const isStrictFiniteNumber = value => {
@@ -193,7 +260,6 @@ const resetCircuit = providerState => {
   providerState.openUntil = 0;
   providerState.lastReasonCode = null;
   providerState.lastFailureAt = null;
-  providerState.activeRequests = 0;
 };
 
 const buildMeta = params => ({
@@ -553,7 +619,7 @@ const fetchRouteOptions = async (
     destinationLon,
   });
   const staleSnapshot = readStaleRouteSnapshot(cacheKey);
-  const providerTargets = resolveProviderTargets(routingConfig, regionHint);
+  const providerTargets = resolveProviderTargets(routingConfig, regionHint, mode);
   const profile = MODE_TO_PROFILE[mode] || MODE_TO_PROFILE.car;
   const alternatives = profile === 'driving' ? 'true' : 'false';
   const maxConcurrentRequests = readMaxConcurrentRequests(config);
@@ -562,7 +628,8 @@ const fetchRouteOptions = async (
 
   for (let targetIndex = 0; targetIndex < providerTargets.length; targetIndex += 1) {
     const providerTarget = providerTargets[targetIndex];
-    const providerState = getProviderState(providerTarget.targetId);
+    const providerHealthKey = buildProviderHealthKey(providerTarget, mode, regionHint);
+    const providerState = getProviderCircuitState(providerHealthKey);
     const attemptStartedAt = now();
     const remainingBudgetMs = Math.max(
       0,
@@ -657,7 +724,8 @@ const fetchRouteOptions = async (
       });
     }
 
-    if (providerState.activeRequests >= maxConcurrentRequests) {
+    const activeRequests = getActiveRequestCount(providerTarget.targetId);
+    if (activeRequests >= maxConcurrentRequests) {
       logProviderEvent(logger, 'warn', 'provider_saturated', {
         providerId: ROUTING_PROVIDER_ID,
         providerTargetId: providerTarget.targetId,
@@ -665,7 +733,7 @@ const fetchRouteOptions = async (
         providerRegionKey: providerTarget.regionKey,
         providerBaseUrl: providerTarget.baseUrl,
         transportMode: mode,
-        activeRequests: providerState.activeRequests,
+        activeRequests,
         maxConcurrentRequests,
       });
 
@@ -689,7 +757,7 @@ const fetchRouteOptions = async (
           providerSource: providerTarget.source,
           providerRegionKey: providerTarget.regionKey,
           transportMode: mode,
-          activeRequests: providerState.activeRequests,
+          activeRequests,
           maxConcurrentRequests,
         });
         return buildStaleSnapshotResponse({
@@ -743,7 +811,7 @@ const fetchRouteOptions = async (
       circuitState: currentCircuitState,
     });
 
-    providerState.activeRequests += 1;
+    incrementActiveRequestCount(providerTarget.targetId);
     let response;
     try {
       response = await fetchJson(url, {
@@ -763,7 +831,7 @@ const fetchRouteOptions = async (
         },
       });
     } finally {
-      providerState.activeRequests = Math.max(0, providerState.activeRequests - 1);
+      decrementActiveRequestCount(providerTarget.targetId);
     }
 
     if (!response.ok) {
@@ -804,6 +872,7 @@ const fetchRouteOptions = async (
         updatedAt: response.fetchedAt || new Date().toISOString(),
         lastFailureAt: providerState.lastFailureAt,
       });
+      clearPreferredProviderTarget(mode, regionHint, providerTarget);
 
       if (canTryAnotherProviderTarget(providerTargets, targetIndex, remainingBudgetMs)) {
         logProviderEvent(logger, 'warn', 'provider_fallback_next', {
@@ -901,6 +970,7 @@ const fetchRouteOptions = async (
         updatedAt: response.fetchedAt || new Date().toISOString(),
         lastFailureAt: providerState.lastFailureAt,
       });
+      clearPreferredProviderTarget(mode, regionHint, providerTarget);
 
       if (
         reasonCode === 'routing_no_route' &&
@@ -922,6 +992,7 @@ const fetchRouteOptions = async (
     }
 
     registerSuccess(providerState);
+    rememberPreferredProviderTarget(mode, regionHint, providerTarget);
     const completedCircuitState = readCircuitState(providerState, now());
     writeStaleRouteSnapshot(
       cacheKey,
@@ -981,16 +1052,20 @@ const fetchRouteOptions = async (
 module.exports = {
   fetchRouteOptions,
   __dangerousResetRoutingProviderStateForTests: () => {
-    PROVIDER_STATES.clear();
+    PROVIDER_CIRCUIT_STATES.clear();
+    PROVIDER_ACTIVE_REQUESTS.clear();
+    PROVIDER_TARGET_PREFERENCES.clear();
   },
   __dangerousResetStaleRouteCacheForTests: () => {
     STALE_ROUTE_CACHE.clear();
   },
   __dangerousGetRoutingProviderStateForTests: () => ({
-    providers: Array.from(PROVIDER_STATES.entries()).map(([targetId, state]) => ({
-      targetId,
+    providers: Array.from(PROVIDER_CIRCUIT_STATES.entries()).map(([healthKey, state]) => ({
+      healthKey,
       ...state,
       circuitState: readCircuitState(state, Date.now()),
     })),
+    activeRequests: Object.fromEntries(PROVIDER_ACTIVE_REQUESTS.entries()),
+    preferences: Object.fromEntries(PROVIDER_TARGET_PREFERENCES.entries()),
   }),
 };
