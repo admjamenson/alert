@@ -137,6 +137,17 @@ const resolveProviderIds = types => {
   return Array.from(ids);
 };
 
+const normalizeProviderIdsOverride = value =>
+  Array.isArray(value)
+    ? Array.from(
+        new Set(
+          value
+            .map(item => String(item || '').trim())
+            .filter(item => item && providerForId(item)),
+        ),
+      )
+    : null;
+
 const updateProviderStatus = status => {
   if (!status?.providerId) return;
   LAST_PROVIDER_STATUS.set(status.providerId, {
@@ -257,7 +268,9 @@ const EventHubService = {
       query.sosPublicOptIn === 'true' ||
       String(query.sosPublicOptIn || '') === '1';
     const limit = Math.max(1, Math.min(250, Number(query.limit || 120)));
-    const providerIds = resolveProviderIds(types);
+    const providerIds =
+      normalizeProviderIdsOverride(deps.providerIdsOverride) ||
+      resolveProviderIds(types);
 
     const cacheKey = cacheKeyForEvents({
       bbox,

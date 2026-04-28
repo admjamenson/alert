@@ -405,7 +405,7 @@ const fetchMeteoGdacsEvents = async ({ provider }) => {
   const result = await fetchJsonWithRetry(GDACS_EVENTS4APP_URL, {
     cacheKey: 'gdacs:events4app',
     cacheTtlMs: provider.cacheTTLms,
-    retries: 2,
+    retries: 0,
     retryDelayMs: 260,
     timeoutMs: provider.latencyBudgetMs || 1500,
     rateLimitKey: provider.id,

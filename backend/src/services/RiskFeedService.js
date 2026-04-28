@@ -30,6 +30,13 @@ const DEFAULT_RISK_FEED_TYPES = [
   'water_outage',
 ];
 
+const HOT_PATH_PROVIDER_IDS = [
+  'community_alert_sos',
+  'geophysical_usgs',
+  'meteo_nowcast_openmeteo',
+  'infra_outages',
+];
+
 const RISK_FEED_CACHE = new Map();
 const RISK_FEED_INFLIGHT = new Map();
 const MAX_RISK_FEED_CACHE_ENTRIES = Math.max(
@@ -329,7 +336,10 @@ const getRiskFeed = async (
                 limit: clampLimit(limit),
                 sosPublicOptIn,
               },
-              { db },
+              {
+                db,
+                providerIdsOverride: HOT_PATH_PROVIDER_IDS,
+              },
             ),
             readRiskFeedTimeoutMs(),
           );
@@ -428,7 +438,10 @@ const getRiskFeed = async (
           limit: clampLimit(limit),
           sosPublicOptIn,
         },
-        { db },
+        {
+          db,
+          providerIdsOverride: HOT_PATH_PROVIDER_IDS,
+        },
       ),
       readRiskFeedTimeoutMs(),
     );
