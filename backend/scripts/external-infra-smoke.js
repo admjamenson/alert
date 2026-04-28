@@ -1,6 +1,8 @@
 'use strict';
 
 const { execFileSync } = require('node:child_process');
+const http = require('node:http');
+const https = require('node:https');
 const path = require('node:path');
 
 const { createCacheStore } = require('../src/platform/cache/createCacheStore');
@@ -19,6 +21,9 @@ let cacheRedisUrl = process.env.ALERT_CACHE_REDIS_URL || sharedRedisUrl;
 const queueName = process.env.ALERT_QUEUE_NAME || 'alert-sos-fanout-smoke';
 const sosFanoutQueueName =
   process.env.ALERT_SOS_FANOUT_QUEUE_NAME || 'alert-sos-fanout';
+const sosFanoutProofBaseUrl = String(
+  process.env.ALERT_SOS_FANOUT_PROOF_BASE_URL || process.env.ALERT_LOAD_BASE_URL || '',
+).trim();
 
 const checks = [];
 let redisRoundtripPassed = false;
@@ -61,6 +66,50 @@ const probeTool = command => {
 };
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+const requestJson = (method, rawUrl, body = null) =>
+  new Promise((resolve, reject) => {
+    const target = new URL(rawUrl);
+    const transport = target.protocol === 'http:' ? http : https;
+    const payload = body ? JSON.stringify(body) : '';
+    const request = transport.request(
+      target,
+      {
+        method,
+        headers: payload
+          ? {
+              'content-type': 'application/json',
+              'content-length': Buffer.byteLength(payload),
+            }
+          : undefined,
+      },
+      response => {
+        let raw = '';
+        response.setEncoding('utf8');
+        response.on('data', chunk => {
+          raw += chunk;
+        });
+        response.on('end', () => {
+          let parsed = null;
+          try {
+            parsed = raw ? JSON.parse(raw) : null;
+          } catch (_error) {
+            parsed = null;
+          }
+          resolve({
+            statusCode: Number(response.statusCode || 0),
+            body: parsed,
+            rawBody: raw,
+          });
+        });
+      },
+    );
+    request.on('error', reject);
+    if (payload) {
+      request.write(payload);
+    }
+    request.end();
+  });
 
 const resolveRedisSource = specificKey => {
   if (process.env[specificKey]) return specificKey;
@@ -529,13 +578,82 @@ const proveSosFanoutFlow = async () => {
   }
 };
 
+const canRunDirectSosProof = () => {
+  if (!queueRedisUrl) return false;
+  if (redisConnectivityBlocked && queueRedisUrl === cacheRedisUrl) return false;
+  if (!redisRoundtripPassed && queueRedisUrl === cacheRedisUrl) return false;
+  return true;
+};
+
+const proveSosFanoutFlowViaHttp = async () => {
+  if (!sosFanoutProofBaseUrl) {
+    addCheck(
+      'flow:sos-fanout',
+      'blocked',
+      'SOS fan-out proof needs ALERT_LOAD_BASE_URL or ALERT_SOS_FANOUT_PROOF_BASE_URL',
+    );
+    return;
+  }
+
+  try {
+    const response = await withTimeout(
+      requestJson(
+        'POST',
+        `${sosFanoutProofBaseUrl.replace(/\/+$/, '')}/v1/ops/sos-fanout-proof`,
+      ),
+      25_000,
+      'sos_fanout_http_proof_timeout',
+    );
+    const deliveredCount = Number(response.body?.deliveredCount || 0);
+    const isProofPass =
+      response.statusCode === 200 &&
+      response.body?.ok === true &&
+      response.body?.flow === 'sos-fanout' &&
+      response.body?.deliveryMode === 'controlled_proof_sink' &&
+      response.body?.handlerId === DELIVERY_PROOF_HANDLER_ID &&
+      deliveredCount > 0;
+
+    addCheck(
+      'flow:sos-fanout',
+      isProofPass ? 'pass' : 'fail',
+      'SOS fan-out delivery proof was processed by the live handler over HTTP',
+      {
+        baseUrl: sosFanoutProofBaseUrl,
+        statusCode: response.statusCode,
+        queueDriver: response.body?.queueDriver || null,
+        jobId: response.body?.jobId || null,
+        state: response.body?.state || null,
+        handlerId: response.body?.handlerId || null,
+        deliveryMode: response.body?.deliveryMode || null,
+        deliveredCount,
+        failedReason: response.body?.failedReason || response.body?.error || null,
+      },
+    );
+  } catch (error) {
+    addCheck(
+      'flow:sos-fanout',
+      'fail',
+      'SOS fan-out HTTP delivery proof failed',
+      {
+        baseUrl: sosFanoutProofBaseUrl,
+        message: error.message,
+        code: error.code,
+      },
+    );
+  }
+};
+
 const main = async () => {
   const dockerAvailable = probeTool('docker');
   probeTool('redis-server');
   ensureRedisUrls({ dockerAvailable });
   await smokeRedis();
   await smokeBullMq();
-  await proveSosFanoutFlow();
+  if (canRunDirectSosProof()) {
+    await proveSosFanoutFlow();
+  } else {
+    await proveSosFanoutFlowViaHttp();
+  }
 
   const failed = checks.filter(check => check.status === 'fail');
   const blocked = checks.filter(check => check.status === 'blocked');

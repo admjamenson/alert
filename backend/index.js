@@ -35,6 +35,9 @@ const {
 const {
   createExternalSosFanoutQueue,
 } = require('./src/services/createSosFanoutQueue');
+const {
+  createSosFanoutDeliveryProofRunner,
+} = require('./src/services/SosFanoutDeliveryProof');
 
 const runtimeConfig = (() => {
   try {
@@ -326,6 +329,10 @@ const sosFanoutDispatcher = createSosFanoutDispatcher({
   queue: sosFanoutQueue,
   sendInline: sendSosFanoutPush,
   logger: console,
+});
+const sosFanoutDeliveryProof = createSosFanoutDeliveryProofRunner({
+  dispatcher: sosFanoutDispatcher,
+  queue: sosFanoutQueue,
 });
 
 const relayRateWindow = new Map();
@@ -1367,6 +1374,50 @@ app.get('/v1/ops/summary', (_req, res) => {
     },
     providers: getProviderFetchMetrics(),
   });
+});
+
+app.post('/v1/ops/sos-fanout-proof', async (req, res) => {
+  const rateKey = `ops:sos-fanout-proof:${req.ip || 'unknown'}`;
+  if (enforceRelayRateLimit(rateKey, 3)) {
+    return res.status(429).json({
+      ok: false,
+      flow: 'sos-fanout',
+      error: 'rate_limited',
+      generatedAt: nowIso(),
+    });
+  }
+
+  try {
+    const result = await sosFanoutDeliveryProof.run({
+      probeIdPrefix: 'ops-http',
+    });
+
+    return res.status(result.ok ? 200 : 503).json({
+      ok: result.ok,
+      flow: 'sos-fanout',
+      queueEnabled: serviceAvailability.sosFanoutQueue,
+      queueDriver: serviceAvailability.sosFanoutQueueDriver,
+      queueReason: serviceAvailability.sosFanoutQueueReason,
+      mode: result.dispatch?.mode || null,
+      queued: Boolean(result.dispatch?.queued),
+      sentInline: Boolean(result.dispatch?.sentInline),
+      jobId: result.dispatch?.jobId || null,
+      state: result.settlement?.state || null,
+      handlerId: result.handlerId,
+      deliveryMode: result.deliveryMode,
+      deliveredCount: result.deliveredCount,
+      failedReason: result.settlement?.failedReason || result.reason || null,
+      generatedAt: nowIso(),
+    });
+  } catch (error) {
+    console.error('[v1/ops/sos-fanout-proof]', error);
+    return res.status(500).json({
+      ok: false,
+      flow: 'sos-fanout',
+      error: 'internal',
+      generatedAt: nowIso(),
+    });
+  }
 });
 
 app.post('/api/guardian/request', async (req, res) => {
