@@ -560,11 +560,23 @@ const computeRetryBudget = ({
 
 const PRIMARY_PROVIDER_MIN_TIMEOUT_MS = 900;
 const ALTERNATE_PROVIDER_MIN_TIMEOUT_MS = 250;
+const ALTERNATE_PROVIDER_MAX_TIMEOUT_MS = 750;
 
 const readMinimumAttemptTimeoutMs = targetIndex =>
   targetIndex > 0
     ? ALTERNATE_PROVIDER_MIN_TIMEOUT_MS
     : PRIMARY_PROVIDER_MIN_TIMEOUT_MS;
+
+const readEffectiveAttemptTimeoutMs = (timeoutMs, remainingBudgetMs, targetIndex) => {
+  const boundedAttemptTimeoutMs = Math.min(timeoutMs, remainingBudgetMs);
+  if (targetIndex > 0) {
+    return Math.max(
+      ALTERNATE_PROVIDER_MIN_TIMEOUT_MS,
+      Math.min(ALTERNATE_PROVIDER_MAX_TIMEOUT_MS, boundedAttemptTimeoutMs),
+    );
+  }
+  return Math.max(PRIMARY_PROVIDER_MIN_TIMEOUT_MS, boundedAttemptTimeoutMs);
+};
 
 const canTryAnotherProviderTarget = (targets, currentIndex, remainingBudgetMs) =>
   currentIndex < targets.length - 1 &&
@@ -820,9 +832,10 @@ const fetchRouteOptions = async (
       `${destinationSafe(destinationLon)},${destinationSafe(destinationLat)}` +
       `?overview=full&geometries=geojson&alternatives=${alternatives}` +
       '&steps=false&annotations=false';
-    const effectiveTimeoutMs = Math.max(
-      readMinimumAttemptTimeoutMs(targetIndex),
-      Math.min(timeoutMs, remainingBudgetMs),
+    const effectiveTimeoutMs = readEffectiveAttemptTimeoutMs(
+      timeoutMs,
+      remainingBudgetMs,
+      targetIndex,
     );
 
     logProviderEvent(logger, 'info', 'provider_selected', {

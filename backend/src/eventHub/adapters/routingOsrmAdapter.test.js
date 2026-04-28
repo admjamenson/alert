@@ -301,6 +301,7 @@ test('routing adapter prefers a regional provider target when region hint matche
 
 test('routing adapter falls back from a degraded regional provider to the primary provider within budget', async () => {
   const urls = [];
+  const timeouts = [];
 
   const payload = await fetchRouteOptions(
     {
@@ -331,8 +332,9 @@ test('routing adapter falls back from a degraded regional provider to the primar
           maxTotalWaitMs: 2200,
         },
       },
-      fetchJson: async url => {
+      fetchJson: async (url, options = {}) => {
         urls.push(url);
+        timeouts.push(options.timeoutMs);
         if (url.startsWith('https://route-use1.alert.example/route/v1/')) {
           return {
             ok: false,
@@ -374,6 +376,8 @@ test('routing adapter falls back from a degraded regional provider to the primar
   assert.equal(urls.length, 2);
   assert.match(urls[0], /^https:\/\/route-use1\.alert\.example\/route\/v1\/walking\//);
   assert.match(urls[1], /^https:\/\/route-primary\.alert\.example\/route\/v1\/walking\//);
+  assert.equal(timeouts[0], 1400);
+  assert.equal(timeouts[1], 750);
   assert.equal(payload.providerTargetId, 'osrm:primary');
   assert.equal(payload.providerSource, 'primary');
 });
