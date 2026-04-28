@@ -7,6 +7,50 @@ const normalizeTokens = tokens =>
         .filter(token => token.length > 0)
     : [];
 
+const DELIVERY_PROOF_TOKEN_PREFIX = 'proof:sos-fanout:';
+const DELIVERY_PROOF_HANDLER_ID = 'createSosFanoutHandler';
+
+const sanitizeDeliveryProofProbeId = value =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9:-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 64);
+
+const buildSosDeliveryProofTokens = (probeId, count = 1) => {
+  const safeProbeId = sanitizeDeliveryProofProbeId(probeId);
+  const safeCount = Math.max(1, Math.min(10, Math.round(Number(count) || 1)));
+  if (!safeProbeId) {
+    throw new Error('sos_delivery_proof_probe_id_required');
+  }
+
+  return Array.from({ length: safeCount }, (_value, index) => {
+    return `${DELIVERY_PROOF_TOKEN_PREFIX}${safeProbeId}:${index + 1}`;
+  });
+};
+
+const resolveDeliveryProofProbe = ({ payload, tokens }) => {
+  const safeProbeId = sanitizeDeliveryProofProbeId(payload?.proofOfDelivery?.probeId);
+  if (!safeProbeId || tokens.length === 0) {
+    return null;
+  }
+
+  const allTokensMatch = tokens.every((token, index) => {
+    return token === `${DELIVERY_PROOF_TOKEN_PREFIX}${safeProbeId}:${index + 1}`;
+  });
+
+  if (!allTokensMatch) {
+    return null;
+  }
+
+  return {
+    probeId: safeProbeId,
+    deliveryMode: 'controlled_proof_sink',
+  };
+};
+
 const buildSosPushMessage = ({
   tokens,
   fromName,
@@ -109,7 +153,30 @@ const createSosFanoutHandler = ({ sendMulticast }) => {
   return async payload => {
     const tokens = normalizeTokens(payload?.tokens);
     if (tokens.length === 0) {
-      return { ok: true, skipped: 'no_tokens', tokenCount: 0 };
+      return {
+        ok: true,
+        skipped: 'no_tokens',
+        tokenCount: 0,
+        deliveredCount: 0,
+        handlerId: DELIVERY_PROOF_HANDLER_ID,
+      };
+    }
+
+    const deliveryProof = resolveDeliveryProofProbe({ payload, tokens });
+    if (deliveryProof) {
+      return {
+        ok: true,
+        tokenCount: tokens.length,
+        successCount: tokens.length,
+        failureCount: 0,
+        deliveredCount: tokens.length,
+        deliveryMode: deliveryProof.deliveryMode,
+        handlerId: DELIVERY_PROOF_HANDLER_ID,
+        proof: {
+          probeId: deliveryProof.probeId,
+          deliveredCount: tokens.length,
+        },
+      };
     }
 
     const response = await sendMulticast(
@@ -126,6 +193,9 @@ const createSosFanoutHandler = ({ sendMulticast }) => {
         typeof response?.successCount === 'number' ? response.successCount : null,
       failureCount:
         typeof response?.failureCount === 'number' ? response.failureCount : null,
+      deliveredCount: null,
+      deliveryMode: 'push_provider',
+      handlerId: DELIVERY_PROOF_HANDLER_ID,
     };
   };
 };
@@ -204,10 +274,12 @@ const createSosFanoutDispatcher = ({
 };
 
 module.exports = {
+  buildSosDeliveryProofTokens,
   buildSosFanoutJobId,
   buildSosPushMessage,
   createRedisConnectionFromUrl,
   createSosFanoutDispatcher,
   createSosFanoutHandler,
+  DELIVERY_PROOF_HANDLER_ID,
   normalizeTokens,
 };

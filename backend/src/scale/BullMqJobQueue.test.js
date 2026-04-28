@@ -89,3 +89,50 @@ test('job queue factory selects BullMQ when ALERT_JOB_QUEUE_DRIVER=bullmq', asyn
   assert.equal(result.accepted, true);
   assert.equal((await queue.snapshot()).driver, 'bullmq');
 });
+
+test('BullMQ adapter can wait for a settled job result from the worker', async () => {
+  const jobs = new Map();
+  const fakeQueue = {
+    async getJob(id) {
+      return jobs.get(id) || null;
+    },
+    async add(name, payload, options) {
+      jobs.set(options.jobId, {
+        id: options.jobId,
+        name,
+        data: payload,
+        attemptsMade: 1,
+        async getState() {
+          return 'completed';
+        },
+        returnvalue: {
+          ok: true,
+          deliveryMode: 'controlled_proof_sink',
+          deliveredCount: 1,
+          handlerId: 'createSosFanoutHandler',
+        },
+        finishedOn: Date.UTC(2026, 3, 28, 17, 0, 0),
+      });
+    },
+    async getJobCounts() {
+      return { waiting: 0, active: 0, completed: 1, failed: 0, delayed: 0 };
+    },
+    async close() {},
+  };
+
+  const queue = createBullMqJobQueue({
+    name: 'sos-fanout',
+    queueName: 'alert-sos-fanout',
+    queue: fakeQueue,
+  });
+
+  await queue.enqueue('sos-proof-1', { flow: 'sos-fanout' });
+  const result = await queue.waitForResult('sos-proof-1', {
+    timeoutMs: 250,
+    pollIntervalMs: 10,
+  });
+
+  assert.equal(result.state, 'completed');
+  assert.equal(result.result.deliveredCount, 1);
+  assert.equal(result.result.handlerId, 'createSosFanoutHandler');
+});

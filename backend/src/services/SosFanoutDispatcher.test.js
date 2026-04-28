@@ -2,6 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  buildSosDeliveryProofTokens,
+  DELIVERY_PROOF_HANDLER_ID,
   buildSosPushMessage,
   createSosFanoutDispatcher,
   createSosFanoutHandler,
@@ -105,8 +107,40 @@ test('SOS fan-out handler builds the same push payload used by the product flow'
   assert.equal(result.ok, true);
   assert.equal(result.tokenCount, 1);
   assert.equal(result.successCount, 1);
+  assert.equal(result.deliveryMode, 'push_provider');
+  assert.equal(result.deliveredCount, null);
+  assert.equal(result.handlerId, DELIVERY_PROOF_HANDLER_ID);
   assert.deepEqual(sent[0], built);
   assert.equal(sent[0].data.type, 'sos');
   assert.equal(sent[0].android.notification.channelId, 'alert_sos_channel');
   assert.equal(sent[0].apns.payload.aps.sound, 'alert_sos.wav');
+});
+
+test('SOS fan-out handler exposes controlled proof delivery without calling the push provider', async () => {
+  let sendMulticastCalls = 0;
+  const proofTokens = buildSosDeliveryProofTokens('render-smoke', 2);
+  const handler = createSosFanoutHandler({
+    sendMulticast: async () => {
+      sendMulticastCalls += 1;
+      return { successCount: 99, failureCount: 0 };
+    },
+  });
+
+  const result = await handler({
+    ...samplePayload(),
+    proofOfDelivery: {
+      probeId: 'render-smoke',
+    },
+    tokens: proofTokens,
+  });
+
+  assert.equal(sendMulticastCalls, 0);
+  assert.equal(result.ok, true);
+  assert.equal(result.tokenCount, 2);
+  assert.equal(result.successCount, 2);
+  assert.equal(result.failureCount, 0);
+  assert.equal(result.deliveredCount, 2);
+  assert.equal(result.deliveryMode, 'controlled_proof_sink');
+  assert.equal(result.handlerId, DELIVERY_PROOF_HANDLER_ID);
+  assert.equal(result.proof.probeId, 'render-smoke');
 });

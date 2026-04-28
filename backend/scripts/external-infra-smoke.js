@@ -5,11 +5,20 @@ const path = require('node:path');
 
 const { createCacheStore } = require('../src/platform/cache/createCacheStore');
 const { createJobQueue } = require('../src/scale/createJobQueue');
-const { createSosFanoutHandler } = require('../src/services/SosFanoutDispatcher');
+const {
+  buildSosDeliveryProofTokens,
+  DELIVERY_PROOF_HANDLER_ID,
+  createSosFanoutHandler,
+} = require('../src/services/SosFanoutDispatcher');
+const { createExternalSosFanoutQueue } = require('../src/services/createSosFanoutQueue');
 
 const requireExternalInfra = process.env.ALERT_REQUIRE_EXTERNAL_INFRA === 'true';
-let redisUrl = process.env.ALERT_REDIS_URL || '';
+let sharedRedisUrl = process.env.ALERT_REDIS_URL || '';
+let queueRedisUrl = process.env.ALERT_QUEUE_REDIS_URL || sharedRedisUrl;
+let cacheRedisUrl = process.env.ALERT_CACHE_REDIS_URL || sharedRedisUrl;
 const queueName = process.env.ALERT_QUEUE_NAME || 'alert-sos-fanout-smoke';
+const sosFanoutQueueName =
+  process.env.ALERT_SOS_FANOUT_QUEUE_NAME || 'alert-sos-fanout';
 
 const checks = [];
 let redisRoundtripPassed = false;
@@ -53,9 +62,15 @@ const probeTool = command => {
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-const parseRedisHost = () => {
+const resolveRedisSource = specificKey => {
+  if (process.env[specificKey]) return specificKey;
+  if (process.env.ALERT_REDIS_URL) return 'ALERT_REDIS_URL';
+  return null;
+};
+
+const parseRedisHost = value => {
   try {
-    return redisUrl ? new URL(redisUrl).hostname : '';
+    return value ? new URL(value).hostname : '';
   } catch (_error) {
     return '';
   }
@@ -64,8 +79,8 @@ const parseRedisHost = () => {
 const isRenderPrivateRedisHost = host =>
   /^red-[a-z0-9-]+$/i.test(String(host || '')) && !process.env.RENDER;
 
-const classifyRedisConnectivityBlock = error => {
-  const host = parseRedisHost();
+const classifyRedisConnectivityBlock = (error, url) => {
+  const host = parseRedisHost(url);
   const message = String(error?.message || error || '');
   const code = String(error?.code || '');
   const looksLikeNetwork =
@@ -100,13 +115,41 @@ const withTimeout = async (promise, timeoutMs, label) => {
   }
 };
 
-const ensureRedisUrl = ({ dockerAvailable }) => {
-  if (redisUrl) {
-    addCheck('env:ALERT_REDIS_URL', 'pass', 'ALERT_REDIS_URL is configured');
+const ensureRedisUrls = ({ dockerAvailable }) => {
+  if (queueRedisUrl) {
+    addCheck(
+      'env:queue-redis-url',
+      'pass',
+      'Queue Redis URL is configured',
+      { source: resolveRedisSource('ALERT_QUEUE_REDIS_URL') },
+    );
+  } else {
+    addCheck(
+      'env:queue-redis-url',
+      'blocked',
+      'Queue Redis needs ALERT_QUEUE_REDIS_URL or ALERT_REDIS_URL',
+    );
+  }
+
+  if (cacheRedisUrl) {
+    addCheck(
+      'env:cache-redis-url',
+      'pass',
+      'Cache Redis URL is configured',
+      { source: resolveRedisSource('ALERT_CACHE_REDIS_URL') },
+    );
+  } else {
+    addCheck(
+      'env:cache-redis-url',
+      'blocked',
+      'Cache Redis needs ALERT_CACHE_REDIS_URL or ALERT_REDIS_URL',
+    );
+  }
+
+  if (queueRedisUrl && cacheRedisUrl) {
     return;
   }
 
-  addCheck('env:ALERT_REDIS_URL', 'blocked', 'ALERT_REDIS_URL is not configured');
   if (!dockerAvailable) {
     return;
   }
@@ -127,10 +170,13 @@ const ensureRedisUrl = ({ dockerAvailable }) => {
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 60_000,
     });
-    redisUrl = 'redis://127.0.0.1:6379';
+    sharedRedisUrl = 'redis://127.0.0.1:6379';
+    queueRedisUrl = queueRedisUrl || sharedRedisUrl;
+    cacheRedisUrl = cacheRedisUrl || sharedRedisUrl;
     addCheck('docker:redis-autostart', 'pass', 'Redis was started with docker compose', {
       composePath,
-      redisUrl,
+      queueRedisUrl,
+      cacheRedisUrl,
     });
   } catch (error) {
     addCheck('docker:redis-autostart', 'fail', 'Docker Redis startup failed', {
@@ -142,7 +188,7 @@ const ensureRedisUrl = ({ dockerAvailable }) => {
 
 const smokeRedis = async () => {
   const redisDependencyAvailable = requireOptional('redis');
-  if (!redisUrl) {
+  if (!cacheRedisUrl) {
     return;
   }
 
@@ -153,7 +199,7 @@ const smokeRedis = async () => {
   const cache = createCacheStore({
     name: 'external-smoke',
     driver: 'redis',
-    url: redisUrl,
+    url: cacheRedisUrl,
     prefix: 'alert:smoke',
     connectTimeoutMs: Number(process.env.ALERT_REDIS_CONNECT_TIMEOUT_MS || 1500),
     reconnectStrategy: false,
@@ -172,7 +218,12 @@ const smokeRedis = async () => {
       return;
     }
     redisRoundtripPassed = true;
-    addCheck('redis:roundtrip', 'pass', 'Redis cache set/get roundtrip passed', cache.snapshot());
+    addCheck(
+      'redis:roundtrip',
+      'pass',
+      'Cache Redis set/get roundtrip passed',
+      cache.snapshot(),
+    );
 
     await cache.setJson('ttl-ready', { ok: true }, 250);
     const beforeTtlExpiry = await cache.getJson('ttl-ready');
@@ -195,7 +246,7 @@ const smokeRedis = async () => {
       { afterDelete },
     );
   } catch (error) {
-    const blocked = classifyRedisConnectivityBlock(error);
+    const blocked = classifyRedisConnectivityBlock(error, cacheRedisUrl);
     if (blocked) {
       redisConnectivityBlocked = true;
       addCheck(
@@ -239,14 +290,18 @@ const waitForQueue = async (queue, predicate, timeoutMs = 5000) => {
 
 const smokeBullMq = async () => {
   const bullMqDependencyAvailable = requireOptional('bullmq');
-  if (!redisUrl) {
-    addCheck('bullmq:redis-url', 'blocked', 'BullMQ smoke needs ALERT_REDIS_URL');
+  if (!queueRedisUrl) {
+    addCheck(
+      'bullmq:redis-url',
+      'blocked',
+      'BullMQ smoke needs ALERT_QUEUE_REDIS_URL or ALERT_REDIS_URL',
+    );
     return;
   }
   if (!bullMqDependencyAvailable) {
     return;
   }
-  if (redisConnectivityBlocked) {
+  if (redisConnectivityBlocked && queueRedisUrl === cacheRedisUrl) {
     addCheck(
       'bullmq:redis-connectivity',
       'blocked',
@@ -255,22 +310,20 @@ const smokeBullMq = async () => {
     );
     return;
   }
-  if (!redisRoundtripPassed) {
+  if (!redisRoundtripPassed && queueRedisUrl === cacheRedisUrl) {
     addCheck(
       'bullmq:redis-connectivity',
       'blocked',
-      'BullMQ smoke skipped because Redis roundtrip did not pass',
+      'BullMQ smoke skipped because shared Redis roundtrip did not pass',
     );
     return;
   }
 
-  const deliveredMessages = [];
   const sosFanoutHandler = createSosFanoutHandler({
     sendMulticast: async message => {
       if (message.data?.message === 'external-smoke-force-fail') {
         throw new Error('external_smoke_expected_failure');
       }
-      deliveredMessages.push(message);
       return { successCount: message.tokens.length, failureCount: 0 };
     },
   });
@@ -279,7 +332,7 @@ const smokeBullMq = async () => {
     driver: 'bullmq',
     queueName,
     connection: {
-      ...redisConnectionFromUrl(redisUrl),
+      ...redisConnectionFromUrl(queueRedisUrl),
       connectTimeout: Number(process.env.ALERT_REDIS_CONNECT_TIMEOUT_MS || 1500),
       maxRetriesPerRequest: null,
     },
@@ -331,22 +384,8 @@ const smokeBullMq = async () => {
     addCheck('bullmq:enqueue', result.accepted ? 'pass' : 'fail', 'BullMQ enqueue smoke completed', {
       result,
     });
-    const delivered = deliveredMessages[0];
-    addCheck(
-      'flow:sos-fanout',
-      delivered?.data?.type === 'sos' &&
-        delivered?.android?.notification?.channelId === 'alert_sos_channel'
-        ? 'pass'
-        : 'fail',
-      'SOS push fan-out flow used the BullMQ worker handler',
-      {
-        deliveredType: delivered?.data?.type,
-        channelId: delivered?.android?.notification?.channelId,
-        deliveredCount: deliveredMessages.length,
-      },
-    );
   } catch (error) {
-    const blocked = classifyRedisConnectivityBlock(error);
+    const blocked = classifyRedisConnectivityBlock(error, queueRedisUrl);
     if (blocked) {
       addCheck(
         'bullmq:enqueue',
@@ -365,12 +404,138 @@ const smokeBullMq = async () => {
   }
 };
 
+const proveSosFanoutFlow = async () => {
+  if (!queueRedisUrl) {
+    addCheck(
+      'flow:sos-fanout',
+      'blocked',
+      'SOS fan-out proof needs ALERT_QUEUE_REDIS_URL or ALERT_REDIS_URL',
+    );
+    return;
+  }
+  if (redisConnectivityBlocked && queueRedisUrl === cacheRedisUrl) {
+    addCheck(
+      'flow:sos-fanout',
+      'blocked',
+      'SOS fan-out proof skipped because Redis is not reachable from this host',
+      { reason: 'redis_roundtrip_blocked' },
+    );
+    return;
+  }
+  if (!redisRoundtripPassed && queueRedisUrl === cacheRedisUrl) {
+    addCheck(
+      'flow:sos-fanout',
+      'blocked',
+      'SOS fan-out proof skipped because shared Redis roundtrip did not pass',
+      { reason: 'redis_roundtrip_failed' },
+    );
+    return;
+  }
+
+  const probeId = `proof-${Date.now()}`;
+  const proofTokens = buildSosDeliveryProofTokens(probeId, 2);
+  const bootstrap = createExternalSosFanoutQueue({
+    env: {
+      ...process.env,
+      ALERT_JOB_QUEUE_DRIVER: 'bullmq',
+      ALERT_SOS_FANOUT_WORKER_ENABLED: 'false',
+      ALERT_QUEUE_REDIS_URL: process.env.ALERT_QUEUE_REDIS_URL || queueRedisUrl,
+      ALERT_REDIS_URL: process.env.ALERT_REDIS_URL || sharedRedisUrl,
+      ALERT_SOS_FANOUT_QUEUE_NAME: sosFanoutQueueName,
+    },
+    sendMulticast: async () => ({ successCount: 0, failureCount: 0 }),
+    logger: { log: () => {}, warn: () => {}, error: () => {} },
+  });
+
+  if (!bootstrap.enabled || !bootstrap.queue) {
+    addCheck(
+      'flow:sos-fanout',
+      'fail',
+      'SOS fan-out proof could not bootstrap an enqueue-only BullMQ client',
+      {
+        driver: bootstrap.driver,
+        reason: bootstrap.reason,
+        queueName: bootstrap.queueName || sosFanoutQueueName,
+      },
+    );
+    return;
+  }
+
+  try {
+    const jobId = `external-smoke-proof-${Date.now()}`;
+    const enqueueResult = await withTimeout(
+      bootstrap.queue.enqueue(jobId, {
+        flow: 'sos-fanout',
+        tier: 'smoke-proof',
+        fromId: 'proof-sender',
+        fromName: 'Alert Smoke',
+        message: 'external-smoke-delivery-proof',
+        location: { latitude: 0, longitude: 0 },
+        targets: [`proof-target:${probeId}`],
+        tokens: proofTokens,
+        timestamp: new Date().toISOString(),
+        proofOfDelivery: {
+          probeId,
+        },
+      }),
+      5000,
+      'sos_fanout_proof_enqueue',
+    );
+    const settlement = await withTimeout(
+      bootstrap.queue.waitForResult(jobId, {
+        timeoutMs: 20_000,
+        pollIntervalMs: 200,
+      }),
+      21_000,
+      'sos_fanout_proof_wait',
+    );
+
+    const deliveredCount = Number(settlement?.result?.deliveredCount || 0);
+    const isProofPass =
+      enqueueResult.accepted === true &&
+      settlement?.state === 'completed' &&
+      settlement?.result?.deliveryMode === 'controlled_proof_sink' &&
+      settlement?.result?.handlerId === DELIVERY_PROOF_HANDLER_ID &&
+      deliveredCount > 0;
+
+    addCheck(
+      'flow:sos-fanout',
+      isProofPass ? 'pass' : 'fail',
+      'SOS fan-out delivery proof was processed by the configured handler',
+      {
+        queueName: bootstrap.queueName || sosFanoutQueueName,
+        jobId,
+        enqueueAccepted: enqueueResult.accepted,
+        state: settlement?.state || 'missing',
+        handlerId: settlement?.result?.handlerId || null,
+        deliveryMode: settlement?.result?.deliveryMode || null,
+        deliveredCount,
+        failedReason: settlement?.failedReason || null,
+      },
+    );
+  } catch (error) {
+    addCheck(
+      'flow:sos-fanout',
+      'fail',
+      'SOS fan-out delivery proof failed',
+      {
+        message: error.message,
+        code: error.code,
+        queueName: bootstrap.queueName || sosFanoutQueueName,
+      },
+    );
+  } finally {
+    await bootstrap.queue.close().catch(() => {});
+  }
+};
+
 const main = async () => {
   const dockerAvailable = probeTool('docker');
   probeTool('redis-server');
-  ensureRedisUrl({ dockerAvailable });
+  ensureRedisUrls({ dockerAvailable });
   await smokeRedis();
   await smokeBullMq();
+  await proveSosFanoutFlow();
 
   const failed = checks.filter(check => check.status === 'fail');
   const blocked = checks.filter(check => check.status === 'blocked');

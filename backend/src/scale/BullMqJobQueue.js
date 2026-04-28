@@ -8,6 +8,11 @@ const loadBullMq = () => {
   }
 };
 
+const sleep = ms =>
+  new Promise(resolve => {
+    setTimeout(resolve, ms);
+  });
+
 const createBullMqJobQueue = ({
   name = 'default',
   queueName = name,
@@ -122,6 +127,52 @@ const createBullMqJobQueue = ({
     };
   };
 
+  const waitForResult = async (
+    id,
+    {
+      timeoutMs = 5000,
+      pollIntervalMs = 100,
+    } = {},
+  ) => {
+    const normalizedId = String(id || '').trim();
+    if (!normalizedId) {
+      throw new Error('job_id_required');
+    }
+
+    const deadlineMs = Date.now() + Math.max(250, Number(timeoutMs || 5000));
+    const boundedPollIntervalMs = Math.max(25, Number(pollIntervalMs || 100));
+
+    while (Date.now() < deadlineMs) {
+      if (typeof queueClient.getJob !== 'function') {
+        return null;
+      }
+
+      const job = await queueClient.getJob(normalizedId);
+      if (job) {
+        const state =
+          typeof job.getState === 'function'
+            ? await job.getState()
+            : String(job.state || '');
+        if (state === 'completed' || state === 'failed') {
+          return {
+            id: String(job.id || normalizedId),
+            state,
+            result: job.returnvalue ?? null,
+            failedReason: job.failedReason || null,
+            attemptsMade: Number(job.attemptsMade || 0),
+            finishedOn: Number.isFinite(Number(job.finishedOn))
+              ? new Date(Number(job.finishedOn)).toISOString()
+              : null,
+          };
+        }
+      }
+
+      await sleep(boundedPollIntervalMs);
+    }
+
+    return null;
+  };
+
   const close = async () => {
     if (worker && typeof worker.close === 'function') {
       await worker.close();
@@ -134,6 +185,7 @@ const createBullMqJobQueue = ({
   return {
     enqueue,
     snapshot,
+    waitForResult,
     close,
   };
 };
