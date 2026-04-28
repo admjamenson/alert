@@ -11,6 +11,11 @@ const DEFAULT_MAX_CONCURRENT_REQUESTS = 4;
 const DEFAULT_TIMEOUT_MS = 1_400;
 const DEFAULT_RETRY_DELAY_MS = 120;
 const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000;
+const PROVIDER_SOURCE_PRIORITY = {
+  region: 0,
+  primary: 1,
+  fallback: 2,
+};
 
 const MODE_TO_PROFILE = {
   car: 'driving',
@@ -96,6 +101,11 @@ const readPreferredProviderTargetId = (mode, regionHint, providerTarget) =>
   PROVIDER_TARGET_PREFERENCES.get(
     buildProviderPreferenceKey(mode, regionHint, providerTarget),
   ) || null;
+
+const readProviderSourcePriority = providerTarget =>
+  Number(
+    PROVIDER_SOURCE_PRIORITY[String(providerTarget?.source || '').trim().toLowerCase()],
+  );
 
 const normalizeMode = value => {
   const normalized = String(value || '').trim().toLowerCase();
@@ -222,6 +232,17 @@ const resolveProviderTargets = (routingConfig, regionHint, mode) => {
   }
 
   return targets.sort((left, right) => {
+    const leftPriority = readProviderSourcePriority(left);
+    const rightPriority = readProviderSourcePriority(right);
+    if (Number.isFinite(leftPriority) || Number.isFinite(rightPriority)) {
+      const normalizedLeftPriority = Number.isFinite(leftPriority) ? leftPriority : 99;
+      const normalizedRightPriority = Number.isFinite(rightPriority)
+        ? rightPriority
+        : 99;
+      if (normalizedLeftPriority !== normalizedRightPriority) {
+        return normalizedLeftPriority - normalizedRightPriority;
+      }
+    }
     if (left.targetId === preferredTargetId && right.targetId !== preferredTargetId) {
       return -1;
     }
