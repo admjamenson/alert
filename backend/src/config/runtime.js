@@ -172,7 +172,7 @@ const buildRuntimeConfig = (env = process.env) => ({
     ),
     maxConcurrentRequests: Math.max(
       1,
-      readNumberEnv('ROUTING_PROVIDER_MAX_CONCURRENT_REQUESTS', 4, env),
+      readNumberEnv('ROUTING_PROVIDER_MAX_CONCURRENT_REQUESTS', 2, env),
     ),
     cacheTtlMs: Math.max(
       30_000,
