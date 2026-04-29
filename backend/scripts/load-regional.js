@@ -271,11 +271,20 @@ const summarize = rows => {
 
 const summarizeBy = (rows, key) =>
   Object.fromEntries(
-    Array.from(new Set(rows.map(row => row[key]))).map(value => [
+    Array.from(new Set(rows.map(row => row[key]).filter(value => value !== null && value !== undefined))).map(value => [
       value,
       summarize(rows.filter(row => row[key] === value)),
     ]),
   );
+
+const readUniqueValues = (rows, key) =>
+  Array.from(
+    new Set(
+      rows
+        .map(row => row[key])
+        .filter(value => value !== null && value !== undefined && value !== ''),
+    ),
+  ).sort();
 
 const evaluateCriticalEndpoints = byEndpoint =>
   Object.entries(byEndpoint)
@@ -324,6 +333,7 @@ const requestOnce = async index => {
         'x-alert-region': region.id,
         'x-alert-city': region.city,
         'x-alert-load-scenario': SCENARIO,
+        'x-alert-ops-route-debug': '1',
       },
     });
     const contentType = String(res.headers.get('content-type') || '').toLowerCase();
@@ -349,6 +359,36 @@ const requestOnce = async index => {
       providerSource: payload?.provider?.source || null,
       providerRegionKey: payload?.provider?.regionKey || null,
       providerReasonCode: payload?.provider?.reasonCode || payload?.reasonCode || null,
+      routeInstanceId:
+        payload?.opsDebug?.instanceId || res.headers.get('x-alert-route-instance'),
+      routeDeployId:
+        payload?.opsDebug?.deployId || res.headers.get('x-alert-route-deploy'),
+      routeConfigFingerprint:
+        payload?.opsDebug?.configFingerprint ||
+        res.headers.get('x-alert-route-config'),
+      routeRequestedRegionHint:
+        payload?.opsDebug?.targetResolution?.normalizedRegionHint || null,
+      routeResolvedRegionKey:
+        payload?.opsDebug?.targetResolution?.resolvedRegionalTarget?.regionKey ||
+        null,
+      routeCandidateTargets: Array.isArray(
+        payload?.opsDebug?.targetResolution?.candidateTargets,
+      )
+        ? payload.opsDebug.targetResolution.candidateTargets.map(target => ({
+            targetId: target?.targetId || null,
+            source: target?.source || null,
+            regionKey: target?.regionKey || null,
+            baseUrl: target?.baseUrl || null,
+          }))
+        : [],
+      routeRuntimeConfig: payload?.opsDebug?.routingConfig || null,
+      routeCircuitState:
+        payload?.opsDebug?.finalProvider?.circuitState ||
+        payload?.provider?.circuitState ||
+        null,
+      routeAttempts:
+        Number(payload?.opsDebug?.finalProvider?.attempts) ||
+        Number(payload?.provider?.attempts || 0),
     };
   } catch (error) {
     return {
@@ -393,6 +433,13 @@ const main = async () => {
     results.filter(row => row.endpoint === 'maps_routes' && row.providerTargetId),
     'providerTargetId',
   );
+  const mapsRouteRows = results.filter(row => row.endpoint === 'maps_routes');
+  const routeObservedInstances = readUniqueValues(mapsRouteRows, 'routeInstanceId');
+  const routeObservedDeployIds = readUniqueValues(mapsRouteRows, 'routeDeployId');
+  const routeObservedConfigFingerprints = readUniqueValues(
+    mapsRouteRows,
+    'routeConfigFingerprint',
+  );
   const hotPaths = summarize(results.filter(row => row.hotPath));
   const providerPressure = summarize(results.filter(row => row.providerPressure));
   const criticalEndpoints = evaluateCriticalEndpoints(byEndpoint);
@@ -428,6 +475,49 @@ const main = async () => {
     byEndpoint,
     byRegion,
     byRouteProviderTarget,
+    routeDiagnostics: {
+      observedInstances: routeObservedInstances,
+      observedDeployIds: routeObservedDeployIds,
+      observedConfigFingerprints: routeObservedConfigFingerprints,
+      singleObservedInstance: routeObservedInstances.length <= 1,
+      homogeneousDeploy: routeObservedDeployIds.length <= 1,
+      homogeneousConfig: routeObservedConfigFingerprints.length <= 1,
+      byInstance: summarizeBy(
+        mapsRouteRows.filter(row => row.routeInstanceId),
+        'routeInstanceId',
+      ),
+      byDeployId: summarizeBy(
+        mapsRouteRows.filter(row => row.routeDeployId),
+        'routeDeployId',
+      ),
+      byConfigFingerprint: summarizeBy(
+        mapsRouteRows.filter(row => row.routeConfigFingerprint),
+        'routeConfigFingerprint',
+      ),
+      byResolvedRegionKey: summarizeBy(
+        mapsRouteRows.filter(row => row.routeResolvedRegionKey),
+        'routeResolvedRegionKey',
+      ),
+      sample: mapsRouteRows.slice(0, 20).map(row => ({
+        region: row.region,
+        status: row.status,
+        durationMs: round(row.durationMs),
+        degraded: row.degraded,
+        fallbackUsed: row.fallbackUsed,
+        providerTargetId: row.providerTargetId,
+        providerSource: row.providerSource,
+        providerRegionKey: row.providerRegionKey,
+        providerReasonCode: row.providerReasonCode,
+        routeInstanceId: row.routeInstanceId || null,
+        routeDeployId: row.routeDeployId || null,
+        routeConfigFingerprint: row.routeConfigFingerprint || null,
+        routeRequestedRegionHint: row.routeRequestedRegionHint || null,
+        routeResolvedRegionKey: row.routeResolvedRegionKey || null,
+        routeCandidateTargets: row.routeCandidateTargets,
+        routeCircuitState: row.routeCircuitState || null,
+        routeAttempts: row.routeAttempts,
+      })),
+    },
     hotPaths,
     providerPressure,
     failureBudget: {

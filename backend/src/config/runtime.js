@@ -1,3 +1,6 @@
+const crypto = require('node:crypto');
+const os = require('node:os');
+
 const BOOLEAN_TRUE_VALUES = new Set(['1', 'true', 'yes', 'on']);
 
 const clampPercent = value => Math.max(0, Math.min(100, Number(value || 0)));
@@ -54,6 +57,110 @@ const readAppEnv = (env = process.env) =>
   (readOptionalEnv('APP_ENV', env) ||
     readOptionalEnv('NODE_ENV', env) ||
     'development').toLowerCase();
+
+const readFirstNonEmptyEnv = (keys, env = process.env) => {
+  for (const key of Array.isArray(keys) ? keys : []) {
+    const value = readOptionalEnv(key, env);
+    if (value) {
+      return value;
+    }
+  }
+  return '';
+};
+
+const sanitizeOpsIdentifier = value =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9:_-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '') || 'unknown';
+
+const normalizeProviderUrlForOps = value => {
+  const normalizedValue = String(value || '').trim();
+  if (!normalizedValue) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(normalizedValue);
+    parsed.username = '';
+    parsed.password = '';
+    parsed.hash = '';
+    parsed.search = '';
+    parsed.pathname = parsed.pathname.replace(/\/+$/, '');
+    return parsed.toString().replace(/\/+$/, '');
+  } catch (_error) {
+    return normalizedValue.replace(/\/+$/, '');
+  }
+};
+
+const buildRouteRuntimeSignature = routingConfig => {
+  const regionProviderBaseUrls = Object.fromEntries(
+    Object.entries(routingConfig?.regionProviderBaseUrls || {})
+      .map(([regionKey, baseUrl]) => [
+        String(regionKey || '').trim().toLowerCase(),
+        normalizeProviderUrlForOps(baseUrl),
+      ])
+      .filter(([regionKey, baseUrl]) => regionKey && baseUrl)
+      .sort(([left], [right]) => left.localeCompare(right)),
+  );
+
+  return {
+    providerBaseUrl: normalizeProviderUrlForOps(routingConfig?.providerBaseUrl),
+    fallbackProviderBaseUrl: normalizeProviderUrlForOps(
+      routingConfig?.fallbackProviderBaseUrl,
+    ),
+    regionProviderBaseUrls,
+    timeoutMs: Number(routingConfig?.timeoutMs || 0),
+    retries: Number(routingConfig?.retries || 0),
+    retryDelayMs: Number(routingConfig?.retryDelayMs || 0),
+    maxTotalWaitMs: Number(routingConfig?.maxTotalWaitMs || 0),
+    failureThreshold: Number(routingConfig?.failureThreshold || 0),
+    cooldownMs: Number(routingConfig?.cooldownMs || 0),
+    maxConcurrentRequests: Number(routingConfig?.maxConcurrentRequests || 0),
+    cacheTtlMs: Number(routingConfig?.cacheTtlMs || 0),
+    staleRouteTtlMs: Number(routingConfig?.staleRouteTtlMs || 0),
+    staleRouteMaxEntries: Number(routingConfig?.staleRouteMaxEntries || 0),
+    maxPerMinute: Number(routingConfig?.maxPerMinute || 0),
+  };
+};
+
+const buildRouteRuntimeDiagnostics = (config = null, env = process.env) => {
+  const resolvedConfig = config || getRuntimeConfig(env);
+  const routing = buildRouteRuntimeSignature(resolvedConfig?.routing || {});
+  const signature = JSON.stringify(routing);
+
+  return {
+    environment: readAppEnv(env),
+    deployId: sanitizeOpsIdentifier(
+      readFirstNonEmptyEnv(
+        [
+          'ALERT_RELEASE_VERSION',
+          'RENDER_GIT_COMMIT',
+          'RENDER_DEPLOY_ID',
+          'RENDER_SERVICE_ID',
+        ],
+        env,
+      ),
+    ),
+    instanceId: sanitizeOpsIdentifier(
+      readFirstNonEmptyEnv(
+        ['RENDER_INSTANCE_ID', 'HOSTNAME', 'COMPUTERNAME'],
+        env,
+      ) || os.hostname(),
+    ),
+    configFingerprint: crypto
+      .createHash('sha1')
+      .update(signature)
+      .digest('hex')
+      .slice(0, 12),
+    routing: {
+      ...routing,
+      regionKeys: Object.keys(routing.regionProviderBaseUrls),
+    },
+  };
+};
 
 const allowPublicProviderDefaults = (env = process.env) =>
   readBooleanEnv(
@@ -213,9 +320,13 @@ module.exports = {
   readNumberEnv,
   readJsonObjectEnv,
   readAppEnv,
+  readFirstNonEmptyEnv,
+  sanitizeOpsIdentifier,
+  normalizeProviderUrlForOps,
   allowPublicProviderDefaults,
   readProviderBaseUrl,
   readRegionalProviderBaseUrls,
+  buildRouteRuntimeDiagnostics,
   buildRuntimeConfig,
   getRuntimeConfig,
   validateRuntimeConfig,

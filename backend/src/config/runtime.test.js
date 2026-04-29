@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 
 const {
   buildRuntimeConfig,
+  buildRouteRuntimeDiagnostics,
   readRegionalProviderBaseUrls,
   readProviderBaseUrl,
 } = require('./runtime');
@@ -124,6 +125,43 @@ test('runtime config hardens route provider defaults for burst protection', () =
   assert.equal(config.routing.cacheTtlMs, 5 * 60 * 1000);
   assert.equal(config.routing.staleRouteTtlMs, 15 * 60 * 1000);
   assert.equal(config.routing.staleRouteMaxEntries, 1000);
+});
+
+test('route runtime diagnostics expose safe routing fingerprint metadata', () => {
+  const config = buildRuntimeConfig({
+    ...baseEnv,
+    APP_ENV: 'production',
+    ALERT_ALLOW_PUBLIC_PROVIDER_DEFAULTS: 'false',
+    EPIDEMIC_BR_NOTIFICA_BASE_URL: 'https://providers.alert.example/notifica',
+    ROUTING_OSRM_BASE_URL: 'https://route-primary.alert.example/route/v1',
+    ROUTING_OSRM_FALLBACK_BASE_URL:
+      'https://route-fallback.alert.example/route/v1',
+    ROUTING_OSRM_REGION_BASE_URLS_JSON: JSON.stringify({
+      'us-east-1': 'https://route-use1.alert.example/route/v1',
+      'sa-east-1': 'https://route-sae1.alert.example/route/v1',
+    }),
+  });
+
+  const diagnostics = buildRouteRuntimeDiagnostics(config, {
+    ...baseEnv,
+    APP_ENV: 'production',
+    ALERT_RELEASE_VERSION: '2026.04.28-canary',
+    HOSTNAME: 'alert-live-01',
+  });
+
+  assert.equal(diagnostics.environment, 'production');
+  assert.equal(diagnostics.deployId, '2026-04-28-canary');
+  assert.equal(diagnostics.instanceId, 'alert-live-01');
+  assert.match(diagnostics.configFingerprint, /^[a-f0-9]{12}$/);
+  assert.equal(
+    diagnostics.routing.providerBaseUrl,
+    'https://route-primary.alert.example/route/v1',
+  );
+  assert.equal(
+    diagnostics.routing.fallbackProviderBaseUrl,
+    'https://route-fallback.alert.example/route/v1',
+  );
+  assert.deepEqual(diagnostics.routing.regionKeys, ['sa-east-1', 'us-east-1']);
 });
 
 let failed = 0;

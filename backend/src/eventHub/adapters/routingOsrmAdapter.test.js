@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   fetchRouteOptions,
+  buildRoutingProviderDebugSnapshot,
   __dangerousResetRoutingProviderStateForTests,
   __dangerousResetStaleRouteCacheForTests,
 } = require('./routingOsrmAdapter');
@@ -1106,5 +1107,36 @@ test('routing adapter keeps multi-region burst responses healthy with the restor
       url.startsWith('https://route-fallback.alert.example/route/v1/'),
     ).length,
     4,
+  );
+});
+
+test('routing adapter exposes safe target resolution diagnostics for route probes', () => {
+  const debugSnapshot = buildRoutingProviderDebugSnapshot(
+    {
+      regionHint: 'us-east-1-new-york',
+      transportMode: 'walking',
+    },
+    {
+      config: {
+        routing: {
+          providerBaseUrl: 'https://route-primary.alert.example/route/v1',
+          fallbackProviderBaseUrl:
+            'https://route-fallback.alert.example/route/v1',
+          regionProviderBaseUrls: {
+            'us-east-1': 'https://route-use1.alert.example/route/v1',
+          },
+        },
+      },
+    },
+  );
+
+  assert.equal(debugSnapshot.normalizedRegionHint, 'us-east-1-new-york');
+  assert.equal(
+    debugSnapshot.resolvedRegionalTarget?.targetId,
+    'osrm:region:us-east-1',
+  );
+  assert.deepEqual(
+    debugSnapshot.candidateTargets.map(target => target.targetId),
+    ['osrm:region:us-east-1', 'osrm:primary', 'osrm:fallback'],
   );
 });

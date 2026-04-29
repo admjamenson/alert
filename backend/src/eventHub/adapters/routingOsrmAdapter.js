@@ -157,6 +157,9 @@ const buildProviderTarget = ({ source, baseUrl, regionKey }) => {
   };
 };
 
+const normalizeProviderBaseUrl = value =>
+  String(value || '').trim().replace(/\/+$/, '') || null;
+
 const resolveRegionalProviderBaseUrl = (regionHint, routingConfig) => {
   const normalizedRegionHint = normalizeRegionHint(regionHint);
   if (!normalizedRegionHint) return null;
@@ -251,6 +254,44 @@ const resolveProviderTargets = (routingConfig, regionHint, mode) => {
     }
     return 0;
   });
+};
+
+const buildRoutingProviderDebugSnapshot = (
+  { regionHint, transportMode },
+  { config } = {},
+) => {
+  const routingConfig = config?.routing || {};
+  const resolvedRegionalTarget = resolveRegionalProviderBaseUrl(
+    regionHint,
+    routingConfig,
+  );
+  const candidateTargets = resolveProviderTargets(
+    routingConfig,
+    regionHint,
+    transportMode,
+  ).map(providerTarget => ({
+    targetId: providerTarget.targetId,
+    source: providerTarget.source,
+    regionKey: providerTarget.regionKey || null,
+    baseUrl: normalizeProviderBaseUrl(providerTarget.baseUrl),
+  }));
+
+  return {
+    requestedRegionHint: String(regionHint || '').trim() || null,
+    normalizedRegionHint: normalizeRegionHint(regionHint) || null,
+    resolvedRegionalTarget: resolvedRegionalTarget
+      ? {
+          targetId: buildProviderTarget({
+            source: 'region',
+            baseUrl: resolvedRegionalTarget.baseUrl,
+            regionKey: resolvedRegionalTarget.regionKey,
+          }).targetId,
+          regionKey: normalizeRegionHint(resolvedRegionalTarget.regionKey) || null,
+          baseUrl: normalizeProviderBaseUrl(resolvedRegionalTarget.baseUrl),
+        }
+      : null,
+    candidateTargets,
+  };
 };
 
 const isStrictFiniteNumber = value => {
@@ -1078,6 +1119,7 @@ const fetchRouteOptions = async (
 
 module.exports = {
   fetchRouteOptions,
+  buildRoutingProviderDebugSnapshot,
   __dangerousResetRoutingProviderStateForTests: () => {
     PROVIDER_CIRCUIT_STATES.clear();
     PROVIDER_ACTIVE_REQUESTS.clear();

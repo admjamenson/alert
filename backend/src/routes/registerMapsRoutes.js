@@ -2,11 +2,103 @@ const {
   searchPlaces,
   reverseGeocode,
 } = require('../eventHub/adapters/geocodingAdapter');
+const {
+  buildRoutingProviderDebugSnapshot,
+} = require('../eventHub/adapters/routingOsrmAdapter');
+const { buildRouteRuntimeDiagnostics } = require('../config/runtime');
 const { getRouteOptionsSnapshot } = require('../services/RouteOptionsService');
 
 const parseFiniteQueryNumber = value => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+};
+
+const DEBUG_TRUE_VALUES = new Set(['1', 'true', 'yes', 'on']);
+
+const isRouteOpsDebugEnabled = req => {
+  const headerValue = String(req.get('x-alert-ops-route-debug') || '')
+    .trim()
+    .toLowerCase();
+  if (DEBUG_TRUE_VALUES.has(headerValue)) {
+    return true;
+  }
+
+  const queryValue = String(req.query?.opsDebug || '')
+    .trim()
+    .toLowerCase();
+  return DEBUG_TRUE_VALUES.has(queryValue);
+};
+
+const buildRouteOpsDebugPayload = ({
+  config,
+  params,
+  payload,
+}) => {
+  const runtimeDiagnostics = buildRouteRuntimeDiagnostics(config);
+  const targetResolution = buildRoutingProviderDebugSnapshot(params, { config });
+  return {
+    instanceId: runtimeDiagnostics.instanceId,
+    deployId: runtimeDiagnostics.deployId,
+    configFingerprint: runtimeDiagnostics.configFingerprint,
+    routingConfig: runtimeDiagnostics.routing,
+    targetResolution,
+    finalProvider: {
+      targetId: payload?.provider?.targetId || 'osrm:primary',
+      source: payload?.provider?.source || 'primary',
+      regionKey: payload?.provider?.regionKey || null,
+      degraded: Boolean(payload?.degraded),
+      fallbackUsed: Boolean(payload?.fallbackUsed),
+      reasonCode: payload?.provider?.reasonCode || payload?.reasonCode || null,
+      circuitState: payload?.provider?.circuitState || 'closed',
+      attempts: Number(payload?.provider?.attempts || 0),
+      latencyMs: Number(payload?.provider?.latencyMs || 0),
+      timeoutMs: Number(payload?.provider?.timeoutMs || 0),
+      cacheHit: Boolean(payload?.provider?.cacheHit),
+      stale: Boolean(payload?.provider?.stale),
+    },
+  };
+};
+
+const writeRouteOpsDebugHeaders = (res, opsDebug) => {
+  res.set('x-alert-route-instance', String(opsDebug?.instanceId || 'unknown'));
+  res.set('x-alert-route-deploy', String(opsDebug?.deployId || 'unknown'));
+  res.set(
+    'x-alert-route-config',
+    String(opsDebug?.configFingerprint || 'unknown'),
+  );
+  res.set(
+    'x-alert-route-target',
+    String(opsDebug?.finalProvider?.targetId || 'osrm:primary'),
+  );
+  res.set(
+    'x-alert-route-source',
+    String(opsDebug?.finalProvider?.source || 'primary'),
+  );
+  res.set(
+    'x-alert-route-region',
+    String(opsDebug?.targetResolution?.normalizedRegionHint || 'unknown'),
+  );
+  res.set(
+    'x-alert-route-reason',
+    String(opsDebug?.finalProvider?.reasonCode || 'none'),
+  );
+};
+
+const attachRouteOpsDebugPayload = (req, res, payload, config, params) => {
+  if (!isRouteOpsDebugEnabled(req)) {
+    return payload;
+  }
+
+  const opsDebug = buildRouteOpsDebugPayload({
+    config,
+    params,
+    payload,
+  });
+  writeRouteOpsDebugHeaders(res, opsDebug);
+  return {
+    ...payload,
+    opsDebug,
+  };
 };
 
 const normalizeSearchResults = results =>
@@ -23,7 +115,13 @@ const normalizeSearchResults = results =>
   }));
 
 const registerMapsRoutes = (app, deps = {}) => {
-  const { config, logger = console } = deps;
+  const {
+    config,
+    logger = console,
+    searchPlacesFn = searchPlaces,
+    reverseGeocodeFn = reverseGeocode,
+    routeOptionsSnapshot = getRouteOptionsSnapshot,
+  } = deps;
 
   const handleSearch = async (req, res) => {
     try {
@@ -32,7 +130,7 @@ const registerMapsRoutes = (app, deps = {}) => {
         return res.json({ results: [] });
       }
 
-      const results = await searchPlaces(
+      const results = await searchPlacesFn(
         {
           query,
           locale: req.query?.locale,
@@ -63,7 +161,7 @@ const registerMapsRoutes = (app, deps = {}) => {
         return res.status(400).json({ error: 'invalid_coordinates' });
       }
 
-      const payload = await reverseGeocode(
+      const payload = await reverseGeocodeFn(
         {
           latitude,
           longitude,
@@ -114,7 +212,7 @@ const registerMapsRoutes = (app, deps = {}) => {
         });
       }
 
-      const payload = await getRouteOptionsSnapshot(
+      const payload = await routeOptionsSnapshot(
         {
           fromLat,
           fromLon,
@@ -131,17 +229,51 @@ const registerMapsRoutes = (app, deps = {}) => {
           logger,
         },
       );
+      const routeParams = {
+        fromLat,
+        fromLon,
+        toLat,
+        toLon,
+        transportMode: req.query?.mode || req.query?.transportMode,
+        regionHint:
+          req.get('x-alert-region') ||
+          req.query?.region ||
+          req.query?.regionHint,
+      };
 
       if (!payload.available && payload.reasonCode === 'invalid_coordinates') {
-        return res.status(400).json(payload);
+        return res
+          .status(400)
+          .json(
+            attachRouteOpsDebugPayload(
+              req,
+              res,
+              payload,
+              config,
+              routeParams,
+            ),
+          );
       }
 
-      return res.json(payload);
+      return res.json(
+        attachRouteOpsDebugPayload(req, res, payload, config, routeParams),
+      );
     } catch (error) {
       logger.error('[maps/routes]', {
         error: 'maps_routes_internal',
       });
-      return res.status(200).json({
+      const routeParams = {
+        fromLat: req.query?.fromLat,
+        fromLon: req.query?.fromLon,
+        toLat: req.query?.toLat,
+        toLon: req.query?.toLon,
+        transportMode: req.query?.mode || req.query?.transportMode,
+        regionHint:
+          req.get('x-alert-region') ||
+          req.query?.region ||
+          req.query?.regionHint,
+      };
+      const failurePayload = {
         available: false,
         degraded: true,
         reasonCode: 'maps_routes_internal',
@@ -170,7 +302,18 @@ const registerMapsRoutes = (app, deps = {}) => {
           timeoutMs: Number(config?.routing?.timeoutMs || 0),
           nonCriticalDependency: true,
         },
-      });
+      };
+      return res
+        .status(200)
+        .json(
+          attachRouteOpsDebugPayload(
+            req,
+            res,
+            failurePayload,
+            config,
+            routeParams,
+          ),
+        );
     }
   };
 
