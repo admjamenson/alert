@@ -1,6 +1,10 @@
-jest.mock('react-native-localize', () => ({
-  getLocales: () => [{ languageTag: 'pt-BR', countryCode: 'BR' }],
-}), { virtual: true });
+jest.mock(
+  'react-native-localize',
+  () => ({
+    getLocales: () => [{ languageTag: 'pt-BR', countryCode: 'BR' }],
+  }),
+  { virtual: true },
+);
 
 jest.mock('../src/services/UserIdentityService', () => ({
   UserIdentityService: {
@@ -25,49 +29,86 @@ describe('PremiumBillingApiAdapter', () => {
   beforeEach(() => {
     jest.resetModules();
     process.env.ALERT_API_URL = '';
-    (global as any).ALERT_API_URL = undefined;
-    (global as any).__ALERT_API_URL__ = undefined;
     (global as any).__DEV__ = false;
     (global as any).fetch = jest.fn();
   });
 
   afterEach(() => {
-    delete (global as any).ALERT_API_URL;
-    delete (global as any).__ALERT_API_URL__;
     delete (global as any).fetch;
   });
 
-  it('uses the live Render billing host by default', async () => {
+  it('reports missing base url when ALERT_API_URL is not configured', async () => {
     const { PremiumBillingApiAdapter } = loadAdapter();
 
-    expect(PremiumBillingApiAdapter.getDiagnostics().baseUrl).toBe(
-      'https://alert-vmpj.onrender.com',
-    );
+    expect(PremiumBillingApiAdapter.getDiagnostics()).toEqual({
+      baseUrl: '',
+      baseUrlSource: 'missing',
+    });
   });
 
-  it('migrates the legacy mobile host to the live Render billing host', async () => {
-    process.env.ALERT_API_URL = 'https://api.alertpremium.com';
-
-    const { PremiumBillingApiAdapter } = loadAdapter();
-
-    expect(PremiumBillingApiAdapter.getDiagnostics().baseUrl).toBe(
-      'https://alert-vmpj.onrender.com',
-    );
-  });
-
-  it('prefers the runtime global billing host override when present', async () => {
-    (global as any).ALERT_API_URL = 'https://alert-vmpj.onrender.com';
-    process.env.ALERT_API_URL = 'https://api.alertpremium.com';
+  it('uses the configured billing host from ALERT_API_URL', async () => {
+    process.env.ALERT_API_URL = 'https://api.alert.app';
 
     const { PremiumBillingApiAdapter } = loadAdapter();
 
     expect(PremiumBillingApiAdapter.getDiagnostics()).toEqual({
-      baseUrl: 'https://alert-vmpj.onrender.com',
-      baseUrlSource: 'global',
+      baseUrl: 'https://api.alert.app',
+      baseUrlSource: 'config',
     });
   });
 
+  it('loads the canonical premium offer from billing/config', async () => {
+    process.env.ALERT_API_URL = 'https://api.alert.app';
+    const fetchMock = global.fetch as jest.Mock;
+    fetchMock.mockResolvedValueOnce(
+      okResponse({
+        publishableKey: 'pk_test_123',
+        appUrl: 'https://api.alert.app',
+        successUrl: 'https://api.alert.app/success',
+        cancelUrl: 'https://api.alert.app/cancel',
+        portalReturnUrl: 'https://api.alert.app/account/billing',
+        priceId: 'price_123',
+        priceSelection: 'default',
+        market: {
+          countryCode: 'BR',
+          currency: 'BRL',
+          locale: 'pt-BR',
+        },
+        offer: {
+          available: true,
+          priceId: 'price_123',
+          productId: 'prod_123',
+          productName: 'Alert Premium',
+          unitAmount: 1490,
+          currency: 'brl',
+          interval: 'month',
+          intervalCount: 1,
+          livemode: false,
+        },
+      }),
+    );
+
+    const { PremiumBillingApiAdapter } = loadAdapter();
+    const result = await PremiumBillingApiAdapter.getBillingConfig();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.alert.app/billing/config',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          'X-Alert-User-Id': '+5511999999999',
+          'X-Alert-Country-Code': 'BR',
+        }),
+      }),
+    );
+    expect(result.offer.available).toBe(true);
+    expect(result.offer.productName).toBe('Alert Premium');
+    expect(result.offer.currency).toBe('BRL');
+    expect(result.offer.interval).toBe('month');
+  });
+
   it('requests a billing token first and returns the full PaymentSheet payload', async () => {
+    process.env.ALERT_API_URL = 'https://api.alert.app';
     const fetchMock = global.fetch as jest.Mock;
     fetchMock
       .mockResolvedValueOnce(okResponse({ token: 'billing-token' }))
@@ -91,10 +132,10 @@ describe('PremiumBillingApiAdapter', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[0][0]).toBe(
-      'https://alert-vmpj.onrender.com/billing/auth-token',
+      'https://api.alert.app/billing/auth-token',
     );
     expect(fetchMock.mock.calls[1][0]).toBe(
-      'https://alert-vmpj.onrender.com/create-payment-intent',
+      'https://api.alert.app/create-payment-intent',
     );
     expect(fetchMock.mock.calls[1][1]).toEqual(
       expect.objectContaining({
@@ -121,6 +162,7 @@ describe('PremiumBillingApiAdapter', () => {
   });
 
   it('refreshes the billing token when the cached token is rejected', async () => {
+    process.env.ALERT_API_URL = 'https://api.alert.app';
     const fetchMock = global.fetch as jest.Mock;
     fetchMock
       .mockResolvedValueOnce(okResponse({ token: 'stale-token' }))
@@ -147,13 +189,13 @@ describe('PremiumBillingApiAdapter', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(fetchMock.mock.calls[0][0]).toBe(
-      'https://alert-vmpj.onrender.com/billing/auth-token',
+      'https://api.alert.app/billing/auth-token',
     );
     expect(fetchMock.mock.calls[1][0]).toBe(
-      'https://alert-vmpj.onrender.com/create-payment-intent',
+      'https://api.alert.app/create-payment-intent',
     );
     expect(fetchMock.mock.calls[2][0]).toBe(
-      'https://alert-vmpj.onrender.com/billing/auth-token',
+      'https://api.alert.app/billing/auth-token',
     );
     expect(fetchMock.mock.calls[3][1]).toEqual(
       expect.objectContaining({
@@ -163,5 +205,57 @@ describe('PremiumBillingApiAdapter', () => {
       }),
     );
     expect(result.paymentIntentClientSecret).toBe('pi_secret_123');
+  });
+
+  it('confirms a payment intent through the canonical backend endpoint', async () => {
+    process.env.ALERT_API_URL = 'https://api.alert.app';
+    const fetchMock = global.fetch as jest.Mock;
+    fetchMock
+      .mockResolvedValueOnce(okResponse({ token: 'billing-token' }))
+      .mockResolvedValueOnce(
+        okResponse({
+          ok: true,
+          paymentIntentId: 'pi_123',
+          paymentIntentStatus: 'succeeded',
+          subscriptionId: 'sub_123',
+          subscriptionStatus: 'active',
+          customerId: 'cus_123',
+          priceId: 'price_123',
+          premiumActive: true,
+          currentPeriodEnd: '2026-05-29T00:00:00.000Z',
+          sourceEvent: 'mobile_payment_confirmation',
+        }),
+      );
+
+    const { PremiumBillingApiAdapter } = loadAdapter();
+    const result = await PremiumBillingApiAdapter.confirmPaymentIntent({
+      paymentIntentId: 'pi_123',
+      subscriptionId: 'sub_123',
+    });
+
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      'https://api.alert.app/confirm-payment-intent',
+    );
+    expect(fetchMock.mock.calls[1][1]).toEqual(
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'X-Alert-Billing-Token': 'billing-token',
+        }),
+      }),
+    );
+    expect(result).toEqual({
+      ok: true,
+      livemode: false,
+      paymentIntentId: 'pi_123',
+      paymentIntentStatus: 'succeeded',
+      subscriptionId: 'sub_123',
+      subscriptionStatus: 'active',
+      customerId: 'cus_123',
+      priceId: 'price_123',
+      premiumActive: true,
+      currentPeriodEnd: '2026-05-29T00:00:00.000Z',
+      sourceEvent: 'mobile_payment_confirmation',
+    });
   });
 });

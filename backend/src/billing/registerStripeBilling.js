@@ -51,6 +51,9 @@ const logBilling = (level, message, extra = {}) => {
 };
 
 const safeRequestId = value => String(value || '').trim().slice(0, 120) || null;
+const SUPPORTED_BILLING_INTERVALS = new Set(['day', 'week', 'month', 'year']);
+const BILLING_OFFER_CACHE_TTL_MS = 60_000;
+const billingOfferCache = new Map();
 
 const normalizeStripeTimestamp = value => {
   if (!value) return null;
@@ -68,6 +71,108 @@ const normalizeStripeTimestamp = value => {
 };
 
 const toCurrencyCode = value => String(value || '').trim().toUpperCase() || null;
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+const normalizeBillingInterval = value => {
+  const normalized = String(value || '').trim().toLowerCase();
+  return SUPPORTED_BILLING_INTERVALS.has(normalized) ? normalized : null;
+};
+
+const buildUnavailableBillingOffer = (config, reasonCode) => ({
+  available: false,
+  reasonCode: String(reasonCode || 'billing_offer_unavailable').trim(),
+  source: 'stripe_price',
+  priceId: String(config?.priceId || '').trim() || null,
+  productId: null,
+  productName: null,
+  productDescription: null,
+  unitAmount: null,
+  currency: toCurrencyCode(config?.market?.currency || config?.defaultCurrency),
+  interval: null,
+  intervalCount: null,
+  livemode: false,
+});
+
+const buildBillingOfferFromStripePrice = ({ config, price }) => {
+  const product =
+    price?.product && typeof price.product === 'object' && !price.product.deleted
+      ? price.product
+      : null;
+  const active =
+    Boolean(price?.active) &&
+    Boolean(price?.recurring) &&
+    (product?.active !== false);
+  const interval = normalizeBillingInterval(price?.recurring?.interval);
+  const intervalCount = Number.isFinite(price?.recurring?.interval_count)
+    ? price.recurring.interval_count
+    : null;
+
+  if (!active || !interval) {
+    return buildUnavailableBillingOffer(
+      config,
+      !price?.active
+        ? 'stripe_price_inactive'
+        : !price?.recurring
+        ? 'stripe_price_not_recurring'
+        : 'stripe_price_interval_invalid',
+    );
+  }
+
+  return {
+    available: true,
+    reasonCode: null,
+    source: 'stripe_price',
+    priceId: String(price?.id || config?.priceId || '').trim() || null,
+    productId: String(product?.id || '').trim() || null,
+    productName:
+      String(product?.name || product?.description || '').trim() || null,
+    productDescription: String(product?.description || '').trim() || null,
+    unitAmount:
+      typeof price?.unit_amount === 'number' ? price.unit_amount : null,
+    currency:
+      toCurrencyCode(price?.currency) ||
+      toCurrencyCode(config?.market?.currency || config?.defaultCurrency),
+    interval,
+    intervalCount,
+    livemode: Boolean(price?.livemode),
+  };
+};
+
+const readCachedBillingOffer = cacheKey => {
+  const cached = billingOfferCache.get(cacheKey);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    billingOfferCache.delete(cacheKey);
+    return null;
+  }
+  return cached.value;
+};
+
+const writeCachedBillingOffer = (cacheKey, offer) => {
+  billingOfferCache.set(cacheKey, {
+    value: offer,
+    expiresAt: Date.now() + BILLING_OFFER_CACHE_TTL_MS,
+  });
+  return offer;
+};
+
+const loadBillingOffer = async ({ stripe, config }) => {
+  const cacheKey = `${String(config?.priceId || '').trim()}::${String(
+    config?.market?.currency || '',
+  ).trim()}`;
+  const cached = readCachedBillingOffer(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const price = await stripe.prices.retrieve(String(config?.priceId || '').trim(), {
+    expand: ['product'],
+  });
+  return writeCachedBillingOffer(
+    cacheKey,
+    buildBillingOfferFromStripePrice({ config, price }),
+  );
+};
 
 const buildInvoiceSummary = invoice => ({
   id: invoice?.id || '',
@@ -457,6 +562,202 @@ const buildMobilePaymentSheetResponse = ({
   };
 };
 
+const readPaymentIntentInput = req =>
+  String(
+    req.body?.payment_intent_id ||
+      req.body?.paymentIntentId ||
+      req.params?.intentId ||
+      req.query?.payment_intent_id ||
+      req.query?.paymentIntentId ||
+      '',
+  ).trim();
+
+const readSubscriptionInput = req =>
+  String(
+    req.body?.subscription_id ||
+      req.body?.subscriptionId ||
+      req.query?.subscription_id ||
+      req.query?.subscriptionId ||
+      '',
+  ).trim();
+
+const resolveExpandedInvoiceSubscription = async ({ stripe, paymentIntent, subscriptionId }) => {
+  let invoice = null;
+  let subscription = null;
+
+  if (paymentIntent?.invoice) {
+    invoice = await stripe.invoices.retrieve(paymentIntent.invoice, {
+      expand: ['subscription'],
+    });
+    if (invoice?.subscription && typeof invoice.subscription === 'object') {
+      subscription = invoice.subscription;
+    } else if (invoice?.subscription) {
+      subscription = await stripe.subscriptions.retrieve(invoice.subscription);
+    }
+  }
+
+  if (!subscription && subscriptionId) {
+    subscription = await stripe.subscriptions.retrieve(subscriptionId);
+  }
+
+  return {
+    invoice,
+    subscription,
+  };
+};
+
+const syncSubscriptionFromPaymentConfirmation = async ({
+  stripe,
+  repo,
+  auth,
+  current,
+  paymentIntent,
+  subscriptionId,
+}) => {
+  const { invoice, subscription } = await resolveExpandedInvoiceSubscription({
+    stripe,
+    paymentIntent,
+    subscriptionId,
+  });
+  const customerId = String(paymentIntent?.customer || current?.stripe_customer_id || '').trim() || null;
+
+  if (
+    current?.stripe_customer_id &&
+    customerId &&
+    current.stripe_customer_id !== customerId
+  ) {
+    const error = new Error('billing_identity_invalid');
+    error.statusCode = 403;
+    throw error;
+  }
+
+  const syncResult = await repo.syncSubscription({
+    userId: auth.userId,
+    stripeCustomerId: customerId,
+    stripeSubscriptionId:
+      subscription?.id ||
+      invoice?.subscription ||
+      subscriptionId ||
+      current?.stripe_subscription_id ||
+      null,
+    stripePriceId:
+      extractSubscriptionPriceId(subscription) ||
+      invoice?.lines?.data?.[0]?.price?.id ||
+      current?.stripe_price_id ||
+      null,
+    stripePaymentIntentId: paymentIntent?.id || current?.stripe_payment_intent_id || null,
+    subscriptionStatus:
+      subscription?.status ||
+      current?.subscription_status ||
+      (paymentIntent?.status === 'succeeded' ? 'active' : 'incomplete'),
+    currentPeriodEnd: normalizePeriodEnd(
+      subscription?.current_period_end || current?.current_period_end || null,
+    ),
+    premiumActive:
+      subscription?.status
+        ? premiumActiveForStatus(subscription.status)
+        : paymentIntent?.status === 'succeeded',
+    ...extractBillingMetadata(subscription?.metadata, current || {}),
+    sourceEvent: 'mobile_payment_confirmation',
+  });
+
+  return {
+    invoice,
+    subscription,
+    syncResult,
+  };
+};
+
+const confirmPaymentIntentStatus = async ({
+  stripe,
+  repo,
+  auth,
+  paymentIntentId,
+  subscriptionId,
+}) => {
+  let paymentIntent = null;
+  let confirmation = {
+    invoice: null,
+    subscription: null,
+    syncResult: null,
+  };
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    confirmation = await syncSubscriptionFromPaymentConfirmation({
+      stripe,
+      repo,
+      auth,
+      current: await repo.getByUserId(auth.userId),
+      paymentIntent,
+      subscriptionId,
+    });
+
+    const subscriptionStatus = String(
+      confirmation.subscription?.status ||
+        confirmation.syncResult?.subscription_status ||
+        '',
+    ).trim();
+    const paymentSucceeded = paymentIntent?.status === 'succeeded';
+    const premiumReady =
+      confirmation.syncResult?.premium_active === true ||
+      premiumActiveForStatus(subscriptionStatus);
+
+    if (paymentSucceeded && premiumReady) {
+      break;
+    }
+
+    if (attempt < 4) {
+      await wait(700);
+    }
+  }
+
+  const subscriptionStatus = String(
+    confirmation.subscription?.status ||
+      confirmation.syncResult?.subscription_status ||
+      '',
+  ).trim() || null;
+  const premiumActive = Boolean(
+    confirmation.syncResult?.premium_active ||
+      premiumActiveForStatus(subscriptionStatus),
+  );
+
+  return {
+    ok: paymentIntent?.status === 'succeeded',
+    livemode: Boolean(paymentIntent?.livemode),
+    paymentIntentId: String(paymentIntent?.id || paymentIntentId).trim(),
+    paymentIntentStatus: String(paymentIntent?.status || '').trim() || null,
+    subscriptionId:
+      String(
+        confirmation.subscription?.id ||
+          confirmation.syncResult?.stripe_subscription_id ||
+          subscriptionId ||
+          '',
+      ).trim() || null,
+    subscriptionStatus,
+    customerId:
+      String(
+        paymentIntent?.customer ||
+          confirmation.syncResult?.stripe_customer_id ||
+          '',
+      ).trim() || null,
+    priceId:
+      String(
+        extractSubscriptionPriceId(confirmation.subscription) ||
+          confirmation.syncResult?.stripe_price_id ||
+          '',
+      ).trim() || null,
+    premiumActive,
+    currentPeriodEnd:
+      String(
+        confirmation.syncResult?.current_period_end ||
+          normalizePeriodEnd(confirmation.subscription?.current_period_end) ||
+          '',
+      ).trim() || null,
+    sourceEvent: 'mobile_payment_confirmation',
+  };
+};
+
 const handleSubscriptionSync = async (repo, subscription, sourceEvent) => {
   const existingBySubscription = await repo.findBySubscriptionId(subscription?.id);
   const existingByCustomer = await repo.findByCustomerId(subscription?.customer);
@@ -615,9 +916,24 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
     }
   });
 
-  app.get('/billing/config', (req, res) => {
+  app.get('/billing/config', async (req, res) => {
     try {
       const config = getBillingConfig(req);
+      let offer = buildUnavailableBillingOffer(config, 'stripe_price_lookup_failed');
+
+      try {
+        offer = await loadBillingOffer({
+          stripe: getStripeClient(),
+          config,
+        });
+      } catch (error) {
+        logBilling('error', 'Stripe billing offer lookup failed', {
+          route: '/billing/config',
+          priceId: config.priceId,
+          error: error.message,
+        });
+      }
+
       return res.json({
         publishableKey: config.publishableKey,
         appUrl: config.appUrl,
@@ -632,6 +948,7 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
         billingAddressCollection: config.billingAddressCollection,
         taxIdCollectionEnabled: config.taxIdCollectionEnabled,
         queryAuthAllowed: allowQueryAuth(process.env),
+        offer,
       });
     } catch (error) {
       logBilling('error', 'Stripe billing config unavailable', {
@@ -875,6 +1192,8 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
         stripeCustomerId: customerId,
         stripeSubscriptionId: subscription?.id || null,
         stripePriceId: extractSubscriptionPriceId(subscription) || config.priceId,
+        stripePaymentIntentId:
+          getPaymentIntentFromSubscription(subscription)?.id || null,
         subscriptionStatus: subscription?.status || 'incomplete',
         currentPeriodEnd: normalizePeriodEnd(subscription?.current_period_end),
         premiumActive: premiumActiveForStatus(subscription?.status),
@@ -926,6 +1245,55 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
       return res.status(normalized.statusCode).json({ error: normalized.error });
     }
   });
+
+  const handleConfirmPaymentIntent = async (req, res) => {
+    try {
+      const stripe = getStripeClient();
+      const auth = getAuthenticatedBillingIdentity(req, process.env);
+      const paymentIntentId = readPaymentIntentInput(req);
+      const subscriptionId = readSubscriptionInput(req);
+
+      if (!paymentIntentId) {
+        return res.status(400).json({ error: 'payment_intent_unavailable' });
+      }
+
+      const confirmation = await confirmPaymentIntentStatus({
+        stripe,
+        repo,
+        auth,
+        paymentIntentId,
+        subscriptionId,
+      });
+
+      logBilling('info', 'Stripe mobile payment confirmation completed', {
+        route: '/confirm-payment-intent',
+        requestId: safeRequestId(extractRequestId(req, auth)),
+        paymentIntentStatus: confirmation.paymentIntentStatus,
+        subscriptionStatus: confirmation.subscriptionStatus,
+        premiumActive: confirmation.premiumActive,
+      });
+
+      return res.json(confirmation);
+    } catch (error) {
+      const auth = (() => {
+        try {
+          return getAuthenticatedBillingIdentity(req, process.env);
+        } catch {
+          return null;
+        }
+      })();
+      logBilling('error', 'Stripe mobile payment confirmation failed', {
+        route: '/confirm-payment-intent',
+        requestId: safeRequestId(extractRequestId(req, auth || {})),
+        error: error.message,
+      });
+      const normalized = mapMobileBillingError(error, 'payment');
+      return res.status(normalized.statusCode).json({ error: normalized.error });
+    }
+  };
+
+  app.post('/confirm-payment-intent', handleConfirmPaymentIntent);
+  app.get('/api/billing/payment-status/:intentId', handleConfirmPaymentIntent);
 
   app.post('/create-portal-session', async (req, res) => {
     try {
@@ -1197,6 +1565,8 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
 module.exports = {
   registerStripeBilling,
   wantsRedirectResponse,
+  buildBillingOfferFromStripePrice,
+  buildUnavailableBillingOffer,
   buildMobilePaymentSheetResponse,
   resolveMobileMerchantCountryCode,
   resolveMobileCurrencyCode,

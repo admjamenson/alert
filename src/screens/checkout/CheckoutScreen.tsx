@@ -1,4 +1,4 @@
-﻿import React, {
+import React, {
   useCallback,
   useEffect,
   useMemo,
@@ -27,31 +27,35 @@ import { useTranslation } from 'react-i18next';
 import { ThemeTokens } from '../../constants/ThemeTokens';
 import { useTheme } from '../../context/ThemeContext';
 import AlertLogo from '../../assets/logo.png';
-import { EntitlementService } from '../../services/EntitlementService';
-import { GetPremiumBillingAccountQuery } from '../../application/queries/GetPremiumBillingAccountQuery';
 import { CreatePremiumCheckoutSessionCommand } from '../../application/commands/CreatePremiumCheckoutSessionCommand';
 import { CreatePremiumPortalSessionCommand } from '../../application/commands/CreatePremiumPortalSessionCommand';
 import { CreatePremiumPaymentIntentCommand } from '../../application/commands/CreatePremiumPaymentIntentCommand';
+import { ConfirmPremiumPaymentCommand } from '../../application/commands/ConfirmPremiumPaymentCommand';
+import { ClearEntitlementCacheCommand } from '../../application/commands/ClearEntitlementCacheCommand';
+import { GetPremiumBillingConfigQuery } from '../../application/queries/GetPremiumBillingConfigQuery';
+import { GetPremiumBillingDiagnosticsQuery } from '../../application/queries/GetPremiumBillingDiagnosticsQuery';
+import { GetPremiumBillingFallbackUrlQuery } from '../../application/queries/GetPremiumBillingFallbackUrlQuery';
+import { GetPremiumBillingStateQuery } from '../../application/queries/GetPremiumBillingStateQuery';
+import {
+  getPremiumBillingErrorCategory,
+  getPremiumBillingErrorCode,
+  shouldOfferHostedBillingFallback,
+} from '../../application/billing/PremiumBillingErrors';
 import { BillingBrowserAdapter } from '../../infrastructure/adapters/BillingBrowserAdapter';
 import { PaymentSheetAdapter } from '../../infrastructure/adapters/PaymentSheetAdapter';
-import { PremiumBillingApiAdapter } from '../../infrastructure/adapters/PremiumBillingApiAdapter';
 import { resolveBillingProvider } from '../../billing/BillingProvider';
 import type {
   PremiumBillingAccount,
   PremiumInvoice,
   PremiumPaymentMethod,
 } from '../../domain/billing/PremiumBillingAccount';
+import type { PremiumBillingConfig } from '../../domain/billing/PremiumBillingConfig';
 import type { RootStackParamList } from '../../navigation/types';
 
 const FONT_FAMILY =
   Platform.OS === 'ios'
     ? ThemeTokens.typography.families.ios
     : ThemeTokens.typography.families.android;
-
-const getBillingErrorCode = (error: unknown) =>
-  error instanceof Error
-    ? String(error.message || '').trim() || 'unknown_billing_error'
-    : 'unknown_billing_error';
 
 type CheckoutNavigationProp = NativeStackNavigationProp<
   RootStackParamList,
@@ -72,50 +76,61 @@ const CheckoutScreen: React.FC<{ navigation: CheckoutNavigationProp }> = ({
   );
   const [billingAccount, setBillingAccount] =
     useState<PremiumBillingAccount | null>(null);
+  const [billingConfig, setBillingConfig] =
+    useState<PremiumBillingConfig | null>(null);
   const [isPremium, setIsPremium] = useState(false);
   const [error, setError] = useState('');
   const lastHandledBillingSyncNonceRef = useRef<number | null>(null);
   const pendingBillingIntentRef = useRef<
     'checkout' | 'portal' | 'document' | null
   >(null);
+  const pendingPaymentConfirmationRef = useRef<{
+    paymentIntentId: string;
+    subscriptionId?: string | null;
+  } | null>(null);
   const appStateRef = useRef(AppState.currentState);
 
   const readBillingState = useCallback(async () => {
-    const [accountResult, entitlementsResult] = await Promise.allSettled([
-      GetPremiumBillingAccountQuery.execute(),
-      EntitlementService.getEntitlements({ forceRefresh: true }),
-    ]);
+    const state = await GetPremiumBillingStateQuery.execute({
+      forceRefresh: true,
+    });
 
-    const account =
-      accountResult.status === 'fulfilled'
-        ? accountResult.value
-        : ({
-            userId: '',
-            billing: null,
-            customer: null,
-            paymentMethod: null,
-            invoices: [],
-            portalAvailable: true,
-            checkoutAvailable: true,
-          } satisfies PremiumBillingAccount);
-    const entitlements =
-      entitlementsResult.status === 'fulfilled'
-        ? entitlementsResult.value
-        : null;
-
-    const premium =
-      Boolean(entitlements?.isPremium) ||
-      Boolean(account?.billing?.premium_active);
-
-    setBillingAccount(account);
-    setIsPremium(premium);
+    setBillingAccount(state.account);
+    setIsPremium(state.premium);
     setError('');
     return {
-      account,
-      premium,
-      hasOperationalBillingState: accountResult.status === 'fulfilled',
+      account: state.account,
+      premium: state.premium,
+      hasOperationalBillingState: state.hasOperationalBillingState,
     };
   }, []);
+
+  const readBillingConfig = useCallback(async () => {
+    const config = await GetPremiumBillingConfigQuery.execute();
+    setBillingConfig(config);
+    return config;
+  }, []);
+
+  const confirmPremiumPayment = useCallback(
+    async (options: { paymentIntentId: string; subscriptionId?: string | null }) => {
+      let lastResult: Awaited<
+        ReturnType<typeof ConfirmPremiumPaymentCommand.execute>
+      > | null = null;
+
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        lastResult = await ConfirmPremiumPaymentCommand.execute(options);
+        if (lastResult.premiumActive || lastResult.paymentIntentStatus === 'succeeded') {
+          return lastResult;
+        }
+        if (attempt < 2) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+
+      return lastResult;
+    },
+    [],
+  );
 
   const loadBillingState = useCallback(
     async (
@@ -135,6 +150,7 @@ const CheckoutScreen: React.FC<{ navigation: CheckoutNavigationProp }> = ({
       }
 
       try {
+        const billingConfigPromise = readBillingConfig().catch(() => null);
         let lastResult: {
           account: PremiumBillingAccount | null;
           premium: boolean;
@@ -146,10 +162,11 @@ const CheckoutScreen: React.FC<{ navigation: CheckoutNavigationProp }> = ({
             break;
           }
 
-          await EntitlementService.clearCache();
+          await ClearEntitlementCacheCommand.execute();
           await new Promise(resolve => setTimeout(resolve, 1200));
         }
 
+        await billingConfigPromise;
         return lastResult;
       } catch {
         setError('');
@@ -159,7 +176,7 @@ const CheckoutScreen: React.FC<{ navigation: CheckoutNavigationProp }> = ({
         setRefreshing(false);
       }
     },
-    [readBillingState, t],
+    [readBillingConfig, readBillingState, t],
   );
 
   useEffect(() => {
@@ -176,7 +193,7 @@ const CheckoutScreen: React.FC<{ navigation: CheckoutNavigationProp }> = ({
         billingSyncNonce !== lastHandledBillingSyncNonceRef.current
       ) {
         lastHandledBillingSyncNonceRef.current = billingSyncNonce;
-        void EntitlementService.clearCache().finally(() => {
+        void ClearEntitlementCacheCommand.execute().finally(() => {
           void loadBillingState(billingSyncHint || 'focus').finally(() => {
             navigation.setParams({
               billingSyncHint: undefined,
@@ -187,7 +204,7 @@ const CheckoutScreen: React.FC<{ navigation: CheckoutNavigationProp }> = ({
         return;
       }
 
-      void EntitlementService.clearCache().finally(() => {
+      void ClearEntitlementCacheCommand.execute().finally(() => {
         void loadBillingState('focus');
       });
     });
@@ -212,9 +229,20 @@ const CheckoutScreen: React.FC<{ navigation: CheckoutNavigationProp }> = ({
       pendingBillingIntentRef.current = null;
       const syncMode =
         intent === 'checkout' ? 'checkout_success' : 'portal_return';
-      void EntitlementService.clearCache().finally(() => {
-        void loadBillingState(syncMode);
-      });
+      const pendingPayment = pendingPaymentConfirmationRef.current;
+      void (async () => {
+        try {
+          if (intent === 'checkout' && pendingPayment) {
+            await confirmPremiumPayment(pendingPayment);
+          }
+        } catch {
+          // refresh below still re-checks canonical backend state
+        } finally {
+          pendingPaymentConfirmationRef.current = null;
+          await ClearEntitlementCacheCommand.execute();
+          await loadBillingState(syncMode);
+        }
+      })();
     };
 
     const appStateSubscription = AppState.addEventListener(
@@ -423,6 +451,63 @@ const CheckoutScreen: React.FC<{ navigation: CheckoutNavigationProp }> = ({
     [t],
   );
 
+  const formatOfferPrice = useCallback(
+    (config?: PremiumBillingConfig | null) => {
+      const offer = config?.offer;
+      if (!offer?.available) {
+        return t('premium_value_unavailable');
+      }
+      if (!offer.currency || typeof offer.unitAmount !== 'number') {
+        return t('premium_value_unavailable');
+      }
+
+      return new Intl.NumberFormat(undefined, {
+        style: 'currency',
+        currency: offer.currency,
+      }).format(offer.unitAmount / 100);
+    },
+    [t],
+  );
+
+  const formatOfferPeriod = useCallback(
+    (config?: PremiumBillingConfig | null) => {
+      const offer = config?.offer;
+      const interval = offer?.interval;
+      if (!offer?.available || !interval) {
+        return '';
+      }
+
+      const intervalLabel =
+        interval === 'day'
+          ? t('premium_interval_day')
+          : interval === 'week'
+          ? t('premium_interval_week')
+          : interval === 'year'
+          ? t('premium_interval_year')
+          : t('premium_interval_month');
+
+      const intervalCount =
+        typeof offer.intervalCount === 'number' && offer.intervalCount > 1
+          ? offer.intervalCount
+          : 1;
+
+      if (intervalCount === 1) {
+        return `/${intervalLabel}`;
+      }
+
+      return t('premium_interval_every_count', {
+        count: intervalCount,
+        interval: intervalLabel,
+      });
+    },
+    [t],
+  );
+
+  const checkoutEnabled = useMemo(
+    () => isPremium || Boolean(billingConfig?.offer?.available),
+    [billingConfig?.offer?.available, isPremium],
+  );
+
   const openBillingSurface = useCallback(
     async (url: string, intent: 'checkout' | 'portal' | 'document') => {
       pendingBillingIntentRef.current = intent === 'document' ? null : intent;
@@ -440,14 +525,9 @@ const CheckoutScreen: React.FC<{ navigation: CheckoutNavigationProp }> = ({
 
   const mapBillingErrorMessage = useCallback(
     (error: unknown, intent: 'checkout' | 'portal') => {
-      const code =
-        error instanceof Error ? String(error.message || '').trim() : '';
+      const category = getPremiumBillingErrorCategory(error);
 
-      if (
-        code === 'billing_auth_missing' ||
-        code === 'billing_identity_invalid' ||
-        code === 'missing_stripe_customer_id'
-      ) {
+      if (category === 'identity') {
         return t(
           intent === 'checkout'
             ? 'premium_error_checkout_identity'
@@ -455,18 +535,7 @@ const CheckoutScreen: React.FC<{ navigation: CheckoutNavigationProp }> = ({
         );
       }
 
-      if (
-        code === 'missing_api_base_url' ||
-        code === 'billing_configuration_invalid' ||
-        code === 'billing_service_unavailable' ||
-        code === 'billing_browser_unavailable' ||
-        code === 'stripe_checkout_missing_url' ||
-        code === 'stripe_portal_missing_url' ||
-        code === 'stripe_payment_missing_client_secret' ||
-        code === 'payment_intent_unavailable' ||
-        code === 'invalid_checkout_url' ||
-        code === 'invalid_portal_url'
-      ) {
+      if (category === 'service') {
         return t(
           intent === 'checkout'
             ? 'premium_error_checkout_service'
@@ -522,7 +591,7 @@ const CheckoutScreen: React.FC<{ navigation: CheckoutNavigationProp }> = ({
       await CreatePremiumPaymentIntentCommand.execute();
     if (__DEV__) {
       console.log('[premium/checkout/payment-sheet]', {
-        baseUrl: PremiumBillingApiAdapter.getDiagnostics().baseUrl,
+        baseUrl: GetPremiumBillingDiagnosticsQuery.execute().baseUrl,
         hasPublishableKey: Boolean(paymentSheetSession.publishableKey),
         hasCustomerId: Boolean(paymentSheetSession.customerId),
         hasEphemeralKey: Boolean(
@@ -534,6 +603,11 @@ const CheckoutScreen: React.FC<{ navigation: CheckoutNavigationProp }> = ({
         hasReturnUrl: Boolean(paymentSheetSession.returnURL),
       });
     }
+    pendingBillingIntentRef.current = 'checkout';
+    pendingPaymentConfirmationRef.current = {
+      paymentIntentId: paymentSheetSession.paymentIntentId,
+      subscriptionId: paymentSheetSession.subscriptionId,
+    };
     const initResult = await PaymentSheetAdapter.initPaymentSheet({
       publishableKey: paymentSheetSession.publishableKey,
       customerId: paymentSheetSession.customerId,
@@ -550,10 +624,14 @@ const CheckoutScreen: React.FC<{ navigation: CheckoutNavigationProp }> = ({
     });
 
     if (initResult.canceled) {
+      pendingPaymentConfirmationRef.current = null;
+      pendingBillingIntentRef.current = null;
       throw new Error('premium_error_payment_canceled');
     }
 
     if (initResult.error) {
+      pendingPaymentConfirmationRef.current = null;
+      pendingBillingIntentRef.current = null;
       throw new Error(
         String(initResult.error.code || 'stripe_payment_sheet_init_failed'),
       );
@@ -561,10 +639,14 @@ const CheckoutScreen: React.FC<{ navigation: CheckoutNavigationProp }> = ({
 
     const presentResult = await PaymentSheetAdapter.presentPaymentSheet();
     if (presentResult.canceled) {
+      pendingPaymentConfirmationRef.current = null;
+      pendingBillingIntentRef.current = null;
       throw new Error('premium_error_payment_canceled');
     }
 
     if (presentResult.error) {
+      pendingPaymentConfirmationRef.current = null;
+      pendingBillingIntentRef.current = null;
       throw new Error(
         String(
           presentResult.error.code || 'stripe_payment_sheet_present_failed',
@@ -572,10 +654,33 @@ const CheckoutScreen: React.FC<{ navigation: CheckoutNavigationProp }> = ({
       );
     }
 
-    await EntitlementService.clearCache();
-    await loadBillingState('checkout_success');
-    Alert.alert(t('checkout_success_title'), t('checkout_success_body'));
-  }, [loadBillingState, t]);
+    let confirmation = null;
+    try {
+      confirmation = await confirmPremiumPayment({
+        paymentIntentId: paymentSheetSession.paymentIntentId,
+        subscriptionId: paymentSheetSession.subscriptionId,
+      });
+    } finally {
+      pendingPaymentConfirmationRef.current = null;
+      pendingBillingIntentRef.current = null;
+    }
+    await ClearEntitlementCacheCommand.execute();
+    const state = await loadBillingState('checkout_success');
+    const premiumActive = Boolean(confirmation?.premiumActive || state?.premium);
+
+    if (premiumActive) {
+      Alert.alert(t('checkout_success_title'), t('checkout_success_body'));
+      return;
+    }
+
+    Alert.alert(
+      t('checkout_success_title'),
+      t('premium_payment_pending_body', {
+        defaultValue:
+          'Seu pagamento foi recebido e o Premium está sendo ativado. Atualize esta tela em alguns instantes.',
+      }),
+    );
+  }, [confirmPremiumPayment, loadBillingState, t]);
 
   const handleHostedCheckout = useCallback(async () => {
     const session = await CreatePremiumCheckoutSessionCommand.execute();
@@ -583,14 +688,10 @@ const CheckoutScreen: React.FC<{ navigation: CheckoutNavigationProp }> = ({
   }, [openCheckoutUrl]);
 
   const handleOpenCheckout = useCallback(async () => {
-    if (billingContext.provider === 'app_store') {
-      Alert.alert(
-        t('premium_error_title'),
-        t('premium_ios_storekit_coming_soon', {
-          defaultValue:
-            'Assinaturas pelo App Store jÃ¡ estÃ£o disponÃ­veis! Confira a pÃ¡gina de planos para assinar agora.',
-        }),
-      );
+    if (!checkoutEnabled) {
+      const message = t('premium_error_checkout_service');
+      setError(message);
+      Alert.alert(t('premium_error_title'), message);
       return;
     }
 
@@ -601,7 +702,7 @@ const CheckoutScreen: React.FC<{ navigation: CheckoutNavigationProp }> = ({
         console.log('[premium/checkout/start]', {
           provider: billingContext.provider,
           platform: Platform.OS,
-          baseUrl: PremiumBillingApiAdapter.getDiagnostics().baseUrl,
+          baseUrl: GetPremiumBillingDiagnosticsQuery.execute().baseUrl,
         });
       }
       if (Platform.OS === 'android' && billingContext.provider === 'stripe') {
@@ -613,14 +714,14 @@ const CheckoutScreen: React.FC<{ navigation: CheckoutNavigationProp }> = ({
       try {
         await handleHostedCheckout();
       } catch (hostedError) {
-        const hostedCode = getBillingErrorCode(hostedError);
+        const hostedCode = getPremiumBillingErrorCode(hostedError);
         if (hostedCode !== 'premium_error_payment_canceled') {
           console.error('[premium/checkout/hosted]', hostedCode);
         }
         throw hostedError;
       }
     } catch (error) {
-      const code = getBillingErrorCode(error);
+      const code = getPremiumBillingErrorCode(error);
       if (code !== 'premium_error_payment_canceled') {
         console.error('[premium/checkout]', code);
       }
@@ -636,9 +737,9 @@ const CheckoutScreen: React.FC<{ navigation: CheckoutNavigationProp }> = ({
       setBusyAction(null);
 
       const fallbackUrl =
-        code === 'billing_service_unavailable'
+        !shouldOfferHostedBillingFallback(error)
           ? null
-          : await PremiumBillingApiAdapter.getCheckoutFallbackUrl();
+          : await GetPremiumBillingFallbackUrlQuery.checkout();
       if (fallbackUrl) {
         Alert.alert(t('premium_error_title'), message, [
           { text: t('common_cancel') || 'Cancelar', style: 'cancel' },
@@ -657,6 +758,7 @@ const CheckoutScreen: React.FC<{ navigation: CheckoutNavigationProp }> = ({
     }
   }, [
     billingContext.provider,
+    checkoutEnabled,
     handleHostedCheckout,
     handleNativeStripeCheckout,
     mapBillingErrorMessage,
@@ -681,13 +783,13 @@ const CheckoutScreen: React.FC<{ navigation: CheckoutNavigationProp }> = ({
       setError('');
       portal = await CreatePremiumPortalSessionCommand.execute();
     } catch (portalError) {
-      const code = getBillingErrorCode(portalError);
+      const code = getPremiumBillingErrorCode(portalError);
       console.error('[premium/portal/session]', code);
       const message = mapBillingErrorMessage(portalError, 'portal');
       setError(message);
       setBusyAction(null);
 
-      const fallbackUrl = await PremiumBillingApiAdapter.getPortalFallbackUrl();
+      const fallbackUrl = await GetPremiumBillingFallbackUrlQuery.portal();
       if (fallbackUrl) {
         Alert.alert(t('premium_error_title'), message, [
           { text: t('common_cancel') || 'Cancelar', style: 'cancel' },
@@ -705,11 +807,14 @@ const CheckoutScreen: React.FC<{ navigation: CheckoutNavigationProp }> = ({
     try {
       await openBillingSurface(String(portal?.url || ''), 'portal');
     } catch (openError) {
-      console.error('[premium/portal/open]', getBillingErrorCode(openError));
+      console.error(
+        '[premium/portal/open]',
+        getPremiumBillingErrorCode(openError),
+      );
       const message = mapBillingErrorMessage(openError, 'portal');
       setError(message);
 
-      const fallbackUrl = await PremiumBillingApiAdapter.getPortalFallbackUrl();
+      const fallbackUrl = await GetPremiumBillingFallbackUrlQuery.portal();
       if (fallbackUrl) {
         Alert.alert(t('premium_error_title'), message, [
           { text: t('common_cancel') || 'Cancelar', style: 'cancel' },
@@ -761,7 +866,7 @@ const CheckoutScreen: React.FC<{ navigation: CheckoutNavigationProp }> = ({
           <RefreshControl
             refreshing={refreshing}
             onRefresh={() => {
-              void EntitlementService.clearCache().finally(() => {
+              void ClearEntitlementCacheCommand.execute().finally(() => {
                 void loadBillingState('focus');
               });
             }}
@@ -831,7 +936,7 @@ const CheckoutScreen: React.FC<{ navigation: CheckoutNavigationProp }> = ({
                 busyAction === 'portal' && styles.disabledButton,
               ]}
               onPress={isPremium ? handleOpenPortal : handleOpenCheckout}
-              disabled={busyAction !== null}
+              disabled={busyAction !== null || (!isPremium && !checkoutEnabled)}
               activeOpacity={0.9}
               accessibilityRole="button"
               accessibilityLabel={
@@ -839,7 +944,8 @@ const CheckoutScreen: React.FC<{ navigation: CheckoutNavigationProp }> = ({
               }
               accessibilityState={{
                 busy: busyAction !== null,
-                disabled: busyAction !== null,
+                disabled:
+                  busyAction !== null || (!isPremium && !checkoutEnabled),
               }}
             >
               {busyAction === 'checkout' || busyAction === 'portal' ? (
@@ -897,12 +1003,12 @@ const CheckoutScreen: React.FC<{ navigation: CheckoutNavigationProp }> = ({
                         { backgroundColor: 'rgba(255,255,255,0.16)' },
                       ]}
                     >
-                      <Text style={styles.marketingBadgeText}>
+                    <Text style={styles.marketingBadgeText}>
                         {t('premium_marketing_badge')}
                       </Text>
                     </View>
                     <Text style={styles.marketingPlanLabel}>
-                      {t('checkout_plan_label')}
+                      {billingConfig?.offer?.productName || t('checkout_plan_label')}
                     </Text>
                   </View>
 
@@ -923,10 +1029,10 @@ const CheckoutScreen: React.FC<{ navigation: CheckoutNavigationProp }> = ({
 
                   <View style={styles.priceRow}>
                     <Text style={styles.priceValue}>
-                      {t('checkout_price_value')}
+                      {formatOfferPrice(billingConfig)}
                     </Text>
                     <Text style={styles.pricePeriod}>
-                      {t('checkout_price_period')}
+                      {formatOfferPeriod(billingConfig)}
                     </Text>
                   </View>
 

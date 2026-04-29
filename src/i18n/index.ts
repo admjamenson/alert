@@ -394,6 +394,9 @@ const resources = {
       sos_sent_title: 'SOS sent',
       sos_sent_body:
         'Your SOS with location was sent in Alert to your guardians.',
+      sos_queued_title: 'SOS protected',
+      sos_queued_body:
+        'Your SOS was protected and queued locally. Alert will retry automatically when the connection returns.',
       sos_failed_title: 'SOS not sent',
       sos_failed_body:
         'We could not send your SOS request right now. Try again.',
@@ -500,7 +503,22 @@ const resources = {
       settings_route_eta_metric_hours_only: '{{hours}} h',
       settings_route_eta_metric_hours_minutes: '{{hours}} h {{minutes}} min',
       settings_route_eta_metric_minutes_only: '{{minutes}} min',
+      settings_route_eta_metric_approximate: '~{{value}}',
       settings_route_eta_distance: '{{distance}} km',
+      settings_route_eta_supporting_estimated:
+        '{{distance}} / {{mode}} / estimated direction only',
+      settings_route_status_estimated_title: 'Estimated direction only',
+      settings_route_status_estimated_body:
+        'Alert could not verify a provider route right now. This line is only a direct estimate and should not be treated as turn-by-turn guidance.',
+      settings_route_status_estimated_a11y:
+        'Route degraded. The map shows only an estimated direct line, not a verified route.',
+      settings_route_status_unavailable_title: 'Route preview unavailable',
+      settings_route_status_unavailable_body:
+        'Alert could not verify a safe route right now. The map will keep your points visible, but no route line is shown.',
+      settings_route_status_unavailable_a11y:
+        'Route preview unavailable. No verified route line is being shown.',
+      chat_route_estimated_label: '~{{distance}} km - {{minutes}} min',
+      chat_route_unavailable_label: 'Route preview unavailable',
       settings_route_transport_title: 'How you travel',
       settings_route_transport_hint:
         'Used to estimate route time more accurately.',
@@ -606,6 +624,8 @@ const resources = {
       widget_commute_metric_exact: '{{minutes}}m',
       widget_commute_metric_format: '{{minutes}}m (+{{extra}})',
       widget_source_routes: 'Route model',
+      widget_source_routes_estimated: 'Estimated route reference',
+      widget_route_chip_estimated: '~{{value}}',
       widget_city_pulse_metric: '{{count}}',
       widget_alerts_count: '{{count}} alerts',
       widget_source_city: 'City feeds',
@@ -738,14 +758,18 @@ const resources = {
       settings_crystals_kybes: 'Crystals-Kybes',
       settings_crystals_kybes_info_title: 'What is Crystals-Kybes?',
       settings_crystals_kybes_info_body:
-        "Crystals-Kybes is Alert's security protocol based on Kyber/PQC principles for critical flows.\n\nIt prioritizes SOS reliability with secure dispatch, queue-and-retry when offline, and integrity protection for sensitive data.",
+        "Crystals-Kybes is Alert's hardened SOS delivery layer for critical flows.\n\nIt prioritizes SOS reliability with protected relay dispatch, store-and-forward queueing when offline, and integrity checks for sensitive data.",
       settings_crystals_kybes_info_cta: 'Got it',
       settings_crystals_kybes_info_hint:
         'Explains how Crystals-Kybes protects SOS and sensitive data in Alert.',
       settings_alert_active: 'Active alert',
+      settings_system_limited: 'Limited mode',
       settings_ads_privacy_title: 'Ads privacy options',
       settings_ads_privacy_hint:
         'Opens consent and privacy options for ads in supported regions.',
+      settings_legal_notice_title: 'Legal notice',
+      settings_legal_notice_hint:
+        'Opens the terms of use and privacy policy for Alert.',
       settings_ads_privacy_unavailable:
         'Privacy options are not available right now. Try again later.',
       ads_privacy_title: 'Ad Privacy',
@@ -758,6 +782,7 @@ const resources = {
       ads_privacy_closing:
         'At Alert, safety and privacy come before monetization.',
       settings_system_running: 'System is operating normally.',
+      settings_system_degraded: 'Protected mode is partially available.',
       settings_theme_system: 'Automatic (System)',
       settings_theme_light: 'Light mode',
       settings_theme_dark: 'Dark mode',
@@ -776,7 +801,14 @@ const resources = {
       welcome_language_label: 'Language',
       brand_name: 'Alert',
       welcome_brand_tagline: 'Your personal safety infrastructure.',
-      welcome_brand_cta: 'START PROTOCOL',
+      legal_stale_data_notice: 'Showing cached data to preserve your quota',
+      legal_terms_acceptance_label:
+        'I understand that Alert is not an emergency service and I agree to the Terms',
+      legal_sos_disclaimer:
+        'Alert does not automatically trigger public authorities. In real emergencies, call local emergency services.',
+      legal_terms_title: 'Terms of Use',
+      legal_privacy_title: 'Privacy Policy',
+      legal_footer_notice: '{{year}} Alert AI Infrastructure.',
       phone_input_title: 'Enter your phone number',
       phone_input_placeholder: '+1 (555) 555-5555',
       phone_input_continue: 'Continue',
@@ -1306,6 +1338,11 @@ const resources = {
       checkout_plan_label: 'MONTHLY PLAN',
       checkout_price_value: '$4.99',
       checkout_price_period: '/mo',
+      premium_interval_day: 'day',
+      premium_interval_week: 'week',
+      premium_interval_month: 'month',
+      premium_interval_year: 'year',
+      premium_interval_every_count: 'every {{count}} {{interval}}',
       checkout_feature_satellite:
         'Premium connectivity mode (optimizes Alert traffic on compatible Wi-Fi)',
       checkout_feature_shots: 'Real-time shooting alerts',
@@ -1821,6 +1858,9 @@ const resources = {
       sos_sent_title: 'SOS enviado',
       sos_sent_body:
         'Seu SOS com localização foi enviado no Alert para seus guardiões.',
+      sos_queued_title: 'SOS protegido',
+      sos_queued_body:
+        'Seu SOS foi protegido e salvo na fila local. O Alert vai reenviar automaticamente quando a conexao voltar.',
       sos_failed_title: 'SOS não enviado',
       sos_failed_body: 'Não foi possível enviar o SOS agora. Tente novamente.',
       sos_action_hint_idle: 'Envia um SOS para seus guardiões de confiança no Alert.',
@@ -1930,11 +1970,15 @@ const resources = {
       settings_crystals_kybes: 'Crystals-Kybes',
       settings_crystals_kybes_info_title: 'O que é Crystals-Kybes?',
       settings_crystals_kybes_info_body:
-        'Crystals-Kybes é o protocolo de segurança do Alert, baseado em princípios Kyber/PQC para fluxos críticos.\n\nEle prioriza a confiabilidade do SOS com envio seguro, fila com reenvio quando offline e proteção de integridade para dados sensíveis.',
+        'Crystals-Kybes e a camada reforcada de entrega de SOS do Alert para fluxos criticos.\n\nEle prioriza a confiabilidade do SOS com relay protegido, fila com reenvio quando offline e verificacao de integridade para dados sensiveis.',
       settings_crystals_kybes_info_cta: 'Entendi',
       settings_crystals_kybes_info_hint:
         'Explica como o Crystals-Kybes protege o SOS e os dados sensíveis no Alert.',
       settings_alert_active: 'Aviso ativo',
+      settings_system_limited: 'Modo limitado',
+      settings_legal_notice_title: 'Aviso legal',
+      settings_legal_notice_hint:
+        'Abre os termos de uso e a politica de privacidade do Alert.',
       settings_ads_privacy_title: 'Privacidade de anúncios',
       settings_ads_privacy_hint:
         'Abre opções de consentimento e privacidade para anúncios em regiões suportadas.',
@@ -1950,6 +1994,7 @@ const resources = {
       ads_privacy_closing:
         'No Alert, segurança e privacidade vêm antes da monetização.',
       settings_system_running: 'Sistema funcionando normalmente.',
+      settings_system_degraded: 'Modo protegido parcialmente disponivel.',
       settings_theme_system: 'Automático (Sistema)',
       settings_theme_light: 'Modo claro',
       settings_theme_dark: 'Modo escuro',
@@ -2514,6 +2559,11 @@ const resources = {
       checkout_plan_label: 'PLANO MENSAL',
       checkout_price_value: 'R$ 19,90',
       checkout_price_period: '/mês',
+      premium_interval_day: 'dia',
+      premium_interval_week: 'semana',
+      premium_interval_month: 'mês',
+      premium_interval_year: 'ano',
+      premium_interval_every_count: 'a cada {{count}} {{interval}}',
       checkout_feature_satellite:
         'Modo de conectividade premium (otimiza o trafego do Alert em Wi-Fi compativel)',
       checkout_feature_shots: 'Alertas de tiroteio em tempo real',
@@ -2881,6 +2931,23 @@ const resources = {
         'Conectividade Premium otimiza e prioriza o trafego do Alert em redes compativeis. O MVP nao inclui plano de internet.',
       starlink_ios_limit_copy:
         'No iPhone, o Alert usa modo de tunel proprio, mas nao bloqueia internet de outros apps.',
+      settings_route_eta_metric_approximate: '~{{value}}',
+      settings_route_eta_supporting_estimated:
+        '{{distance}} / {{mode}} / linha estimada apenas',
+      settings_route_status_estimated_title: 'Linha estimada apenas',
+      settings_route_status_estimated_body:
+        'O Alert não conseguiu validar a rota com o provedor agora. Esta linha é apenas uma direção direta estimada e não deve ser tratada como navegação precisa.',
+      settings_route_status_estimated_a11y:
+        'Rota degradada. O mapa mostra apenas uma linha direta estimada, não uma rota validada.',
+      settings_route_status_unavailable_title: 'Prévia de rota indisponível',
+      settings_route_status_unavailable_body:
+        'O Alert não conseguiu validar uma rota segura agora. O mapa mantém seus pontos visíveis, mas não desenha linha de rota.',
+      settings_route_status_unavailable_a11y:
+        'Prévia de rota indisponível. Nenhuma linha de rota validada está sendo mostrada.',
+      chat_route_estimated_label: '~{{distance}} km - {{minutes}} min',
+      chat_route_unavailable_label: 'Prévia de rota indisponível',
+      widget_source_routes_estimated: 'Referência de rota estimada',
+      widget_route_chip_estimated: '~{{value}}',
       settings_route_label: 'Nome da rota',
       settings_route_label_placeholder: 'Casa, trabalho, academia',
       route_settings_pick_destination:
@@ -2901,6 +2968,14 @@ const resources = {
       checkin_default_message: 'Estou saindo',
       lock_title: 'DISPOSITIVO PROTEGIDO',
       lock_footer: 'Protocolo seguro ativo',
+      legal_stale_data_notice: 'Exibindo dados em cache para preservar sua cota',
+      legal_terms_acceptance_label:
+        'Compreendo que o Alert não é um serviço de emergência e concordo com os Termos',
+      legal_sos_disclaimer:
+        'O Alert não aciona autoridades públicas automaticamente. Em emergências reais, ligue para os serviços de socorro locais.',
+      legal_terms_title: 'Termos de Uso',
+      legal_privacy_title: 'Política de Privacidade',
+      legal_footer_notice: '{{year}} Alert AI Infrastructure.',
     },
   },
 };
@@ -3137,4 +3212,3 @@ export const setStoredLanguage = async (mode: 'system' | string) => {
 };
 
 export { default } from 'i18next';
-

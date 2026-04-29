@@ -1,14 +1,14 @@
 import * as RNLocalize from 'react-native-localize';
-import { APP_CONFIG } from '../../core/config';
+import { getAlertApiBaseUrl } from '../../core/config';
 import { PremiumBillingAccount } from '../../domain/billing/PremiumBillingAccount';
+import {
+  PremiumBillingConfig,
+  PremiumBillingOfferInterval,
+  PremiumPaymentConfirmation,
+} from '../../domain/billing/PremiumBillingConfig';
 import { UserIdentityService } from '../../services/UserIdentityService';
 
-type AlertRuntimeGlobals = typeof globalThis & {
-  ALERT_API_URL?: string;
-  __ALERT_API_URL__?: string;
-};
-
-const CANONICAL_BILLING_API_ORIGIN = APP_CONFIG.API_BASE_URL;
+const CANONICAL_BILLING_API_ORIGIN = getAlertApiBaseUrl();
 const LEGACY_BILLING_API_HOSTS = new Set(['api.alertpremium.com']);
 const HTTP_URL_PATTERN =
   /^(https?):\/\/([^/?#]+)(\/[^?#]*)?(\?[^#]*)?(#.*)?$/i;
@@ -103,49 +103,12 @@ const normalizeBaseUrl = (value: unknown) => {
   return '';
 };
 
-const getRuntimeApiBaseUrlOverride = () => {
-  const runtimeGlobals = globalThis as AlertRuntimeGlobals;
-  return (
-    normalizeBaseUrl(runtimeGlobals.ALERT_API_URL) ||
-    normalizeBaseUrl(runtimeGlobals.__ALERT_API_URL__) ||
-    ''
-  );
-};
-
 const getApiBaseUrl = () => {
-  const runtimeEnv =
-    typeof process !== 'undefined'
-      ? (process.env as Record<string, string | undefined> | undefined)
-      : undefined;
-  const envBaseUrl = runtimeEnv?.ALERT_API_URL || '';
-  return (
-    getRuntimeApiBaseUrlOverride() ||
-    normalizeBaseUrl(envBaseUrl) ||
-    normalizeBaseUrl(APP_CONFIG.API_BASE_URL)
-  );
+  return normalizeBaseUrl(getAlertApiBaseUrl());
 };
 
-const getApiBaseUrlSource = (): 'global' | 'env' | 'config' | 'missing' => {
-  const runtimeEnv =
-    typeof process !== 'undefined'
-      ? (process.env as Record<string, string | undefined> | undefined)
-      : undefined;
-  const envBaseUrl = runtimeEnv?.ALERT_API_URL || '';
-
-  if (getRuntimeApiBaseUrlOverride()) {
-    return 'global';
-  }
-
-  if (normalizeBaseUrl(envBaseUrl)) {
-    return 'env';
-  }
-
-  if (normalizeBaseUrl(APP_CONFIG.API_BASE_URL)) {
-    return 'config';
-  }
-
-  return 'missing';
-};
+const getApiBaseUrlSource = (): 'config' | 'missing' =>
+  getApiBaseUrl() ? 'config' : 'missing';
 
 const debugLog = (
   label: string,
@@ -455,17 +418,25 @@ const buildUnsignedHeaders = async (contentType = 'application/json') =>
   buildIdentityHeaders(contentType);
 
 const buildBillingRequestPayload = async (
-  options: { billingToken?: string } = {},
+  options: {
+    billingToken?: string;
+    extraPayload?: Record<string, unknown>;
+  } = {},
 ) => {
   const identity = await buildIdentityPayload();
   const billingToken = String(options.billingToken || '').trim();
+  const extraPayload = options.extraPayload || {};
 
   if (!billingToken) {
-    return identity;
+    return {
+      ...identity,
+      ...extraPayload,
+    };
   }
 
   return {
     ...identity,
+    ...extraPayload,
     billing_token: billingToken,
     billingToken,
   };
@@ -491,11 +462,15 @@ const postBillingEndpoint = async (
   options: {
     billingToken?: string;
     encoding?: 'json' | 'form';
+    extraPayload?: Record<string, unknown>;
   } = {},
 ) => {
   const billingToken = String(options.billingToken || '').trim();
   const encoding = options.encoding || 'json';
-  const payload = await buildBillingRequestPayload({ billingToken });
+  const payload = await buildBillingRequestPayload({
+    billingToken,
+    extraPayload: options.extraPayload,
+  });
   const isForm = encoding === 'form';
   const headers = billingToken
     ? {
@@ -607,6 +582,9 @@ const parseBillingEndpointWithFallbacks = async <T>(
   requestUrl: string,
   intent: 'checkout' | 'portal',
   billingToken: string,
+  options: {
+    extraPayload?: Record<string, unknown>;
+  } = {},
 ): Promise<T> => {
   const attempts: Array<{ billingToken?: string; encoding: 'json' | 'form' }> =
     billingToken
@@ -622,7 +600,10 @@ const parseBillingEndpointWithFallbacks = async <T>(
   for (let index = 0; index < attempts.length; index += 1) {
     const attempt = attempts[index];
     try {
-      const response = await postBillingEndpoint(requestUrl, attempt);
+      const response = await postBillingEndpoint(requestUrl, {
+        ...attempt,
+        extraPayload: options.extraPayload,
+      });
       return await parseJson<T>(response);
     } catch (error) {
       const normalized = new Error(normalizeBillingSessionError(error, intent));
@@ -740,6 +721,9 @@ const runBillingSessionRequest = async <T>(
   baseUrl: string,
   requestUrl: string,
   intent: 'checkout' | 'portal',
+  options: {
+    extraPayload?: Record<string, unknown>;
+  } = {},
 ): Promise<T> => {
   let billingToken = '';
   try {
@@ -756,6 +740,7 @@ const runBillingSessionRequest = async <T>(
       requestUrl,
       intent,
       billingToken,
+      options,
     );
   } catch (error) {
     const normalized = normalizeBillingSessionError(error, intent);
@@ -779,9 +764,14 @@ const runBillingSessionRequest = async <T>(
       requestUrl,
       intent,
       refreshedToken,
+      options,
     );
   }
 };
+
+const getBillingConfigHeaders = async () => ({
+  ...(await buildUnsignedHeaders()),
+});
 
 /**
  * URL da página de checkout (billing-web) para fallback quando a API não retorna sessão.
@@ -874,6 +864,88 @@ export const PremiumBillingApiAdapter = {
       );
     } catch {
       return createFallbackBillingAccount();
+    }
+  },
+
+  async getBillingConfig(): Promise<PremiumBillingConfig> {
+    const baseUrl = getApiBaseUrl();
+    if (!baseUrl) {
+      throw new Error('missing_api_base_url');
+    }
+
+    try {
+      const requestUrl = buildAbsoluteUrl(baseUrl, 'billing/config');
+      const response = await fetchWithTimeout(requestUrl, {
+        method: 'GET',
+        headers: await getBillingConfigHeaders(),
+      });
+      const payload = await parseJson<Partial<PremiumBillingConfig>>(response);
+
+      const publishableKey = String(payload?.publishableKey || '').trim();
+      const priceId = String(payload?.priceId || '').trim();
+
+      if (!publishableKey || !priceId) {
+        throw new Error('billing_configuration_invalid');
+      }
+
+      return {
+        publishableKey,
+        appUrl: String(payload?.appUrl || '').trim(),
+        successUrl: String(payload?.successUrl || '').trim(),
+        cancelUrl: String(payload?.cancelUrl || '').trim(),
+        portalReturnUrl: String(payload?.portalReturnUrl || '').trim(),
+        priceId,
+        priceSelection: String(payload?.priceSelection || '').trim() || null,
+        market: payload?.market || null,
+        checkoutLocale: String(payload?.checkoutLocale || '').trim() || null,
+        automaticTaxEnabled: Boolean(payload?.automaticTaxEnabled),
+        billingAddressCollection:
+          String(payload?.billingAddressCollection || '').trim() || null,
+        taxIdCollectionEnabled: Boolean(payload?.taxIdCollectionEnabled),
+        queryAuthAllowed: Boolean(payload?.queryAuthAllowed),
+        offer: {
+          available: Boolean(payload?.offer?.available),
+          reasonCode:
+            String(payload?.offer?.reasonCode || '').trim() || null,
+          source: String(payload?.offer?.source || '').trim() || null,
+          priceId: String(payload?.offer?.priceId || priceId).trim() || null,
+          productId:
+            String(payload?.offer?.productId || '').trim() || null,
+          productName:
+            String(payload?.offer?.productName || '').trim() || null,
+          productDescription:
+            String(payload?.offer?.productDescription || '').trim() || null,
+          unitAmount:
+            typeof payload?.offer?.unitAmount === 'number'
+              ? payload.offer.unitAmount
+              : null,
+          currency:
+            String(payload?.offer?.currency || '').trim().toUpperCase() ||
+            null,
+          interval: ((() => {
+            const normalizedInterval = String(payload?.offer?.interval || '')
+              .trim()
+              .toLowerCase();
+            if (
+              normalizedInterval === 'day' ||
+              normalizedInterval === 'week' ||
+              normalizedInterval === 'month' ||
+              normalizedInterval === 'year'
+            ) {
+              return normalizedInterval as PremiumBillingOfferInterval;
+            }
+            return null;
+          })()),
+          intervalCount:
+            typeof payload?.offer?.intervalCount === 'number'
+              ? payload.offer.intervalCount
+              : null,
+          livemode: Boolean(payload?.offer?.livemode),
+        },
+      };
+    } catch (error) {
+      const normalized = normalizeBillingSessionError(error, 'checkout');
+      throw new Error(normalized);
     }
   },
 
@@ -1021,6 +1093,63 @@ export const PremiumBillingApiAdapter = {
       ) {
         cachedBillingToken = null;
       }
+      throw new Error(normalized);
+    }
+  },
+
+  async confirmPaymentIntent(options: {
+    paymentIntentId: string;
+    subscriptionId?: string | null;
+  }): Promise<PremiumPaymentConfirmation> {
+    const baseUrl = getApiBaseUrl();
+    if (!baseUrl) {
+      throw new Error('missing_api_base_url');
+    }
+
+    const paymentIntentId = String(options.paymentIntentId || '').trim();
+    if (!paymentIntentId) {
+      throw new Error('payment_intent_unavailable');
+    }
+
+    try {
+      const requestUrl = buildAbsoluteUrl(baseUrl, 'confirm-payment-intent');
+      const responsePayload = await runBillingSessionRequest<
+        Partial<PremiumPaymentConfirmation>
+      >(baseUrl, requestUrl, 'checkout', {
+        extraPayload: {
+          payment_intent_id: paymentIntentId,
+          paymentIntentId,
+          subscription_id:
+            String(options.subscriptionId || '').trim() || undefined,
+          subscriptionId:
+            String(options.subscriptionId || '').trim() || undefined,
+        },
+      });
+
+      return {
+        ok: Boolean(responsePayload?.ok),
+        livemode: Boolean(responsePayload?.livemode),
+        paymentIntentId:
+          String(responsePayload?.paymentIntentId || paymentIntentId).trim(),
+        paymentIntentStatus:
+          String(responsePayload?.paymentIntentStatus || '').trim() || null,
+        subscriptionId:
+          String(
+            responsePayload?.subscriptionId || options.subscriptionId || '',
+          ).trim() || null,
+        subscriptionStatus:
+          String(responsePayload?.subscriptionStatus || '').trim() || null,
+        customerId:
+          String(responsePayload?.customerId || '').trim() || null,
+        priceId: String(responsePayload?.priceId || '').trim() || null,
+        premiumActive: Boolean(responsePayload?.premiumActive),
+        currentPeriodEnd:
+          String(responsePayload?.currentPeriodEnd || '').trim() || null,
+        sourceEvent:
+          String(responsePayload?.sourceEvent || '').trim() || null,
+      };
+    } catch (error) {
+      const normalized = normalizePaymentIntentError(error);
       throw new Error(normalized);
     }
   },

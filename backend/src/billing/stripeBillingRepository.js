@@ -36,6 +36,8 @@ const serializeRecord = record => {
   return {
     ...record,
     current_period_end: toIsoString(record.current_period_end),
+    premium_started_at: toIsoString(record.premium_started_at),
+    premium_last_event_at: toIsoString(record.premium_last_event_at),
     premium_updated_at: toIsoString(record.premium_updated_at || record.updated_at),
     updated_at: toIsoString(record.updated_at) || String(record.updated_at || ''),
   };
@@ -80,6 +82,7 @@ class StripeBillingRepository {
     stripeCustomerId,
     stripeSubscriptionId,
     stripePriceId,
+    stripePaymentIntentId,
     subscriptionStatus,
     currentPeriodEnd,
     premiumActive,
@@ -115,6 +118,9 @@ class StripeBillingRepository {
       toFirestoreTimestamp(existing?.current_period_end) ||
       null;
     const normalizedUpdatedAt = admin.firestore.Timestamp.now();
+    const normalizedPremiumStartedAt = normalizedPremium
+      ? toFirestoreTimestamp(existing?.premium_started_at) || normalizedUpdatedAt
+      : null;
 
     const payload = {
       user_id: stableUserId,
@@ -140,6 +146,8 @@ class StripeBillingRepository {
       stripe_subscription_id:
         stripeSubscriptionId || existing?.stripe_subscription_id || null,
       stripe_price_id: stripePriceId || existing?.stripe_price_id || null,
+      stripe_payment_intent_id:
+        stripePaymentIntentId || existing?.stripe_payment_intent_id || null,
       billing_currency: billingCurrency || existing?.billing_currency || null,
       billing_country_code: billingCountryCode || existing?.billing_country_code || null,
       billing_locale: billingLocale || existing?.billing_locale || null,
@@ -147,8 +155,17 @@ class StripeBillingRepository {
       billing_market_tier: billingMarketTier || existing?.billing_market_tier || null,
       billing_market_key: billingMarketKey || existing?.billing_market_key || null,
       subscription_status: normalizedStatus,
+      premium_status: normalizedStatus,
+      premium_source: existing?.premium_source || 'stripe',
       current_period_end: normalizedPeriodEnd,
       premium_active: normalizedPremium,
+      premium_started_at: normalizedPremiumStartedAt,
+      premium_expires_at: normalizedPeriodEnd,
+      premium_customer_id:
+        stripeCustomerId || existing?.premium_customer_id || null,
+      premium_subscription_id:
+        stripeSubscriptionId || existing?.premium_subscription_id || null,
+      premium_last_event_at: normalizedUpdatedAt,
       premium_updated_at: normalizedUpdatedAt,
       last_source_event: sourceEvent || null,
       updated_at: normalizedUpdatedAt,
@@ -159,6 +176,14 @@ class StripeBillingRepository {
       {
         plan: normalizedPremium ? 'premium' : 'free',
         premium: normalizedPremium,
+        premium_active: normalizedPremium,
+        premium_status: payload.subscription_status,
+        premium_source: payload.premium_source,
+        premium_started_at: payload.premium_started_at,
+        premium_expires_at: payload.premium_expires_at,
+        premium_customer_id: payload.premium_customer_id,
+        premium_subscription_id: payload.premium_subscription_id,
+        premium_last_event_at: payload.premium_last_event_at,
         billingProvider: payload.billing_provider || 'stripe',
         providerCustomerId: payload.provider_customer_id || payload.stripe_customer_id || null,
         providerSubscriptionId:
@@ -167,6 +192,7 @@ class StripeBillingRepository {
         stripeCustomerId: payload.stripe_customer_id,
         stripeSubscriptionId: payload.stripe_subscription_id,
         stripePriceId: payload.stripe_price_id,
+        stripePaymentIntentId: payload.stripe_payment_intent_id || null,
         billingCurrency: payload.billing_currency,
         billingCountryCode: payload.billing_country_code,
         billingLocale: payload.billing_locale,
@@ -229,6 +255,10 @@ class StripeBillingRepository {
 
     await this.entitlements.doc(stableUserId).set(
       {
+        premium_active: Boolean(existing.premium_active),
+        premium_source: 'stripe',
+        premium_customer_id: stableCustomerId,
+        premium_last_event_at: updatedAt,
         billingProvider: 'stripe',
         providerCustomerId: stableCustomerId,
         stripeCustomerId: stableCustomerId,
