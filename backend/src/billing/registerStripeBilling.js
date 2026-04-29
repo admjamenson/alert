@@ -218,6 +218,24 @@ const resolveDefaultPaymentMethod = ({ subscription, customer }) => {
   return null;
 };
 
+const extractSubscriptionCurrency = subscription =>
+  toCurrencyCode(subscription?.items?.data?.[0]?.price?.currency) ||
+  toCurrencyCode(subscription?.plan?.currency) ||
+  null;
+
+const extractInvoiceLineCurrency = invoice =>
+  toCurrencyCode(invoice?.lines?.data?.[0]?.price?.currency) || null;
+
+const resolveStripeBillingCurrency = (...values) => {
+  for (const value of values) {
+    const normalized = toCurrencyCode(value);
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return null;
+};
+
 const expressStaticSafe = dir => {
   const express = require('express');
   return express.static(dir);
@@ -658,6 +676,14 @@ const syncSubscriptionFromPaymentConfirmation = async ({
         ? premiumActiveForStatus(subscription.status)
         : paymentIntent?.status === 'succeeded',
     ...extractBillingMetadata(subscription?.metadata, current || {}),
+    billingCurrency: resolveStripeBillingCurrency(
+      paymentIntent?.currency,
+      invoice?.currency,
+      extractSubscriptionCurrency(subscription),
+      extractInvoiceLineCurrency(invoice),
+      subscription?.metadata?.billing_currency,
+      current?.billing_currency,
+    ),
     sourceEvent: 'mobile_payment_confirmation',
   });
 
@@ -777,6 +803,11 @@ const handleSubscriptionSync = async (repo, subscription, sourceEvent) => {
     currentPeriodEnd: normalizePeriodEnd(subscription?.current_period_end || existing?.current_period_end),
     premiumActive: premiumActiveForStatus(subscription?.status),
     ...extractBillingMetadata(subscription?.metadata, existing || {}),
+    billingCurrency: resolveStripeBillingCurrency(
+      extractSubscriptionCurrency(subscription),
+      subscription?.metadata?.billing_currency,
+      existing?.billing_currency,
+    ),
     sourceEvent,
   });
 };
@@ -821,6 +852,13 @@ const syncSubscriptionFromInvoice = async (
     ),
     premiumActive,
     ...metadata,
+    billingCurrency: resolveStripeBillingCurrency(
+      invoice?.currency,
+      extractInvoiceLineCurrency(invoice),
+      extractSubscriptionCurrency(subscription),
+      metadata.billingCurrency,
+      current?.billing_currency,
+    ),
     sourceEvent,
   });
 };
@@ -844,7 +882,10 @@ const syncSubscriptionFromRefundedCharge = async (stripe, repo, charge, sourceEv
     subscriptionStatus: current.subscription_status,
     currentPeriodEnd: current.current_period_end,
     premiumActive: premiumActiveForStatus(current.subscription_status),
-    billingCurrency: current.billing_currency,
+    billingCurrency: resolveStripeBillingCurrency(
+      charge?.currency,
+      current.billing_currency,
+    ),
     billingCountryCode: current.billing_country_code,
     billingLocale: current.billing_locale,
     billingCityName: current.billing_city_name,
@@ -1462,6 +1503,11 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
             currentPeriodEnd: normalizePeriodEnd(subscription?.current_period_end),
             premiumActive: premiumActiveForStatus(subscription?.status),
             ...extractBillingMetadata(subscription?.metadata, session.metadata || {}),
+            billingCurrency: resolveStripeBillingCurrency(
+              session?.currency,
+              extractSubscriptionCurrency(subscription),
+              session?.metadata?.billing_currency,
+            ),
             sourceEvent: event.type,
           });
           break;
@@ -1487,6 +1533,11 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
             currentPeriodEnd: normalizePeriodEnd(subscription?.current_period_end),
             premiumActive: false,
             ...extractBillingMetadata(subscription?.metadata, current || {}),
+            billingCurrency: resolveStripeBillingCurrency(
+              extractSubscriptionCurrency(subscription),
+              subscription?.metadata?.billing_currency,
+              current?.billing_currency,
+            ),
             sourceEvent: event.type,
           });
           break;
@@ -1570,4 +1621,7 @@ module.exports = {
   buildMobilePaymentSheetResponse,
   resolveMobileMerchantCountryCode,
   resolveMobileCurrencyCode,
+  resolveStripeBillingCurrency,
+  extractSubscriptionCurrency,
+  extractInvoiceLineCurrency,
 };

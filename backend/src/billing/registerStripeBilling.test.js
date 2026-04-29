@@ -4,6 +4,9 @@ const {
   buildBillingOfferFromStripePrice,
   buildUnavailableBillingOffer,
   buildMobilePaymentSheetResponse,
+  resolveStripeBillingCurrency,
+  extractSubscriptionCurrency,
+  extractInvoiceLineCurrency,
 } = require('./registerStripeBilling');
 
 test('buildBillingOfferFromStripePrice returns an available recurring offer', () => {
@@ -119,4 +122,47 @@ test('buildMobilePaymentSheetResponse preserves the canonical return URL', () =>
     currencyCode: 'BRL',
     returnURL: 'alertapp://billing-return',
   });
+});
+
+test('resolveStripeBillingCurrency prefers provider currency over metadata fallback', () => {
+  const resolved = resolveStripeBillingCurrency(
+    null,
+    'brl',
+    'usd',
+    null,
+  );
+
+  assert.equal(resolved, 'BRL');
+});
+
+test('extractSubscriptionCurrency reads the Stripe subscription item price currency', () => {
+  const currency = extractSubscriptionCurrency({
+    items: {
+      data: [
+        {
+          price: {
+            currency: 'brl',
+          },
+        },
+      ],
+    },
+  });
+
+  assert.equal(currency, 'BRL');
+});
+
+test('extractInvoiceLineCurrency reads the Stripe invoice line price currency', () => {
+  const currency = extractInvoiceLineCurrency({
+    lines: {
+      data: [
+        {
+          price: {
+            currency: 'brl',
+          },
+        },
+      ],
+    },
+  });
+
+  assert.equal(currency, 'BRL');
 });
