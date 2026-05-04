@@ -5,17 +5,101 @@ const {
 const {
   buildRoutingProviderDebugSnapshot,
 } = require('../eventHub/adapters/routingOsrmAdapter');
-const { buildRouteRuntimeDiagnostics } = require('../config/runtime');
-const { getRouteOptionsSnapshot } = require('../services/RouteOptionsService');
-const { resolveRequestIdentity } = require('../http/identity');
+const {buildRouteRuntimeDiagnostics} = require('../config/runtime');
+const {getRouteOptionsSnapshot} = require('../services/RouteOptionsService');
+const {resolveRequestIdentity} = require('../http/identity');
+const {recordRoutingUsage} = require('../billing/billingUsageRepository');
 const {
-  recordRoutingUsage,
-} = require('../billing/billingUsageRepository');
+  BACKEND_REQUEST_BASE,
+  MAP_ROUTE_PROVIDER,
+  sumOperationCosts,
+} = require('../economics/CostCatalog');
+const {
+  evaluateEconomicGate,
+  withEconomicGate,
+} = require('../economics/EconomicGate');
+const {normalizeTier} = require('../economics/EconomicsPolicy');
 
 const parseFiniteQueryNumber = value => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 };
+
+const buildEconomicsTier = req => {
+  const tierHint = String(req.get('x-alert-tier') || req.query?.tier || '')
+    .trim()
+    .toLowerCase();
+  return normalizeTier(tierHint || 'free');
+};
+
+const buildEconomicsContext = req => {
+  const identity = resolveRequestIdentity(req);
+  return {
+    userKey: String(identity.userId || identity.deviceId || 'anonymous'),
+    tier: buildEconomicsTier(req),
+    regionKey: String(
+      req.get('x-alert-region') ||
+        req.query?.region ||
+        req.query?.regionHint ||
+        'global',
+    ),
+    criticality: 'standard',
+  };
+};
+
+const attachMapEconomics = (payload, decision) => ({
+  ...payload,
+  economics: {
+    allowed: Boolean(decision?.allowed && !decision?.degraded),
+    degraded: Boolean(decision?.degraded),
+    reason: String(decision?.reason || 'economics_not_evaluated'),
+    operation: String(decision?.operation || MAP_ROUTE_PROVIDER),
+    fallbackMode: decision?.fallbackMode || null,
+    estimatedCostUsd: Number(decision?.estimatedCostUsd || 0),
+    generatedAt: decision?.generatedAt || new Date().toISOString(),
+  },
+});
+
+const buildMapRouteFallback = (decision, timeoutMs) => ({
+  ok: true,
+  available: false,
+  degraded: true,
+  reasonCode: 'economics_budget_degraded',
+  retryable: true,
+  fallbackUsed: true,
+  routeMode: 'unavailable',
+  precision: 'none',
+  providerAvailable: false,
+  advisory: {
+    code: 'route_advisory_budget_degraded',
+    severity: 'warning',
+  },
+  routes: [],
+  source: 'Alert Routing',
+  updatedAt: new Date().toISOString(),
+  provider: {
+    id: 'osrm',
+    available: false,
+    degraded: true,
+    reasonCode: 'economics_budget_degraded',
+    retryable: true,
+    circuitState: 'closed',
+    attempts: 0,
+    cacheHit: false,
+    latencyMs: 0,
+    timeoutMs: Number(timeoutMs || 0),
+    nonCriticalDependency: true,
+  },
+  economics: {
+    allowed: false,
+    degraded: true,
+    reason: String(decision?.reason || 'economics_budget_degraded'),
+    operation: String(decision?.operation || MAP_ROUTE_PROVIDER),
+    fallbackMode: decision?.fallbackMode || null,
+    estimatedCostUsd: Number(decision?.estimatedCostUsd || 0),
+    generatedAt: decision?.generatedAt || new Date().toISOString(),
+  },
+});
 
 const DEBUG_TRUE_VALUES = new Set(['1', 'true', 'yes', 'on']);
 
@@ -33,13 +117,9 @@ const isRouteOpsDebugEnabled = req => {
   return DEBUG_TRUE_VALUES.has(queryValue);
 };
 
-const buildRouteOpsDebugPayload = ({
-  config,
-  params,
-  payload,
-}) => {
+const buildRouteOpsDebugPayload = ({config, params, payload}) => {
   const runtimeDiagnostics = buildRouteRuntimeDiagnostics(config);
-  const targetResolution = buildRoutingProviderDebugSnapshot(params, { config });
+  const targetResolution = buildRoutingProviderDebugSnapshot(params, {config});
   return {
     instanceId: runtimeDiagnostics.instanceId,
     deployId: runtimeDiagnostics.deployId,
@@ -133,7 +213,7 @@ const registerMapsRoutes = (app, deps = {}) => {
     try {
       const query = String(req.query?.q || '').trim();
       if (!query) {
-        return res.json({ results: [] });
+        return res.json({results: []});
       }
 
       const results = await searchPlacesFn(
@@ -164,7 +244,7 @@ const registerMapsRoutes = (app, deps = {}) => {
       const latitude = parseFiniteQueryNumber(req.query?.lat);
       const longitude = parseFiniteQueryNumber(req.query?.lon);
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-        return res.status(400).json({ error: 'invalid_coordinates' });
+        return res.status(400).json({error: 'invalid_coordinates'});
       }
 
       const payload = await reverseGeocodeFn(
@@ -218,23 +298,6 @@ const registerMapsRoutes = (app, deps = {}) => {
         });
       }
 
-      const payload = await routeOptionsSnapshot(
-        {
-          fromLat,
-          fromLon,
-          toLat,
-          toLon,
-          transportMode: req.query?.mode || req.query?.transportMode,
-          regionHint:
-            req.get('x-alert-region') ||
-            req.query?.region ||
-            req.query?.regionHint,
-        },
-        {
-          config,
-          logger,
-        },
-      );
       const routeParams = {
         fromLat,
         fromLon,
@@ -247,34 +310,77 @@ const registerMapsRoutes = (app, deps = {}) => {
           req.query?.regionHint,
       };
 
-      if (!payload.available && payload.reasonCode === 'invalid_coordinates') {
-        return res
-          .status(400)
-          .json(
-            attachRouteOpsDebugPayload(
-              req,
-              res,
-              payload,
+      const economicsContext = buildEconomicsContext(req);
+      const estimatedRouteCostUsd = sumOperationCosts([
+        BACKEND_REQUEST_BASE,
+        MAP_ROUTE_PROVIDER,
+      ]);
+
+      const payload = await withEconomicGate(
+        {
+          ...economicsContext,
+          operation: MAP_ROUTE_PROVIDER,
+          estimatedCostUsd: estimatedRouteCostUsd,
+          actualCostUsd: estimatedRouteCostUsd,
+          fallbackCostUsd: sumOperationCosts([BACKEND_REQUEST_BASE]),
+          regionKey: economicsContext.regionKey,
+          criticality: 'standard',
+        },
+        async decision => {
+          const routePayload = await routeOptionsSnapshot(
+            {
+              fromLat,
+              fromLon,
+              toLat,
+              toLon,
+              transportMode: req.query?.mode || req.query?.transportMode,
+              regionHint: routeParams.regionHint,
+            },
+            {
               config,
-              routeParams,
-            ),
+              logger,
+            },
           );
-      }
-
-      if (payload?.available && Array.isArray(payload?.routes) && payload.routes.length > 0) {
-        await recordRoutingUsageFn({
-          db,
-          identity: resolveRequestIdentity(req),
-        }).catch(error => {
-          logger.warn('[maps/routes] usage_tracking_failed', {
-            error: error?.message || 'unknown',
-          });
-        });
-      }
-
-      return res.json(
-        attachRouteOpsDebugPayload(req, res, payload, config, routeParams),
+          if (
+            routePayload?.available &&
+            Array.isArray(routePayload?.routes) &&
+            routePayload.routes.length > 0
+          ) {
+            await recordRoutingUsageFn({
+              db,
+              identity: resolveRequestIdentity(req),
+            }).catch(error => {
+              logger.warn('[maps/routes] usage_tracking_failed', {
+                error: error?.message || 'unknown',
+              });
+            });
+          }
+          return attachRouteOpsDebugPayload(
+            req,
+            res,
+            attachMapEconomics(routePayload, decision),
+            config,
+            routeParams,
+          );
+        },
+        decision =>
+          attachRouteOpsDebugPayload(
+            req,
+            res,
+            buildMapRouteFallback(
+              decision,
+              Number(config?.routing?.timeoutMs || 0),
+            ),
+            config,
+            routeParams,
+          ),
       );
+
+      if (!payload.available && payload.reasonCode === 'invalid_coordinates') {
+        return res.status(400).json(payload);
+      }
+
+      return res.json(payload);
     } catch (error) {
       logger.error('[maps/routes]', {
         error: 'maps_routes_internal',

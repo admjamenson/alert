@@ -51,6 +51,11 @@ Validacao executada localmente em um unico processo Node com:
 - `ALERT_LOAD_TEST_SAFE_MODE=true`
 - `ALERT_DISABLE_REMOTE_RELEASE_OVERRIDE=true`
 
+- `npm --prefix backend run scale:foundation:check` => PASS
+  - falhou inicialmente porque o backend local não estava rodando
+  - após iniciar com `RELAY_HMAC_SECRET=test_secret_long_enough_for_local_development_12345`, passou
+  - `/v1/ops/summary` retornou métricas corretamente e sem falhas críticas
+
 Resultados:
 
 - `GET /api/v1/risk/feed?lat=-23.5505&lon=-46.6333&limit=10`
@@ -107,6 +112,13 @@ Snapshot de `/v1/ops/metrics` tambem validado com HTTP `200` e o mesmo schema no
   - `p99 < 1500ms`
   - timeout em `risk/feed` e `entitlements` igual a zero ou quase zero
 
-## 7. Status
+## 7. Economics Engine
+
+- Implementado: revisão e gate econômico antes de calls caros no backend.
+- Cobertura: RiskFeed, WeatherFeed, EntitlementSnapshot, Maps/routes e métricas unificadas.
+- Impacto esperado: redução do risco de explosão de custo por usuário e região, com fallback seguro em vez de erro crítico.
+- Limitações: ainda não há prova de 30M usuários. O engine controla gastos, mas a validação de escala real depende de testes de carga e rede/infrastrutura.
+
+## 8. Status
 
 `30M NAO SUPORTA AINDA - 500 RPS remoto ainda nao foi provado`

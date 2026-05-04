@@ -16,6 +16,9 @@ const {getRiskFeedMetrics} = require('./src/services/RiskFeedService');
 const {
   getEntitlementMetrics,
 } = require('./src/services/EntitlementSnapshotService');
+const {getEconomicsMetrics} = require('./src/economics/UserCostTracker');
+const {isEconomicsGateEnabled} = require('./src/economics/EconomicGate');
+const {readEconomicsPolicy} = require('./src/economics/EconomicsPolicy');
 const {
   bboxFromPoint,
   haversineKm,
@@ -358,9 +361,7 @@ const handleMetricsEndpoint = (_req, res) => {
       totalRequests:
         Number(entitlementSnapshotMetrics.totalRequests || 0) +
         Number(safeModeMetrics.hardBypassEntitlementsCount || 0),
-      safeModeBypass: Number(
-        safeModeMetrics.hardBypassEntitlementsCount || 0,
-      ),
+      safeModeBypass: Number(safeModeMetrics.hardBypassEntitlementsCount || 0),
       firestoreLookups: Number(
         entitlementSnapshotMetrics.firestoreLookups || 0,
       ),
@@ -390,6 +391,11 @@ const handleMetricsEndpoint = (_req, res) => {
           uptimeMs: entitlementSnapshotMetrics.uptimeMs || 0,
         },
         providers: Array.isArray(providerMetrics) ? providerMetrics : [],
+      },
+      economics: {
+        enabled: isEconomicsGateEnabled(process.env),
+        policy: readEconomicsPolicy(),
+        metrics: getEconomicsMetrics(),
       },
       requestMetrics,
       cache: cacheStatus,
@@ -1853,52 +1859,12 @@ app.get('/v1/ops/summary', (_req, res) => {
       chatMessages: summarizeRequestMetric(relayMetrics.chatMessages),
     },
     providers: getProviderFetchMetrics(),
-    release: summarizeReleasePolicy(buildCachedReleaseSnapshot()),
+    economics: {
+      enabled: isEconomicsGateEnabled(process.env),
+      policy: readEconomicsPolicy(),
+      metrics: getEconomicsMetrics(),
+    },
   });
-});
-
-app.post('/v1/ops/sos-fanout-proof', async (req, res) => {
-  const rateKey = `ops:sos-fanout-proof:${req.ip || 'unknown'}`;
-  if (enforceRelayRateLimit(rateKey, 3)) {
-    return res.status(429).json({
-      ok: false,
-      flow: 'sos-fanout',
-      error: 'rate_limited',
-      generatedAt: nowIso(),
-    });
-  }
-
-  try {
-    const result = await sosFanoutDeliveryProof.run({
-      probeIdPrefix: 'ops-http',
-    });
-
-    return res.status(result.ok ? 200 : 503).json({
-      ok: result.ok,
-      flow: 'sos-fanout',
-      queueEnabled: serviceAvailability.sosFanoutQueue,
-      queueDriver: serviceAvailability.sosFanoutQueueDriver,
-      queueReason: serviceAvailability.sosFanoutQueueReason,
-      mode: result.dispatch?.mode || null,
-      queued: Boolean(result.dispatch?.queued),
-      sentInline: Boolean(result.dispatch?.sentInline),
-      jobId: result.dispatch?.jobId || null,
-      state: result.settlement?.state || null,
-      handlerId: result.handlerId,
-      deliveryMode: result.deliveryMode,
-      deliveredCount: result.deliveredCount,
-      failedReason: result.settlement?.failedReason || result.reason || null,
-      generatedAt: nowIso(),
-    });
-  } catch (error) {
-    console.error('[v1/ops/sos-fanout-proof]', error);
-    return res.status(500).json({
-      ok: false,
-      flow: 'sos-fanout',
-      error: 'internal',
-      generatedAt: nowIso(),
-    });
-  }
 });
 
 app.get('/v1/release/status', async (req, res) => {
