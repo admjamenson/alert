@@ -452,7 +452,21 @@ const recordEconomicsDecision = ({decision, estimatedCostUsd = 0} = {}) => {
 
 const getEconomicsMetrics = async () => {
   // Force Redis initialization before returning metrics
-  await initRedisAvailability();
+  try {
+    await initRedisAvailability();
+  } catch (error) {
+    console.error('[ECONOMICS] Failed to initialize Redis availability', error);
+    // Ensure metrics are set to safe defaults
+    METRICS.redisConfigured = false;
+    METRICS.redisClientCreated = false;
+    METRICS.redisPingOk = false;
+    METRICS.redisAvailable = false;
+    METRICS.memoryFallback = true;
+    METRICS.redisLastErrorType = String(error?.code || 'unknown');
+    METRICS.redisLastErrorMessageSanitized = String(error?.message || 'unknown')
+      .replace(/rediss?:\/\/[^@]+@/, 'rediss://[REDACTED]@')
+      .slice(0, 100);
+  }
 
   return {
     totalEstimatedCostUsd: Number(METRICS.totalEstimatedCostUsd.toFixed(8)),

@@ -395,7 +395,31 @@ const handleMetricsEndpoint = async (_req, res) => {
       economics: {
         enabled: isEconomicsGateEnabled(process.env),
         policy: readEconomicsPolicy(),
-        metrics: await getEconomicsMetrics(),
+        metrics: await (async () => {
+          try {
+            return await getEconomicsMetrics();
+          } catch (error) {
+            console.error('[metrics] failed to get economics metrics', error);
+            return {
+              totalEstimatedCostUsd: 0,
+              totalTrackedCostUsd: 0,
+              trackedUsers: 0,
+              degradedRequests: 0,
+              blockedRequests: 0,
+              allowedRequests: 0,
+              bypassedRequests: 0,
+              redisAvailable: false,
+              memoryFallback: true,
+              lastErrorType: null,
+              redisConfigured: false,
+              redisClientCreated: false,
+              redisPingOk: false,
+              redisLastErrorType: null,
+              redisLastErrorMessageSanitized: null,
+              topOperationsByCost: [],
+            };
+          }
+        })(),
       },
       requestMetrics,
       cache: cacheStatus,
@@ -1862,7 +1886,34 @@ app.get('/v1/ops/summary', async (_req, res) => {
     economics: {
       enabled: isEconomicsGateEnabled(process.env),
       policy: readEconomicsPolicy(),
-      metrics: await getEconomicsMetrics(),
+      metrics: await (async () => {
+        try {
+          return await getEconomicsMetrics();
+        } catch (error) {
+          console.error(
+            '[v1/ops/summary] failed to get economics metrics',
+            error,
+          );
+          return {
+            totalEstimatedCostUsd: 0,
+            totalTrackedCostUsd: 0,
+            trackedUsers: 0,
+            degradedRequests: 0,
+            blockedRequests: 0,
+            allowedRequests: 0,
+            bypassedRequests: 0,
+            redisAvailable: false,
+            memoryFallback: true,
+            lastErrorType: null,
+            redisConfigured: false,
+            redisClientCreated: false,
+            redisPingOk: false,
+            redisLastErrorType: null,
+            redisLastErrorMessageSanitized: null,
+            topOperationsByCost: [],
+          };
+        }
+      })(),
     },
   });
 });
