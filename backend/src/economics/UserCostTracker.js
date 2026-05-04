@@ -1,7 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
-const {createCacheStore} = require('../platform/cache/createCacheStore');
+const Redis = require('ioredis');
 
 const USER_COSTS = new Map();
 const REGION_COSTS = new Map();
@@ -21,6 +21,83 @@ const DEFAULT_METRICS = () => ({
 });
 
 const METRICS = DEFAULT_METRICS();
+
+const redisPrefix = 'economics:';
+let redisClient = null;
+let redisAvailable = false;
+let redisInitialized = false;
+
+function createRedisClient() {
+  const url = process.env.ALERT_REDIS_URL;
+  if (!url) return null;
+
+  return new Redis(url, {
+    maxRetriesPerRequest: 1,
+    enableReadyCheck: true,
+    tls: url.startsWith('rediss://') ? {} : undefined,
+  });
+}
+
+const redis = createRedisClient();
+
+const noteTrackerError = error => {
+  METRICS.lastErrorType = String(error?.code || error?.message || 'unknown');
+};
+
+const redisKeyFor = key => `${redisPrefix}${String(key || '').trim()}`;
+
+const getJsonFromRedis = async key => {
+  const raw = await redis.get(redisKeyFor(key));
+  if (!raw) return null;
+  return JSON.parse(raw);
+};
+
+const setJsonToRedis = async (key, value, ttlMs = 0) => {
+  if (!Number.isFinite(Number(ttlMs)) || Number(ttlMs) <= 0) return false;
+  await redis.set(
+    redisKeyFor(key),
+    JSON.stringify(value),
+    'PX',
+    Math.max(1, Math.round(ttlMs)),
+  );
+  return true;
+};
+
+const initRedisAvailability = async () => {
+  if (!redis) {
+    redisAvailable = false;
+    redisInitialized = true;
+    console.info('[ECONOMICS] Redis status:', {
+      connected: false,
+      fallback: true,
+    });
+    return false;
+  }
+
+  if (redisInitialized) {
+    console.info('[ECONOMICS] Redis status:', {
+      connected: redisAvailable,
+      fallback: !redisAvailable,
+    });
+    return redisAvailable;
+  }
+
+  try {
+    await redis.ping();
+    redisAvailable = true;
+  } catch (e) {
+    console.error('[ECONOMICS] Redis connection failed:', e.message);
+    redisAvailable = false;
+  } finally {
+    redisInitialized = true;
+    console.info('[ECONOMICS] Redis status:', {
+      connected: redisAvailable,
+      fallback: !redisAvailable,
+    });
+  }
+
+  return redisAvailable;
+};
 
 let trackerStore = null;
 let trackerStoreResolved = false;
@@ -106,10 +183,6 @@ const buildEmptyBucket = ({
   updatedAt: nowIso(),
 });
 
-const noteTrackerError = error => {
-  METRICS.lastErrorType = String(error?.code || error?.message || 'unknown');
-};
-
 const getTopOperationsByCost = () =>
   Array.from(OPERATION_TOTALS.entries())
     .sort((left, right) => right[1].totalCostUsd - left[1].totalCostUsd)
@@ -121,7 +194,9 @@ const getTopOperationsByCost = () =>
     }));
 
 const rememberOperationCost = (operation, amountUsd) => {
-  const normalizedOperation = String(operation || 'UNKNOWN').trim().toUpperCase();
+  const normalizedOperation = String(operation || 'UNKNOWN')
+    .trim()
+    .toUpperCase();
   const current = OPERATION_TOTALS.get(normalizedOperation) || {
     totalCostUsd: 0,
     count: 0,
@@ -131,10 +206,14 @@ const rememberOperationCost = (operation, amountUsd) => {
   OPERATION_TOTALS.set(normalizedOperation, current);
 };
 
-const shouldUseRedis = (env = process.env) =>
-  isProductionLike(env) && hasRedisUrl(env);
+const shouldUseRedis = (env = process.env) => hasRedisUrl(env);
 
-const resolveTrackerStore = () => {
+const createRedisStore = () => ({
+  getJson: async key => getJsonFromRedis(key),
+  setJson: async (key, value, ttlMs = 0) => setJsonToRedis(key, value, ttlMs),
+});
+
+const resolveTrackerStore = async () => {
   if (trackerStoreResolved) {
     return trackerStore;
   }
@@ -148,43 +227,49 @@ const resolveTrackerStore = () => {
     return null;
   }
 
-  try {
-    trackerStore =
-      typeof trackerStoreFactory === 'function'
-        ? trackerStoreFactory()
-        : createCacheStore({
-            name: 'economics',
-            prefix: 'alert:economics',
-            driver: 'redis',
-          });
-    trackerStoreDriver = 'redis';
-    METRICS.memoryFallback = false;
-    return trackerStore;
-  } catch (error) {
-    noteTrackerError(error);
+  if (typeof trackerStoreFactory === 'function') {
+    try {
+      trackerStore = trackerStoreFactory();
+      trackerStoreDriver = 'redis';
+      METRICS.memoryFallback = false;
+      return trackerStore;
+    } catch (error) {
+      noteTrackerError(error);
+      trackerStore = null;
+      trackerStoreDriver = 'memory';
+      METRICS.memoryFallback = true;
+      METRICS.redisAvailable = false;
+      console.warn(
+        '[economics/tracker] redis unavailable, using memory fallback',
+        error?.message || 'unknown',
+      );
+      return null;
+    }
+  }
+
+  const redisIsReady = await initRedisAvailability();
+  if (!redisIsReady) {
     trackerStore = null;
     trackerStoreDriver = 'memory';
     METRICS.memoryFallback = true;
     METRICS.redisAvailable = false;
-    console.warn(
-      '[economics/tracker] redis unavailable, using memory fallback',
-      error?.message || 'unknown',
-    );
     return null;
   }
+
+  trackerStore = createRedisStore();
+  trackerStoreDriver = 'redis';
+  METRICS.memoryFallback = false;
+  METRICS.redisAvailable = true;
+  return trackerStore;
 };
 
-const readBucket = async ({
-  storageKey,
-  memoryMap,
-  subjectType,
-  subjectKey,
-}) => {
-  const store = resolveTrackerStore();
+const readBucket = async ({storageKey, memoryMap, subjectType, subjectKey}) => {
+  const store = await resolveTrackerStore();
   if (store && trackerStoreDriver === 'redis') {
     try {
       const stored = await store.getJson(storageKey);
       METRICS.redisAvailable = true;
+      METRICS.memoryFallback = false;
       if (stored && typeof stored === 'object') {
         memoryMap.set(storageKey, stored);
         return stored;
@@ -211,11 +296,12 @@ const readBucket = async ({
 
 const writeBucket = async ({storageKey, memoryMap, bucket}) => {
   memoryMap.set(storageKey, bucket);
-  const store = resolveTrackerStore();
+  const store = await resolveTrackerStore();
   if (store && trackerStoreDriver === 'redis') {
     try {
       await store.setJson(storageKey, bucket, ttlUntilNextMonthMs());
       METRICS.redisAvailable = true;
+      METRICS.memoryFallback = false;
       return bucket;
     } catch (error) {
       noteTrackerError(error);
@@ -244,8 +330,9 @@ const mutateBucket = (bucket, amountUsd, metadata = {}) => {
       [normalizedOperation]: {
         totalCostUsd: Number(
           (
-            Number(bucket.operations?.[normalizedOperation]?.totalCostUsd || 0) +
-            safeAmountUsd
+            Number(
+              bucket.operations?.[normalizedOperation]?.totalCostUsd || 0,
+            ) + safeAmountUsd
           ).toFixed(8),
         ),
         count: Number(bucket.operations?.[normalizedOperation]?.count || 0) + 1,
@@ -320,11 +407,10 @@ const addRegionMonthlyCost = async (regionKey, amountUsd, metadata = {}) => {
   });
 };
 
-const recordEconomicsDecision = ({
-  decision,
-  estimatedCostUsd = 0,
-} = {}) => {
-  const safeDecision = String(decision || '').trim().toLowerCase();
+const recordEconomicsDecision = ({decision, estimatedCostUsd = 0} = {}) => {
+  const safeDecision = String(decision || '')
+    .trim()
+    .toLowerCase();
   const safeEstimatedCostUsd = nonNegative(estimatedCostUsd);
   METRICS.totalEstimatedCostUsd = Number(
     (METRICS.totalEstimatedCostUsd + safeEstimatedCostUsd).toFixed(8),
