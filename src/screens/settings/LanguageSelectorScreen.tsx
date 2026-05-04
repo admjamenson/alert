@@ -213,7 +213,15 @@ const LanguageSelectorScreen: React.FC = ({ navigation }: any) => {
 
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
-      <Pressable style={styles.overlay} onPress={() => navigation.goBack()} />
+      <Pressable
+        accessibilityLabel={t('close')}
+        accessibilityRole="button"
+        style={[
+          styles.overlay,
+          { backgroundColor: isDark ? 'rgba(2,4,10,0.58)' : 'rgba(8,13,24,0.34)' },
+        ]}
+        onPress={() => navigation.goBack()}
+      />
       <View
         style={[
           styles.card,
@@ -262,10 +270,9 @@ const styles = StyleSheet.create({
   },
   overlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.52)',
   },
   card: {
-    borderRadius: ThemeTokens.radius.xl,
+    borderRadius: 28,
     borderWidth: 1,
     maxHeight: '78%',
     overflow: 'hidden',

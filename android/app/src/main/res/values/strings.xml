@@ -22,4 +22,10 @@
     <string name="widget_desc_route">Route risk snapshot.</string>
     <string name="widget_desc_attention_local">Top local alert right now.</string>
     <string name="widget_desc_status_local">Local status summary with trend bars.</string>
+    <string name="critical_launch_title">Alert</string>
+    <string name="critical_launch_status_loading">Emergency entry ready</string>
+    <string name="critical_launch_sos_label">SOS</string>
+    <string name="critical_launch_sos_accessibility">Trigger SOS now</string>
+    <string name="critical_launch_sos_hint">Starts the secure help flow while the app finishes loading.</string>
+    <string name="critical_launch_sos_feedback">SOS selected. Opening the secure flow.</string>
 </resources>

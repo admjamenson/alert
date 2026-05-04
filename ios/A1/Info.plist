@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>A1</string>
+	<string>Alert</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -33,7 +33,17 @@
 		<true/>
 	</dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string></string>
+	<string>Alert uses your location to show nearby safety context and send precise SOS information when you choose to request help.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Alert may use location during active safety flows so emergency context remains accurate if the app is backgrounded.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>Alert can access contacts only when you choose guardians for SOS and safety check-ins.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Alert can use the camera when you choose to attach visual context to a safety report.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Alert can use the microphone when you choose to record emergency context.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Alert can access selected photos when you choose to attach evidence to a safety report.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIRequiredDeviceCapabilities</key>

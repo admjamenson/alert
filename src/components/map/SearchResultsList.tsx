@@ -13,7 +13,7 @@ import { useTranslation } from 'react-i18next';
 
 import { ThemeTokens } from '../../constants/ThemeTokens';
 import { useTheme } from '../../context/ThemeContext';
-import { PlaceSuggestion } from '../../services/maps';
+import type { PlaceSuggestion } from '../../domain/maps/MapModels';
 
 const FONT_FAMILY =
   Platform.OS === 'ios'

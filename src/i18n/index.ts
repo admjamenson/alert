@@ -6,7 +6,7 @@
  */
 
 import i18n from 'i18next';
-import { initReactI18next } from 'react-i18next';
+import {initReactI18next} from 'react-i18next';
 import * as RNLocalize from 'react-native-localize';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
@@ -359,7 +359,8 @@ const resources = {
         '{{active}} active situations out of {{monitored}} monitored right now.',
       assistant_monitoring_snapshot_unavailable:
         'Monitoring snapshot is unavailable right now.',
-      assistant_monitoring_events_list: 'Monitored categories include {{list}}.',
+      assistant_monitoring_events_list:
+        'Monitored categories include {{list}}.',
       assistant_event_title: '{{event}} status',
       assistant_event_body:
         'Here is what Alert knows about {{event}}: {{summary}}',
@@ -400,7 +401,8 @@ const resources = {
       sos_failed_title: 'SOS not sent',
       sos_failed_body:
         'We could not send your SOS request right now. Try again.',
-      sos_action_hint_idle: 'Sends an SOS alert to your trusted guardians in Alert.',
+      sos_action_hint_idle:
+        'Sends an SOS alert to your trusted guardians in Alert.',
       sos_action_hint_sending: 'Sending your SOS alert now.',
       sos_action_hint_active: 'SOS active. Stay safe and wait for responses.',
       sos_guardians_required_title: 'Guardians required',
@@ -560,8 +562,7 @@ const resources = {
       support_email_cta: 'Email support',
       support_email_hint: 'Opens your email app to contact support.',
       support_email_subject: 'Alert Support Request',
-      support_email_body_template:
-        'Hello Alert team,\n\nI need help with:\n\n',
+      support_email_body_template: 'Hello Alert team,\n\nI need help with:\n\n',
       support_faq_notifications:
         'You can update notifications in Settings > Notifications. Choose what matters most and keep only the alerts you want.',
       support_faq_settings:
@@ -738,6 +739,10 @@ const resources = {
       morning_brief_enable_location: 'Enable location for Morning Brief',
       settings_history: 'SOS History',
       settings_appearance: 'Appearance',
+      settings_temperature: 'Temperature Unit',
+      settings_temperature_auto: 'Automatic (by region)',
+      settings_temperature_celsius: 'Celsius (°C)',
+      settings_temperature_fahrenheit: 'Fahrenheit (°F)',
       settings_system: 'System',
       settings_protocol_version: 'Protocol version',
       settings_server_status: 'Server status',
@@ -1832,10 +1837,10 @@ const resources = {
         '{{active}} situaÃ§Ãµes ativas entre {{monitored}} monitoradas agora.',
       assistant_monitoring_snapshot_unavailable:
         'Snapshot de monitoramento indisponÃ­vel no momento.',
-      assistant_monitoring_events_list: 'Categorias monitoradas incluem {{list}}.',
+      assistant_monitoring_events_list:
+        'Categorias monitoradas incluem {{list}}.',
       assistant_event_title: 'Status de {{event}}',
-      assistant_event_body:
-        'O Alert monitorou {{event}} assim: {{summary}}',
+      assistant_event_body: 'O Alert monitorou {{event}} assim: {{summary}}',
       assistant_event_summary_empty:
         'Sem sinais recentes de {{event}} na sua cobertura atual.',
       assistant_event_action_empty:
@@ -1863,7 +1868,8 @@ const resources = {
         'Seu SOS foi protegido e salvo na fila local. O Alert vai reenviar automaticamente quando a conexao voltar.',
       sos_failed_title: 'SOS não enviado',
       sos_failed_body: 'Não foi possível enviar o SOS agora. Tente novamente.',
-      sos_action_hint_idle: 'Envia um SOS para seus guardiões de confiança no Alert.',
+      sos_action_hint_idle:
+        'Envia um SOS para seus guardiões de confiança no Alert.',
       sos_action_hint_sending: 'Enviando seu SOS agora.',
       sos_action_hint_active: 'SOS ativo. Fique em segurança e aguarde.',
       sos_guardians_required_title: 'Guardiões necessários',
@@ -1950,6 +1956,10 @@ const resources = {
         'Gerencie plano, comprovantes e status da conta.',
       settings_history: 'Histórico de SOS',
       settings_appearance: 'Aparência',
+      settings_temperature: 'Unidade de Temperatura',
+      settings_temperature_auto: 'Automático (por região)',
+      settings_temperature_celsius: 'Celsius (°C)',
+      settings_temperature_fahrenheit: 'Fahrenheit (°F)',
       settings_system: 'Sistema',
       settings_protocol_version: 'Versão do protocolo',
       settings_server_status: 'Status do servidor',
@@ -2740,7 +2750,8 @@ const resources = {
       settings_route_transport_walk_a11y: 'Ir a pé',
       settings_widgets: 'Widgets',
       settings_support_title: 'Suporte',
-      settings_support_subtitle: 'Tire dúvidas rápidas ou fale com nossa equipe',
+      settings_support_subtitle:
+        'Tire dúvidas rápidas ou fale com nossa equipe',
       settings_support_hint: 'Abre o chat de suporte e opções de email.',
       support_screen_title: 'Suporte',
       support_chat_scope_title: 'Suporte geral apenas',
@@ -2968,7 +2979,8 @@ const resources = {
       checkin_default_message: 'Estou saindo',
       lock_title: 'DISPOSITIVO PROTEGIDO',
       lock_footer: 'Protocolo seguro ativo',
-      legal_stale_data_notice: 'Exibindo dados em cache para preservar sua cota',
+      legal_stale_data_notice:
+        'Exibindo dados em cache para preservar sua cota',
       legal_terms_acceptance_label:
         'Compreendo que o Alert não é um serviço de emergência e concordo com os Termos',
       legal_sos_disclaimer:
@@ -3172,7 +3184,7 @@ i18n.use(initReactI18next).init({
   supportedLngs: ['en', 'pt', ...SUPPORTED_LOCALE_CODES],
   nonExplicitSupportedLngs: true,
   load: 'languageOnly',
-  interpolation: { escapeValue: false },
+  interpolation: {escapeValue: false},
   compatibilityJSON: 'v4',
 });
 
@@ -3211,4 +3223,4 @@ export const setStoredLanguage = async (mode: 'system' | string) => {
   await i18n.changeLanguage(target);
 };
 
-export { default } from 'i18next';
+export {default} from 'i18next';

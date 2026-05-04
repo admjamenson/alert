@@ -32,7 +32,7 @@ const confidenceFromStatus = (status: EpidemicSnapshot['status']): number => {
   return 0.52;
 };
 
-const modeFromCategory = (category?: string): EpidemicMode | null => {
+const modeFromCategory = (category?: string | null): EpidemicMode | null => {
   const normalized = String(category || '').trim().toLowerCase();
   if (normalized === 'pandemic') return 'pandemic';
   if (normalized === 'epidemic') return 'epidemic';
@@ -42,6 +42,7 @@ const modeFromCategory = (category?: string): EpidemicMode | null => {
 export const EpidemicSignalsConnector: AlertSignalsConnector = {
   id: 'epidemic-official-feed',
   policy: {
+    id: 'epidemic-official-feed-policy',
     allowedDomains: [
       'who.int',
       'covid19.who.int',
@@ -60,10 +61,16 @@ export const EpidemicSignalsConnector: AlertSignalsConnector = {
   async fetchSignals(context) {
     const mode = modeFromCategory(context.category);
     if (!mode) return [];
+    if (
+      !Number.isFinite(context.latitude) ||
+      !Number.isFinite(context.longitude)
+    ) {
+      return [];
+    }
 
     const snapshot = await EpidemicService.getSnapshot(
-      context.latitude,
-      context.longitude,
+      Number(context.latitude),
+      Number(context.longitude),
       mode,
       '7d',
       { force: Boolean(context.force) },
@@ -81,7 +88,7 @@ export const EpidemicSignalsConnector: AlertSignalsConnector = {
       severity,
       geometry: {
         type: 'Point',
-        coordinates: [context.longitude, context.latitude],
+        coordinates: [Number(context.longitude), Number(context.latitude)],
       },
       timestamp,
       sourceName: String(source?.name || snapshot.disease?.name || 'Official Epidemiology Feed'),

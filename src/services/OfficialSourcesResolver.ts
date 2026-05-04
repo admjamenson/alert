@@ -61,12 +61,12 @@ const byDomains = (items: OfficialSource[], domains: MonitoringDomain[]) => {
   return items.filter(item => normalizedDomains.has(item.monitoringDomain));
 };
 
-const byCountry = (items: OfficialSource[], countryCode: string | null) => {
+const byCountry = (items: OfficialSource[], countryCode?: string | null) => {
   if (!countryCode) return [];
   return items.filter(item => item.countryCode.toUpperCase() === countryCode.toUpperCase());
 };
 
-const byAdmin1 = (items: OfficialSource[], admin1Code: string | null) => {
+const byAdmin1 = (items: OfficialSource[], admin1Code?: string | null) => {
   if (!admin1Code) return [];
   return items.filter(
     item =>
@@ -77,9 +77,9 @@ const byAdmin1 = (items: OfficialSource[], admin1Code: string | null) => {
 
 const byAdmin2 = (
   items: OfficialSource[],
-  admin1Code: string | null,
-  admin2Name: string | null,
-  admin3Name: string | null,
+  admin1Code?: string | null,
+  admin2Name?: string | null,
+  admin3Name?: string | null,
 ) => {
   const admin2 = normalizeName(admin2Name);
   const admin3 = normalizeName(admin3Name);
@@ -165,9 +165,13 @@ export const resolveOfficialSourcesWithRegistry = (
   registry: OfficialSourcesRegistry,
   monitoringDomainsNeeded: MonitoringDomain[],
 ): ResolvedSourcesByLevel => {
-  const countryItems = byCountry(registry.sources, context.countryCode);
+  const registrySources = Array.isArray(registry.sources) ? registry.sources : [];
+  const registryFallbacks = Array.isArray(registry.globalFallbacks)
+    ? registry.globalFallbacks
+    : [];
+  const countryItems = byCountry(registrySources, context.countryCode);
   const filteredCountryItems = byDomains(countryItems, monitoringDomainsNeeded);
-  const globalFallbacks = sortSources(byDomains(registry.globalFallbacks, monitoringDomainsNeeded));
+  const globalFallbacks = sortSources(byDomains(registryFallbacks, monitoringDomainsNeeded));
 
   const municipalPrimary = sortSources(
     byAdmin2(

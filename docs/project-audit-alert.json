@@ -1,0 +1,812 @@
+{
+  "repo_root": "C:\\Alert",
+  "generated_at": "2026-04-09T00:00:00-03:00",
+  "languages": [
+    {
+      "name": "TypeScript",
+      "status": "ativo",
+      "evidence": ["tsconfig.json", "src/**/*.ts", "__tests__/*.ts"],
+      "note": "Linguagem principal da logica mobile."
+    },
+    {
+      "name": "TSX",
+      "status": "ativo",
+      "evidence": ["App.tsx", "src/screens/**/*.tsx", "src/components/**/*.tsx"],
+      "note": "Principal linguagem das telas React Native."
+    },
+    {
+      "name": "JavaScript",
+      "status": "ativo",
+      "evidence": ["index.js", "babel.config.js", "metro.config.js", "backend/index.js"],
+      "note": "Usada em bootstrap, configs e backend."
+    },
+    {
+      "name": "Kotlin",
+      "status": "ativo",
+      "evidence": ["android/app/src/main/java/com/company/alert/MainApplication.kt", "android/app/src/main/java/com/company/alert/MainActivity.kt"],
+      "note": "Camada nativa Android."
+    },
+    {
+      "name": "Objective-C++/Objective-C",
+      "status": "ativo",
+      "evidence": ["ios/A1/AppDelegate.mm", "ios/A1/main.m"],
+      "note": "Entrada nativa iOS."
+    },
+    {
+      "name": "Ruby",
+      "status": "ativo",
+      "evidence": ["ios/Podfile", "Gemfile"],
+      "note": "Tooling iOS/CocoaPods."
+    },
+    {
+      "name": "PowerShell",
+      "status": "ativo",
+      "evidence": ["scripts/android-release-smoke.ps1", "scripts/set-github-required-smoke-check.ps1"],
+      "note": "Automacao local e CI."
+    },
+    {
+      "name": "C/C++/Java toolchain vendorizado",
+      "status": "preparado",
+      "evidence": ["android/ndk/26.1.10909125/**", "android/ndk/27.1.12297006/**"],
+      "note": "Presente por toolchain, nao como linguagem principal do produto."
+    }
+  ],
+  "frameworks": [
+    {
+      "name": "React Native 0.78",
+      "status": "ativo",
+      "evidence": ["package.json", "App.tsx", "android/", "ios/"]
+    },
+    {
+      "name": "React 19",
+      "status": "ativo",
+      "evidence": ["package.json", "App.tsx"]
+    },
+    {
+      "name": "Express",
+      "status": "ativo",
+      "evidence": ["backend/package.json", "backend/index.js"]
+    },
+    {
+      "name": "React Navigation",
+      "status": "ativo",
+      "evidence": ["package.json", "src/navigation/index.tsx"]
+    }
+  ],
+  "libraries": [
+    {
+      "name": "@maplibre/maplibre-react-native",
+      "status": "ativo",
+      "evidence": ["package.json", "src/screens/home/SecurityMapScreen.tsx", "src/components/home/RiskMapWidget.tsx"]
+    },
+    {
+      "name": "@react-native-async-storage/async-storage",
+      "status": "ativo",
+      "evidence": ["package.json", "src/services/WeatherService.ts", "src/services/EntitlementService.ts"]
+    },
+    {
+      "name": "react-native-mmkv",
+      "status": "ativo",
+      "evidence": ["package.json", "src/services/chat/ChatPersistenceService.ts"]
+    },
+    {
+      "name": "crypto-js",
+      "status": "ativo",
+      "evidence": ["package.json", "src/services/chat/ChatPersistenceService.ts", "src/services/KyberNetworkService.ts"]
+    },
+    {
+      "name": "react-native-google-mobile-ads",
+      "status": "parcial",
+      "evidence": ["package.json", "src/ads/AdsBootstrap.ts", "react-native.config.js"]
+    },
+    {
+      "name": "react-native-config",
+      "status": "nao confirmado",
+      "evidence": ["package.json"]
+    },
+    {
+      "name": "react-native-facebook",
+      "status": "nao confirmado",
+      "evidence": ["package.json"]
+    }
+  ],
+  "sdks": [
+    {
+      "name": "Firebase Auth",
+      "status": "ativo",
+      "evidence": ["src/services/FirebaseAuthResilienceService.ts", "src/services/GuardianNetworkService.ts"]
+    },
+    {
+      "name": "Firebase Firestore",
+      "status": "ativo",
+      "evidence": ["src/services/GuardianNetworkService.ts", "src/services/ChatThreadService.ts"]
+    },
+    {
+      "name": "Firebase Messaging",
+      "status": "ativo",
+      "evidence": ["index.js", "src/api/alertService.ts", "src/services/PushNotificationService.ts"]
+    },
+    {
+      "name": "Firebase Remote Config",
+      "status": "ativo",
+      "evidence": ["src/config/remoteConfig/adsConfig.ts"]
+    },
+    {
+      "name": "Firebase Analytics",
+      "status": "nao confirmado",
+      "evidence": ["package.json"]
+    },
+    {
+      "name": "Firebase Performance",
+      "status": "nao confirmado",
+      "evidence": ["package.json"]
+    },
+    {
+      "name": "Stripe",
+      "status": "ativo",
+      "evidence": ["src/infrastructure/adapters/PremiumBillingApiAdapter.ts", "backend/src/billing/**"]
+    },
+    {
+      "name": "StoreKit/react-native-iap",
+      "status": "parcial",
+      "evidence": ["src/billing/AppleBillingClient.ts", "src/billing/BillingProvider.ts"]
+    }
+  ],
+  "apps": [
+    {
+      "name": "alert-mobile",
+      "type": "react-native mobile app",
+      "status": "ativo",
+      "evidence": ["App.tsx", "index.js", "src/", "android/", "ios/"]
+    },
+    {
+      "name": "alert-backend",
+      "type": "node express api",
+      "status": "ativo",
+      "evidence": ["backend/index.js", "backend/src/**", "backend/package.json"]
+    },
+    {
+      "name": "billing-web-dist",
+      "type": "static billing spa artifact",
+      "status": "parcial",
+      "evidence": ["billing-web/dist/index.html", "billing-web/dist/assets/index-4kOGczXJ.js", "billing-web/dist/assets/index-C1YEhu43.css"],
+      "note": "Artefato compilado tracked; fonte web nao foi confirmado no repo tracked."
+    }
+  ],
+  "modules": [
+    {
+      "name": "widgets",
+      "status": "ativo",
+      "evidence": ["src/widgets/**", "android/app/src/main/java/com/company/alert/widgets/**"],
+      "note": "Modulo com separacao domain/application/infra/presentation."
+    },
+    {
+      "name": "eventHub",
+      "status": "ativo",
+      "evidence": ["backend/src/eventHub/**", "src/services/EventHubService.ts"]
+    },
+    {
+      "name": "billing",
+      "status": "ativo/parcial",
+      "evidence": ["backend/src/billing/**", "src/screens/checkout/CheckoutScreen.tsx", "src/billing/**"]
+    },
+    {
+      "name": "EmergencyServer gRPC",
+      "status": "parcial",
+      "evidence": ["backend/src/services/EmergencyServer.ts"],
+      "note": "Referencia proto inexistente e dependencias ausentes."
+    }
+  ],
+  "frontend": {
+    "runtime": {
+      "status": "ativo",
+      "evidence": ["App.tsx", "index.js"],
+      "note": "Boot com providers, gesture handler, safe area e tarefas diferidas."
+    },
+    "navigation": {
+      "status": "ativo",
+      "evidence": ["src/navigation/index.tsx"],
+      "note": "Deep links, restore de estado e push routing."
+    },
+    "screens": [
+      "auth",
+      "home",
+      "monitoring",
+      "chat",
+      "guardians",
+      "checkout",
+      "settings",
+      "support",
+      "profile",
+      "widgets"
+    ],
+    "architecture_notes": [
+      "Ha bolsos de Clean Architecture e CQRS em application/domain/infrastructure.",
+      "Grande parte do app ainda depende de services amplos e contexts."
+    ]
+  },
+  "backend": {
+    "runtime": {
+      "status": "ativo",
+      "evidence": ["backend/index.js", "backend/package.json"],
+      "note": "Express com billing, relay, event hub, entitlements e feed epidemico."
+    },
+    "modules": [
+      "billing",
+      "bootstrap",
+      "eventHub",
+      "services"
+    ],
+    "routes": [
+      "/api/me/entitlements",
+      "/api/register-token",
+      "/api/guardian/request",
+      "/api/sos",
+      "/api/checkin",
+      "/api/chat/conversations",
+      "/api/chat/messages",
+      "/api/chat/send",
+      "/api/chat/ack",
+      "/api/relay/token",
+      "/api/relay/ping",
+      "/api/relay/sos",
+      "/api/relay/chat/send",
+      "/api/relay/chat/messages",
+      "/v1/events",
+      "/v1/health/top",
+      "/v1/operational/snapshot",
+      "/v1/providers/status",
+      "/v1/epidemic/feed",
+      "/v1/meta/countries"
+    ],
+    "notes": [
+      "Backend entra em modo degradado se Firebase Admin nao estiver configurado.",
+      "Servidor gRPC existe como arquivo isolado, mas nao esta conectado."
+    ]
+  },
+  "apis": [
+    {
+      "name": "Entitlements API",
+      "status": "ativo",
+      "files": ["backend/index.js", "src/services/EntitlementService.ts"],
+      "purpose": "Plano premium e feature flags"
+    },
+    {
+      "name": "Guardian network APIs",
+      "status": "ativo",
+      "files": ["backend/index.js", "src/services/GuardianNetworkService.ts"],
+      "purpose": "Convites, SOS e check-ins"
+    },
+    {
+      "name": "Relay APIs",
+      "status": "ativo",
+      "files": ["backend/index.js", "src/services/AlertRelayService.ts", "src/services/KyberNetworkService.ts"],
+      "purpose": "SOS/chat com relay e store-and-forward"
+    },
+    {
+      "name": "Event hub APIs",
+      "status": "ativo",
+      "files": ["backend/index.js", "src/services/EventHubService.ts"],
+      "purpose": "Eventos operacionais e monitoramento"
+    },
+    {
+      "name": "Official sources registry remote",
+      "status": "parcial",
+      "files": ["src/services/OfficialSourcesRegistryService.ts"],
+      "purpose": "Registry remoto de fontes oficiais nao confirmado no backend"
+    }
+  ],
+  "features": [
+    {
+      "name": "Onboarding por telefone",
+      "domain": "onboarding",
+      "status": "parcial",
+      "implemented_in": ["src/screens/auth/LoginScreen.tsx", "src/screens/auth/VerifyCodeScreen.tsx"],
+      "dependencies": ["i18n", "React Navigation"],
+      "maturity": "UX existe, autenticacao real nao esta fechada."
+    },
+    {
+      "name": "Home principal",
+      "domain": "home",
+      "status": "ativo",
+      "implemented_in": ["src/screens/home/HomeScreen.tsx", "src/components/home/WeatherWidget.tsx", "src/components/home/RiskMapWidget.tsx"]
+    },
+    {
+      "name": "Clima atual e previsao",
+      "domain": "clima",
+      "status": "ativo",
+      "implemented_in": ["src/services/WeatherService.ts", "src/components/home/WeatherWidget.tsx"],
+      "dependencies": ["Open-Meteo", "Nominatim", "AsyncStorage"]
+    },
+    {
+      "name": "Mapa de seguranca",
+      "domain": "mapa",
+      "status": "ativo",
+      "implemented_in": ["src/screens/home/SecurityMapScreen.tsx", "src/components/map/SecurityMapView.tsx"],
+      "dependencies": ["MapLibre", "UnifiedIncidentStore"]
+    },
+    {
+      "name": "Feed de monitoramento",
+      "domain": "monitoramento",
+      "status": "ativo",
+      "implemented_in": ["src/screens/home/MonitoringFeedScreen.tsx", "src/screens/home/RealtimeInsightsScreen.tsx"],
+      "dependencies": ["EventHubService", "EpidemicService", "AlertIntelligenceService"]
+    },
+    {
+      "name": "SOS",
+      "domain": "SOS",
+      "status": "ativo",
+      "implemented_in": ["src/services/SosDispatchService.ts", "src/context/SecurityContext.tsx", "src/tasks/SOSQuickTask.ts"],
+      "dependencies": ["KyberNetworkService", "GuardianNetworkService", "ChatThreadService"]
+    },
+    {
+      "name": "Guardioes e grupo fixado",
+      "domain": "guardioes",
+      "status": "ativo",
+      "implemented_in": ["src/screens/home/GuardiansScreen.tsx", "src/screens/home/ConversationsScreen.tsx", "src/screens/home/GuardiansGroupChatScreen.tsx"],
+      "dependencies": ["Firestore", "MapLibre", "Chat persistence"]
+    },
+    {
+      "name": "Chat privado",
+      "domain": "mensageria",
+      "status": "ativo",
+      "implemented_in": ["src/screens/chat/PrivateReplyScreen.tsx", "src/screens/chat/ChatThreadScreen.tsx"]
+    },
+    {
+      "name": "Widgets",
+      "domain": "widgets",
+      "status": "ativo",
+      "implemented_in": ["src/widgets/**", "android/app/src/main/java/com/company/alert/widgets/**"]
+    },
+    {
+      "name": "Premium checkout",
+      "domain": "billing",
+      "status": "ativo/parcial",
+      "implemented_in": ["src/screens/checkout/CheckoutScreen.tsx", "src/infrastructure/adapters/PremiumBillingApiAdapter.ts", "backend/src/billing/**"],
+      "dependencies": ["Stripe", "EntitlementService", "billing-web dist"]
+    },
+    {
+      "name": "Alert Assistant",
+      "domain": "assistente",
+      "status": "parcial",
+      "implemented_in": ["src/screens/home/AlertAssistantScreen.tsx", "src/application/queries/GetAlertAssistantReplyQuery.ts"],
+      "maturity": "Responde com briefing estruturado, mas tem recursos 'coming soon'."
+    }
+  ],
+  "internal_capabilities": [
+    {
+      "name": "Boot error fallback",
+      "status": "ativo",
+      "files": ["index.js", "src/components/boot/BootErrorScreen.tsx"]
+    },
+    {
+      "name": "Deep linking",
+      "status": "ativo",
+      "files": ["src/navigation/index.tsx"]
+    },
+    {
+      "name": "Kyber queue store-and-forward",
+      "status": "ativo",
+      "files": ["src/services/KyberNetworkService.ts"]
+    },
+    {
+      "name": "Chat persistence with MMKV fallback",
+      "status": "ativo",
+      "files": ["src/services/chat/ChatPersistenceService.ts"]
+    },
+    {
+      "name": "CostGuard",
+      "status": "ativo",
+      "files": ["src/services/cost/CostGuard.ts", "src/application/cost/BudgetGuard.ts"]
+    },
+    {
+      "name": "Widget snapshot pipeline",
+      "status": "ativo",
+      "files": ["src/widgets/application/commands/RefreshWidgetSnapshotsCommand.ts", "src/widgets/infra/WidgetBridge.ts"]
+    }
+  ],
+  "security": {
+    "auth": [
+      {
+        "name": "Phone onboarding",
+        "status": "parcial",
+        "evidence": ["src/screens/auth/LoginScreen.tsx", "src/screens/auth/VerifyCodeScreen.tsx"],
+        "note": "Codigo e mock."
+      },
+      {
+        "name": "Firebase anonymous auth resilience",
+        "status": "preparado",
+        "evidence": ["src/services/FirebaseAuthResilienceService.ts", "src/core/config.ts"],
+        "note": "Depende de flag desabilitada por padrao."
+      }
+    ],
+    "controls": [
+      {
+        "name": "Device integrity check",
+        "status": "ativo",
+        "evidence": ["src/core/security/IntegrityCheck.ts", "App.tsx"]
+      },
+      {
+        "name": "Android allowBackup false",
+        "status": "ativo",
+        "evidence": ["android/app/src/main/AndroidManifest.xml"]
+      },
+      {
+        "name": "PII redaction logger",
+        "status": "ativo",
+        "evidence": ["src/privacy/RedactionLogger.ts"]
+      }
+    ],
+    "gaps": [
+      {
+        "name": "Security flags declaradas sem prova total de implementacao",
+        "status": "citado",
+        "evidence": ["src/core/config.ts"]
+      },
+      {
+        "name": "iOS location usage description vazio",
+        "status": "parcial",
+        "evidence": ["ios/A1/Info.plist"]
+      }
+    ]
+  },
+  "storage": {
+    "local": [
+      {
+        "name": "AsyncStorage",
+        "status": "ativo",
+        "evidence": ["src/services/WeatherService.ts", "src/services/NotificationService.ts", "src/services/EntitlementService.ts"]
+      },
+      {
+        "name": "MMKV chat store",
+        "status": "ativo",
+        "evidence": ["src/services/chat/ChatPersistenceService.ts"]
+      }
+    ],
+    "remote": [
+      {
+        "name": "Firestore",
+        "status": "ativo",
+        "evidence": ["src/services/GuardianNetworkService.ts", "src/services/ChatThreadService.ts"]
+      }
+    ],
+    "cache": [
+      {
+        "name": "Weather cache",
+        "status": "ativo",
+        "evidence": ["src/services/WeatherService.ts"]
+      },
+      {
+        "name": "Operational snapshot cache",
+        "status": "ativo",
+        "evidence": ["src/infrastructure/adapters/OperationalSnapshotApiAdapter.ts"]
+      }
+    ]
+  },
+  "billing": {
+    "status": "ativo/parcial",
+    "mobile": ["src/screens/checkout/CheckoutScreen.tsx", "src/infrastructure/adapters/PremiumBillingApiAdapter.ts", "src/billing/AppleBillingClient.ts"],
+    "backend": ["backend/src/billing/**", "backend/index.js"],
+    "notes": [
+      "Stripe esta operacional.",
+      "Apple billing esta parcial.",
+      "billing-web source nao esta tracked; apenas dist."
+    ]
+  },
+  "notifications": {
+    "status": "ativo",
+    "push": ["index.js", "src/api/alertService.ts", "src/services/PushNotificationService.ts"],
+    "inbox": ["src/services/NotificationService.ts", "src/screens/home/NotificationsScreen.tsx"],
+    "messaging": ["src/services/ChatThreadService.ts", "src/services/chat/ChatSyncService.ts", "src/screens/chat/PrivateReplyScreen.tsx"]
+  },
+  "analytics": {
+    "status": "parcial",
+    "implemented": [
+      {
+        "name": "TelemetryService",
+        "status": "ativo",
+        "evidence": ["src/services/TelemetryService.ts"]
+      },
+      {
+        "name": "Ad event telemetry",
+        "status": "ativo",
+        "evidence": ["src/analytics/adEvents.ts"]
+      }
+    ],
+    "not_confirmed": [
+      {
+        "name": "Firebase Analytics runtime",
+        "status": "nao confirmado",
+        "evidence": ["package.json"]
+      },
+      {
+        "name": "Crash reporting externo",
+        "status": "nao confirmado",
+        "evidence": ["src/", "backend/"]
+      }
+    ]
+  },
+  "i18n": {
+    "status": "ativo",
+    "languages": ["pt-BR", "en"],
+    "evidence": ["src/i18n/index.ts", "src/services/LocaleService.ts", "src/i18n/bootstrap.ts"],
+    "note": "Idioma do sistema e escolha manual sao suportados."
+  },
+  "accessibility": {
+    "status": "parcial",
+    "implemented": [
+      "SafeAreaProvider/SafeAreaView",
+      "font scaling defaults",
+      "accessibilityLabel/hint em varias telas"
+    ],
+    "evidence": ["App.tsx", "src/screens/**/*.tsx"],
+    "gaps": [
+      "Nao encontrei suite dedicada de a11y.",
+      "Ainda existem hardcodes fora de i18n."
+    ]
+  },
+  "build_release": {
+    "mobile": [
+      {
+        "name": "Android Gradle + Hermes",
+        "status": "ativo",
+        "evidence": ["android/app/build.gradle", "android/gradle.properties"]
+      },
+      {
+        "name": "New Architecture Android",
+        "status": "preparado",
+        "evidence": ["android/gradle.properties", "android/app/src/main/java/com/company/alert/MainActivity.kt"],
+        "note": "Flag desligada."
+      },
+      {
+        "name": "iOS release bundle",
+        "status": "ativo",
+        "evidence": ["ios/A1/AppDelegate.mm"]
+      }
+    ],
+    "backend": [
+      {
+        "name": "Express start",
+        "status": "ativo",
+        "evidence": ["backend/index.js", "backend/package.json"]
+      }
+    ],
+    "ci": [
+      {
+        "name": "Android release smoke",
+        "status": "ativo",
+        "evidence": [".github/workflows/android-release-smoke.yml", "scripts/android-release-smoke.ps1"]
+      }
+    ],
+    "risks": [
+      "Android release usa assinatura debug.",
+      "Deploy backend/web nao tem infraestrutura tracked.",
+      "Repo inclui NDK vendorizado."
+    ]
+  },
+  "env_vars": [
+    {
+      "name": "ALERT_API_URL",
+      "status": "parcial",
+      "evidence": [".env", "src/core/config.ts", "index.js"],
+      "note": "Ha drift entre host legado, onrender e host canonico do billing."
+    },
+    {
+      "name": "AUTH_ANONYMOUS_ENABLED",
+      "status": "preparado",
+      "evidence": ["src/core/config.ts"]
+    },
+    {
+      "name": "MAP_PROVIDER/MAPTILER_KEY/MAP_STYLE_*",
+      "status": "ativo",
+      "evidence": ["src/core/config.ts", "src/constants/MapStyles.ts"]
+    },
+    {
+      "name": "alertBundleDebugJs/newArchEnabled/hermesEnabled",
+      "status": "ativo",
+      "evidence": ["android/gradle.properties", "android/app/build.gradle"]
+    },
+    {
+      "name": "STRIPE_* / APP_URL / ALERT_BILLING_* / PORT",
+      "status": "ativo",
+      "evidence": ["backend/.env.example", "backend/src/billing/billingConfig.js"]
+    },
+    {
+      "name": "STARLINK_* rollout / ALERT_PREMIUM_* / RELAY_*",
+      "status": "ativo",
+      "evidence": ["backend/index.js"]
+    }
+  ],
+  "feature_flags": [
+    {
+      "name": "AUTH_ANONYMOUS_ENABLED",
+      "status": "preparado",
+      "evidence": ["src/core/config.ts"]
+    },
+    {
+      "name": "MAP_SATELLITE_ENABLED",
+      "status": "ativo",
+      "evidence": ["src/core/config.ts", "src/constants/MapStyles.ts"]
+    },
+    {
+      "name": "SECURITY_MAP_V2_ENABLED",
+      "status": "ativo",
+      "evidence": ["src/core/config.ts"]
+    },
+    {
+      "name": "starlinkConnectEnabled/starlinkTunnelBetaEnabled/starlinkExclusiveEnabled",
+      "status": "ativo",
+      "evidence": ["src/services/EntitlementService.ts", "backend/index.js"]
+    }
+  ],
+  "tests": {
+    "frameworks": ["Jest"],
+    "mobile": ["__tests__/App.test.tsx", "__tests__/KyberNetworkService.test.ts", "__tests__/SosDispatchService.test.ts", "__tests__/SettingScreen.test.tsx", "__tests__/premiumBillingClient.test.ts"],
+    "backend": ["backend/src/billing/*.test.js", "backend/src/bootstrap/firebaseAdmin.test.js", "backend/src/eventHub/*.test.js"],
+    "gaps": [
+      "Ha testes placeholder no backend.",
+      "Nao encontrei E2E mobile."
+    ]
+  },
+  "integrations": [
+    {
+      "name": "Open-Meteo",
+      "status": "ativo",
+      "evidence": ["src/services/WeatherService.ts", "backend/src/eventHub/adapters/meteoAdapter.js"]
+    },
+    {
+      "name": "Nominatim",
+      "status": "ativo",
+      "evidence": ["src/services/WeatherService.ts", "src/services/ReverseGeocodeService.ts"]
+    },
+    {
+      "name": "NOAA/USGS/GDACS/WHO",
+      "status": "ativo",
+      "evidence": ["src/services/WeatherService.ts", "backend/src/eventHub/providerRegistry.js", "src/services/EpidemicService.ts"]
+    }
+  ],
+  "risks": [
+    {
+      "name": "OTP mock no fluxo principal",
+      "severity": "high",
+      "status": "parcial",
+      "evidence": ["src/screens/auth/VerifyCodeScreen.tsx"]
+    },
+    {
+      "name": "Android release signing com debug key",
+      "severity": "high",
+      "status": "parcial",
+      "evidence": ["android/app/build.gradle"]
+    },
+    {
+      "name": "New Architecture desligada no Android",
+      "severity": "medium",
+      "status": "parcial",
+      "evidence": ["android/gradle.properties"]
+    },
+    {
+      "name": "Drift de hosts/config",
+      "severity": "high",
+      "status": "parcial",
+      "evidence": [".env", "src/core/config.ts", "backend/src/billing/billingConfig.js"]
+    },
+    {
+      "name": "Servidor gRPC quebrado",
+      "severity": "medium",
+      "status": "parcial",
+      "evidence": ["backend/src/services/EmergencyServer.ts", "backend/package.json"]
+    },
+    {
+      "name": "iOS location description vazio",
+      "severity": "medium",
+      "status": "parcial",
+      "evidence": ["ios/A1/Info.plist"]
+    },
+    {
+      "name": "Billing web sem fonte tracked",
+      "severity": "medium",
+      "status": "parcial",
+      "evidence": ["billing-web/dist/index.html"]
+    },
+    {
+      "name": "Crash reporting externo nao confirmado",
+      "severity": "medium",
+      "status": "nao confirmado",
+      "evidence": ["package.json", "src/", "backend/"]
+    }
+  ],
+  "todos_and_stubs": [
+    {
+      "name": "VerifyCodeScreen mock",
+      "status": "parcial",
+      "evidence": ["src/screens/auth/VerifyCodeScreen.tsx"]
+    },
+    {
+      "name": "Placeholder tests",
+      "status": "parcial",
+      "evidence": ["backend/src/eventHub/providerRegistry.test.js", "backend/src/eventHub/adapters/meteoAdapter.test.js", "backend/src/billing/registerStripeBilling.test.js"]
+    },
+    {
+      "name": "Assistant coming soon strings",
+      "status": "parcial",
+      "evidence": ["src/i18n/index.ts"]
+    },
+    {
+      "name": "Weather lottie placeholders",
+      "status": "parcial",
+      "evidence": ["src/assets/weather/lottie/*.json"]
+    },
+    {
+      "name": "Official sources remote endpoint not confirmed",
+      "status": "parcial",
+      "evidence": ["src/services/OfficialSourcesRegistryService.ts", "backend/index.js"]
+    },
+    {
+      "name": "eslint.config.js vazio",
+      "status": "parcial",
+      "evidence": ["eslint.config.js"]
+    }
+  ],
+  "evidence": [
+    {
+      "item": "React Native mobile app",
+      "status": "ativo",
+      "files": ["package.json", "App.tsx", "index.js", "android/", "ios/"],
+      "observation": "Projeto mobile cross-platform com base RN."
+    },
+    {
+      "item": "Node/Express backend",
+      "status": "ativo",
+      "files": ["backend/index.js", "backend/package.json", "backend/src/**"],
+      "observation": "Backend real com billing, relay, event hub e entitlements."
+    },
+    {
+      "item": "Billing web artifact",
+      "status": "parcial",
+      "files": ["billing-web/dist/index.html", "billing-web/dist/assets/index-4kOGczXJ.js", "billing-web/dist/assets/index-C1YEhu43.css"],
+      "observation": "Artefato compilado tracked; fonte nao confirmada."
+    },
+    {
+      "item": "Hermes",
+      "status": "ativo",
+      "files": ["android/gradle.properties", "android/app/build.gradle"],
+      "observation": "Motor JS Android ligado."
+    },
+    {
+      "item": "New Architecture",
+      "status": "preparado",
+      "files": ["android/gradle.properties", "android/app/src/main/java/com/company/alert/MainActivity.kt"],
+      "observation": "Estrutura existe, mas a flag esta desligada."
+    },
+    {
+      "item": "Phone verification",
+      "status": "parcial",
+      "files": ["src/screens/auth/VerifyCodeScreen.tsx"],
+      "observation": "Fluxo de codigo e mock."
+    },
+    {
+      "item": "Widgets",
+      "status": "ativo",
+      "files": ["src/widgets/**", "android/app/src/main/java/com/company/alert/widgets/**"],
+      "observation": "Modulo ativo com snapshots e bridge Android."
+    },
+    {
+      "item": "Kyber relay queue",
+      "status": "ativo",
+      "files": ["src/services/KyberNetworkService.ts", "src/services/AlertRelayService.ts", "backend/index.js"],
+      "observation": "Fila store-and-forward e relay SOS/chat."
+    },
+    {
+      "item": "Official sources remote registry",
+      "status": "parcial",
+      "files": ["src/services/OfficialSourcesRegistryService.ts", "backend/index.js"],
+      "observation": "Mobile consome, backend nao confirmou rota equivalente."
+    },
+    {
+      "item": "gRPC emergency server",
+      "status": "parcial",
+      "files": ["backend/src/services/EmergencyServer.ts", "backend/package.json"],
+      "observation": "Referencia proto inexistente e nao declara deps gRPC."
+    }
+  ]
+}

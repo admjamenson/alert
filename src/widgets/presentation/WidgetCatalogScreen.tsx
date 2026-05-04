@@ -49,7 +49,7 @@ const buildFallbackModel = (
           ? t('widget_alerts_status_attention', { defaultValue: 'Attention nearby' })
           : '',
   metric: preset === 'commute' ? '9m' : '18',
-  confidence: 'medium',
+  confidence: 'MEDIUM',
   confidenceLabel: t('widget_confidence_medium', { defaultValue: 'Medium confidence' }),
   updatedAtLabel: t('widget_updated_now', { defaultValue: 'Updated now' }),
   chips: [],

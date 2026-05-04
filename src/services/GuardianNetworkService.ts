@@ -18,8 +18,17 @@ import i18n from '../i18n';
 import { NotificationService } from './NotificationService';
 import { ProfileService } from './ProfileService';
 import { UserIdentityService } from './UserIdentityService';
-import { ensureAnonymousAuth } from './FirebaseAuthResilienceService';
-import { APP_CONFIG } from '../core/config';
+import {
+  ensureAnonymousAuth,
+  getAnonymousAuthStatus,
+} from './FirebaseAuthResilienceService';
+import { getAlertApiBaseUrl } from '../core/config';
+import {
+  logSosDiagnostic,
+  summarizeError,
+  summarizeResponseBody,
+  summarizeUrl,
+} from '../observability/SosDiagnostics';
 
 const USERS_COLLECTION = 'users';
 const REQUESTS_COLLECTION = 'guardian_requests';
@@ -40,6 +49,15 @@ type GuardianRequestDoc = {
   createdAt: string;
 };
 
+type GuardianSosResult = {
+  ok: boolean;
+  accepted?: boolean;
+  delivered?: boolean;
+  requestId?: string;
+  jobId?: string;
+  reason?: string;
+};
+
 const getLocalUserId = async (): Promise<string> => {
   const current = authClient.currentUser;
   if (current?.uid) return current.uid;
@@ -47,9 +65,25 @@ const getLocalUserId = async (): Promise<string> => {
   return `device_${deviceId}`;
 };
 
-const getApiBaseUrl = () => (APP_CONFIG.API_BASE_URL || '').trim();
+const normalizeGuardianPhone = (phone?: string | null): string =>
+  UserIdentityService.normalizePhone(phone || '');
+
+const looksLikePhoneNumber = (value: string): boolean =>
+  /^[\d+\-\s()]+$/.test(value) && value.replace(/\D/g, '').length >= 7;
+
+const normalizeLegacyGuardianTargetId = (value?: string | null): string => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/^\d+$/.test(raw)) return '';
+  if (looksLikePhoneNumber(raw)) return '';
+  return raw;
+};
+
+const getApiBaseUrl = () => getAlertApiBaseUrl();
 const getFallbackSenderName = () => i18n.t('chat_sender_fallback');
 const getDefaultCheckInMessage = () => i18n.t('checkin_default_message');
+const buildGuardianSosRequestId = () =>
+  `guardian-sos-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 let guardianRequestsRealtimeDisabled = false;
 let incomingSosRealtimeDisabled = false;
 let guardianRequestsWarnedUnexpectedError = false;
@@ -99,9 +133,6 @@ const warnUnexpectedRealtimeError = (
 
 export const GuardianNetworkService = {
   async registerDevice(): Promise<void> {
-    const authenticated = await ensureAnonymousAuth();
-    if (!authenticated) return;
-
     const userId = await getLocalUserId();
     const profile = await ProfileService.getProfile();
     const phone = await UserIdentityService.getUserPhone();
@@ -134,6 +165,9 @@ export const GuardianNetworkService = {
       }
     }
 
+    const authenticated = await ensureAnonymousAuth();
+    if (!authenticated) return;
+
     try {
       await setDoc(doc(collection(db, USERS_COLLECTION), userId), payload, {
         merge: true,
@@ -148,9 +182,6 @@ export const GuardianNetworkService = {
     requestId?: string;
     targetId?: string;
   }> {
-    const authenticated = await ensureAnonymousAuth();
-    if (!authenticated) return { status: 'error' };
-
     const normalized = UserIdentityService.normalizePhone(phone);
     if (!normalized) return { status: 'error' };
 
@@ -183,6 +214,9 @@ export const GuardianNetworkService = {
         // ignore backend errors
       }
     }
+
+    const authenticated = await ensureAnonymousAuth();
+    if (!authenticated) return { status: 'error' };
 
     try {
       const usersQuery = query(
@@ -287,35 +321,160 @@ export const GuardianNetworkService = {
     location: { latitude: number; longitude: number };
     senderName?: string;
     message?: string;
-    guardians: Array<{ remoteId?: string; name: string }>;
-  }): Promise<{ ok: boolean }> {
-    const authenticated = await ensureAnonymousAuth();
-    if (!authenticated) return { ok: false };
-
+    guardians: Array<{ id?: string; remoteId?: string; name: string; phone?: string }>;
+  }): Promise<GuardianSosResult> {
     const me = await getLocalUserId();
+    const authState = getAnonymousAuthStatus();
+    const requestId = buildGuardianSosRequestId();
     const targets = payload.guardians
-      .map(g => g.remoteId)
+      .map(g => g.remoteId || normalizeLegacyGuardianTargetId(g.id))
       .filter((id): id is string => Boolean(id));
-    if (targets.length === 0) return { ok: false };
+    const targetPhones = Array.from(
+      new Set(
+        payload.guardians
+          .map(g => normalizeGuardianPhone(g.phone))
+          .filter((phone): phone is string => Boolean(phone)),
+      ),
+    );
+
+    logSosDiagnostic('guardian_sos:auth_state', {
+      anonymousAuthEnabled: authState.enabled,
+      hasCurrentUser: authState.hasCurrentUser,
+      hasCurrentUserId: authState.hasCurrentUserId,
+      blockedForSession: authState.blockedForSession,
+      targetCount: targets.length,
+      targetPhoneCount: targetPhones.length,
+    });
+
+    if (targets.length === 0 && targetPhones.length === 0) {
+      logSosDiagnostic('guardian_sos:blocked', {
+        requestId,
+        reason: 'no_guardian_targets',
+      });
+      return { ok: false, reason: 'no_guardian_targets', requestId };
+    }
 
     const baseUrl = getApiBaseUrl();
     if (baseUrl) {
       try {
-        const response = await fetch(`${baseUrl}/api/sos`, {
+        const requestUrl = `${baseUrl}/api/sos`;
+        logSosDiagnostic('guardian_sos:request_start', {
+          requestId,
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          url: summarizeUrl(requestUrl),
+          targetCount: targets.length,
+          targetPhoneCount: targetPhones.length,
+        });
+        const response = await fetch(requestUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Alert-Request-Id': requestId,
+          },
           body: JSON.stringify({
             fromId: me,
             fromName: payload.senderName || getFallbackSenderName(),
             message: payload.message || '',
             location: payload.location,
             targets,
+            targetPhones,
           }),
         });
-        if (response.ok) return { ok: true };
-      } catch {
-        // ignore backend errors
+        const json = await response.json().catch(() => null);
+        const responseRequestId =
+          String(
+            response.headers.get('x-alert-request-id') ||
+              json?.requestId ||
+              requestId,
+          ).trim() || requestId;
+        const fanout = json?.fanout && typeof json.fanout === 'object' ? json.fanout : {};
+        const tokenCount = Number(fanout?.tokenCount || 0);
+        const delivered =
+          Boolean(fanout?.queued) ||
+          Boolean(fanout?.sentInline) ||
+          Boolean(fanout?.deduped) ||
+          tokenCount > 0;
+        const jobId =
+          typeof fanout?.jobId === 'string' && fanout.jobId.trim().length > 0
+            ? fanout.jobId.trim()
+            : undefined;
+        logSosDiagnostic('guardian_sos:response', {
+          requestId: responseRequestId,
+          method: 'POST',
+          url: summarizeUrl(requestUrl),
+          status: response.status,
+          ok: response.ok,
+          body: summarizeResponseBody(json),
+        });
+        if (response.ok && delivered) {
+          return {
+            ok: true,
+            accepted: true,
+            delivered: true,
+            requestId: responseRequestId,
+            jobId,
+          };
+        }
+        if (response.ok) {
+          logSosDiagnostic('guardian_sos:accepted_without_fanout', {
+            requestId: responseRequestId,
+            jobId: jobId || null,
+            tokenCount,
+            queued: Boolean(fanout?.queued),
+            sentInline: Boolean(fanout?.sentInline),
+            deduped: Boolean(fanout?.deduped),
+          });
+          return {
+            ok: false,
+            accepted: true,
+            delivered: false,
+            requestId: responseRequestId,
+            jobId,
+            reason: 'backend_accepted_without_fanout',
+          };
+        }
+      } catch (error) {
+        logSosDiagnostic('guardian_sos:error', {
+          requestId,
+          method: 'POST',
+          url: summarizeUrl(`${baseUrl}/api/sos`),
+          error: summarizeError(error),
+        });
       }
+    } else {
+      logSosDiagnostic('guardian_sos:blocked', {
+        requestId,
+        reason: 'missing_base_url',
+      });
+    }
+
+    const authenticated = await ensureAnonymousAuth();
+    if (!authenticated) {
+      logSosDiagnostic('guardian_sos:blocked', {
+        requestId,
+        reason: 'anonymous_auth_unavailable_for_firestore_fallback',
+      });
+      return {
+        ok: false,
+        accepted: false,
+        delivered: false,
+        requestId,
+        reason: 'anonymous_auth_unavailable_for_firestore_fallback',
+      };
+    }
+
+    if (targets.length === 0) {
+      logSosDiagnostic('guardian_sos:blocked', {
+        requestId,
+        reason: 'missing_firestore_targets',
+      });
+      return {
+        ok: false,
+        accepted: false,
+        delivered: false,
+        requestId,
+        reason: 'missing_firestore_targets',
+      };
     }
 
     const now = new Date().toISOString();
@@ -334,9 +493,25 @@ export const GuardianNetworkService = {
     });
     try {
       await batch.commit();
-      return { ok: true };
+      logSosDiagnostic('guardian_sos:firestore_fallback_written', {
+        requestId,
+        targetCount: targets.length,
+      });
+      return {
+        ok: false,
+        accepted: true,
+        delivered: false,
+        requestId,
+        reason: 'firestore_fallback_only',
+      };
     } catch {
-      return { ok: false };
+      return {
+        ok: false,
+        accepted: false,
+        delivered: false,
+        requestId,
+        reason: 'firestore_fallback_failed',
+      };
     }
   },
 

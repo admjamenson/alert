@@ -16,6 +16,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import ViewShot from 'react-native-view-shot';
 import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { RootStackParamList } from '../../navigation/types';
 
 import { useTheme } from '../../context/ThemeContext';
 import { useSecurity } from '../../context/SecurityContext';
@@ -47,7 +49,7 @@ const buildScreenshotFileName = () => {
   return `Alert_security_map_${now.getFullYear()}${toPad(now.getMonth() + 1)}${toPad(now.getDate())}_${toPad(now.getHours())}${toPad(now.getMinutes())}${toPad(now.getSeconds())}`;
 };
 
-const getRelativeAgeLabel = (updatedAt: string | undefined, t: any) => {
+const getRelativeAgeLabel = (updatedAt: string | undefined, t: (key: string, options?: any) => string) => {
   if (!updatedAt) return t('monitoring_overlay_status_monitoring');
   const parsed = Date.parse(updatedAt);
   if (!Number.isFinite(parsed)) return t('monitoring_overlay_status_monitoring');
@@ -72,7 +74,9 @@ const getRelativeAgeLabel = (updatedAt: string | undefined, t: any) => {
   });
 };
 
-export const SecurityMapScreen = ({ navigation, route }: any) => {
+type Props = NativeStackScreenProps<RootStackParamList, 'SafetyMap'>;
+
+export const SecurityMapScreen = ({ navigation, route }: Props) => {
   const { colors, isDark } = useTheme();
   const { securityState } = useSecurity();
   const { t, i18n } = useTranslation();

@@ -1,0 +1,11 @@
+﻿src/core/security/IntegrityCheck.ts(4,34): error TS2307: Cannot find module '../TelemetryService' or its corresponding type declarations.
+src/screens/home/AlertAssistantScreen.tsx(97,11): error TS2322: Type 'number | null' is not assignable to type 'number | undefined'.
+  Type 'null' is not assignable to type 'number | undefined'.
+src/screens/home/AlertAssistantScreen.tsx(98,11): error TS2322: Type 'number | null' is not assignable to type 'number | undefined'.
+  Type 'null' is not assignable to type 'number | undefined'.
+src/widgets/infra/WidgetDataComposer.ts(991,19): error TS2367: This comparison appears to be unintentional because the types 'WidgetConfidence' and '"high"' have no overlap.
+src/widgets/infra/WidgetDataComposer.ts(1065,11): error TS2322: Type '"high" | "low"' is not assignable to type 'WidgetConfidence'.
+  Type '"high"' is not assignable to type 'WidgetConfidence'. Did you mean '"HIGH"'?
+src/widgets/infra/WidgetDataComposer.ts(1215,11): error TS2367: This comparison appears to be unintentional because the types 'WidgetConfidence' and '"high"' have no overlap.
+src/widgets/infra/WidgetDataComposer.ts(1268,11): error TS2322: Type '"medium" | "low" | WidgetConfidence' is not assignable to type 'WidgetConfidence'.
+  Type '"medium"' is not assignable to type 'WidgetConfidence'. Did you mean '"MEDIUM"'?

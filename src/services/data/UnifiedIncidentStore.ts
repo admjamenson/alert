@@ -146,16 +146,44 @@ const bucketByScope = (lat: number, lon: number, scope: SecurityScope) => {
   return `${lat.toFixed(precision)}:${lon.toFixed(precision)}`;
 };
 
+const resolveSignalPoint = (
+  signal: AlertSignal,
+): { latitude: number; longitude: number } | null => {
+  if (signal.geometry?.type !== 'Point') return null;
+  const coords = signal.geometry.coordinates;
+  if (!Array.isArray(coords) || coords.length < 2) return null;
+  const longitude = Number(coords[0]);
+  const latitude = Number(coords[1]);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  return { latitude, longitude };
+};
+
+const resolveSignalTimestamp = (signal: AlertSignal) =>
+  String(signal.timestamp || signal.updatedAt || new Date().toISOString());
+
+const resolveEvidenceLinks = (trustMeta: AlertTrustMeta): string[] =>
+  Array.isArray(trustMeta.evidencePack.evidenceLinks)
+    ? trustMeta.evidencePack.evidenceLinks
+    : [];
+
+const resolveContinuityOfficiality = (
+  source: AlertTrustMeta['sources'][number],
+): import('../MonitoringContinuityStore').ContinuitySourceOfficiality => {
+  if (source.sourceClass === 'TRUSTED_MEDIA') return 'TRUSTED_MEDIA';
+  if (source.sourceClass === 'TRUSTED_SOCIAL') return 'TRUSTED_SOCIAL';
+  if (source.sourceClass === 'COMMUNITY') return 'COMMUNITY';
+  if (source.sourceClass === 'ESTIMATED') return 'ESTIMATED';
+  if (source.officiality === 'OFFICIAL') return 'OFFICIAL';
+  if (source.officiality === 'VERIFIED') return 'VERIFIED';
+  return 'REFERENCE';
+};
+
 const signalKey = (signal: AlertSignal, scope: SecurityScope) => {
-  const coords =
-    signal.geometry?.type === 'Point'
-      ? bucketByScope(
-          Number(signal.geometry.coordinates[1]),
-          Number(signal.geometry.coordinates[0]),
-          scope,
-        )
-      : 'poly';
-  const timeBucket = Math.floor(Date.parse(signal.timestamp) / (15 * 60 * 1000));
+  const point = resolveSignalPoint(signal);
+  const coords = point ? bucketByScope(point.latitude, point.longitude, scope) : 'poly';
+  const timeBucket = Math.floor(
+    Date.parse(resolveSignalTimestamp(signal)) / (15 * 60 * 1000),
+  );
   return `${signal.category}:${coords}:${timeBucket}`;
 };
 
@@ -214,7 +242,7 @@ const buildItem = (
   const badge = sourceBadgeFromSignal(signal, trustMeta);
   let score =
     baseScoreFromBadge(badge) +
-    ageBoost(signal.timestamp) +
+    ageBoost(resolveSignalTimestamp(signal)) +
     corroborationBoost +
     crowdBonus;
 
@@ -226,7 +254,7 @@ const buildItem = (
     .replace(/\b\w/g, letter => letter.toUpperCase());
 
   const item: SecurityIncidentItem = {
-    id: signal.id,
+    id: String(signal.id || `${signal.category}-${resolveSignalTimestamp(signal)}`),
     category: signal.category,
     domain: domainFromCategory(signal.category),
     severity: signal.severity,
@@ -234,18 +262,12 @@ const buildItem = (
     confidenceScore: score,
     title,
     summary: signal.summary || title,
-    updatedAt: signal.timestamp,
+    updatedAt: resolveSignalTimestamp(signal),
     sourceName: signal.sourceName || 'Alert',
-    sourceUrl: signal.sourceUrl,
+    sourceUrl: signal.sourceUrl || undefined,
     sourceBadge: badge,
-    evidenceLinks: trustMeta.evidencePack.evidenceLinks.slice(0, 5),
-    coordinate:
-      signal.geometry.type === 'Point'
-        ? {
-            latitude: Number(signal.geometry.coordinates[1]),
-            longitude: Number(signal.geometry.coordinates[0]),
-          }
-        : undefined,
+    evidenceLinks: resolveEvidenceLinks(trustMeta).slice(0, 5),
+    coordinate: resolveSignalPoint(signal) || undefined,
   };
   return item;
 };
@@ -339,8 +361,9 @@ const sortItems = (a: SecurityIncidentItem, b: SecurityIncidentItem) => {
 const mapSignalsFromContinuity = (signals: AlertSignal[]): SecurityIncidentItem[] =>
   signals.map(signal => {
     const score = Math.max(0.2, Math.min(0.95, Number(signal.confidence || 0.4)));
+    const point = resolveSignalPoint(signal);
     return {
-      id: signal.id,
+      id: String(signal.id || `${signal.category}-${resolveSignalTimestamp(signal)}`),
       category: signal.category,
       domain: domainFromCategory(signal.category),
       severity: signal.severity,
@@ -350,9 +373,9 @@ const mapSignalsFromContinuity = (signals: AlertSignal[]): SecurityIncidentItem[
         .replace(/_/g, ' ')
         .replace(/\b\w/g, letter => letter.toUpperCase()),
       summary: signal.summary || '',
-      updatedAt: signal.timestamp,
+      updatedAt: resolveSignalTimestamp(signal),
       sourceName: signal.sourceName || 'Alert',
-      sourceUrl: signal.sourceUrl,
+      sourceUrl: signal.sourceUrl || undefined,
       sourceBadge:
         signal.officiality === 'OFFICIAL'
           ? 'OFFICIAL'
@@ -360,13 +383,7 @@ const mapSignalsFromContinuity = (signals: AlertSignal[]): SecurityIncidentItem[
             ? 'VERIFIED'
             : 'REFERENCE',
       evidenceLinks: [],
-      coordinate:
-        signal.geometry.type === 'Point'
-          ? {
-              latitude: Number(signal.geometry.coordinates[1]),
-              longitude: Number(signal.geometry.coordinates[0]),
-            }
-          : undefined,
+      coordinate: point || undefined,
     } as SecurityIncidentItem;
   });
 
@@ -450,21 +467,22 @@ export const UnifiedIncidentStore = {
     const snapshot: SecurityMapSnapshot = {
       status,
       confidence: confidenceFromScore(averageScore),
-      updatedAt,
+      updatedAt: updatedAt || undefined,
       hasOfficialLocal,
       sourcesCount: Math.max(
         distinctSources,
         continuity?.snapshot?.sources?.length || 0,
       ),
       evidenceLinks:
-        trustMeta.evidencePack.evidenceLinks.length > 0
-          ? trustMeta.evidencePack.evidenceLinks.slice(0, 5)
+        resolveEvidenceLinks(trustMeta).length > 0
+          ? resolveEvidenceLinks(trustMeta).slice(0, 5)
           : continuity?.snapshot?.evidenceLinks?.slice(0, 5) || [],
       items: finalItems,
       glyphs: buildGlyphs(finalItems, params.scope),
     };
 
     if (liveSignals.length > 0 || crowdSignals.length > 0) {
+      const crowdPointSignals = crowdSignals.filter(signal => resolveSignalPoint(signal));
       const sourceLine =
         finalItems[0]?.sourceName ||
         trustMeta.sources[0]?.name ||
@@ -479,20 +497,16 @@ export const UnifiedIncidentStore = {
         summary: finalItems[0]?.summary || '',
         sourceLine,
         sourceUrl: finalItems[0]?.sourceUrl,
-        sourceTrustTier: trustMeta.evidencePack.sourceTrustTier,
+        sourceTrustTier:
+          trustMeta.evidencePack.sourceTrustTier === 'A' ||
+          trustMeta.evidencePack.sourceTrustTier === 'B' ||
+          trustMeta.evidencePack.sourceTrustTier === 'C'
+            ? trustMeta.evidencePack.sourceTrustTier
+            : '',
         sources: trustMeta.sources.slice(0, 5).map(source => ({
           name: source.name,
-          url: source.url,
-          officiality:
-            source.sourceClass === 'TRUSTED_MEDIA'
-              ? 'TRUSTED_MEDIA'
-              : source.sourceClass === 'TRUSTED_SOCIAL'
-                ? 'TRUSTED_SOCIAL'
-                : source.sourceClass === 'COMMUNITY'
-                  ? 'COMMUNITY'
-                  : source.sourceClass === 'ESTIMATED'
-                    ? 'ESTIMATED'
-                    : source.officiality,
+          url: source.url || undefined,
+          officiality: resolveContinuityOfficiality(source),
         })),
         sourcesFallback: !hasOfficialLocal,
         updatedAt: snapshot.updatedAt,
@@ -519,13 +533,15 @@ export const UnifiedIncidentStore = {
         },
         sosPoints: {
           type: 'FeatureCollection',
-          features: crowdSignals
-            .filter(signal => signal.geometry.type === 'Point')
+          features: crowdPointSignals
             .map(signal => ({
               type: 'Feature',
               geometry: {
                 type: 'Point',
-                coordinates: signal.geometry.coordinates,
+                coordinates: [
+                  resolveSignalPoint(signal)!.longitude,
+                  resolveSignalPoint(signal)!.latitude,
+                ],
               },
               properties: {
                 confidence: signal.confidence,

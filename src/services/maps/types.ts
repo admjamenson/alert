@@ -1,50 +1,12 @@
-export type TrustMeta = {
-  sourceName?: string;
-  updatedAt?: string;
-  connectionStatus: 'online' | 'degraded' | 'offline';
-  providerId: string;
-};
-
-export type PlaceSuggestion = {
-  id?: string;
-  name: string;
-  address: string;
-  coordinate: [number, number];
-  countryCode?: string;
-  distanceMeters?: number;
-  trust?: TrustMeta;
-};
-
-export type GuardianSuggestion = {
-  id: string;
-  name: string;
-  coordinate: [number, number];
-  distanceMeters?: number;
-};
-
-export type RouteKind = 'fastest' | 'shortest' | 'safest' | 'alternative';
-
-export type TrafficLevel = 'low' | 'medium' | 'high' | 'unknown';
-
-export type RouteOption = {
-  id: string;
-  kind: RouteKind;
-  title: string;
-  etaMin: number;
-  distanceKm: number;
-  geometry: Array<[number, number]>;
-  safetyScore?: number;
-  trafficLevel?: TrafficLevel;
-  trust?: TrustMeta;
-};
-
-export type RouteRequest = {
-  from: [number, number];
-  to: [number, number];
-  locale: string;
-  worldview?: string;
-  riskPenalty?: number;
-};
+export type {
+  GuardianSuggestion,
+  PlaceSuggestion,
+  RouteKind,
+  RouteOption,
+  RouteRequest,
+  TrafficLevel,
+  TrustMeta,
+} from '../../domain/maps/MapModels';
 
 export type ProviderCandidate<TInput, TOutput> = {
   id: string;

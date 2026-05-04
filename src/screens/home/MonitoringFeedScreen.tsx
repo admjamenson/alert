@@ -10,6 +10,8 @@ import {
   Image,
   I18nManager,
   Linking,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   Platform,
   ScrollView,
   Share,
@@ -20,6 +22,7 @@ import {
   ViewToken,
 } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import ViewShot from 'react-native-view-shot';
@@ -47,18 +50,13 @@ import {
   resolveLocale,
   resolveTimeZone,
 } from '../../utils/dateTimeFormat';
-import { MonitoringService } from '../../services/MonitoringService';
-import { RouteDestinationService } from '../../services/RouteDestinationService';
-import { EpidemicService, EpidemicSnapshot } from '../../services/EpidemicService';
-import { EventHubService, HealthTopItem } from '../../services/EventHubService';
-import { RiskReport, RiskReportService } from '../../services/RiskReportService';
-import { AdminContextService } from '../../services/AdminContextService';
-import { AlertIntelligenceService } from '../../services/AlertIntelligenceService';
-import { MonitoringContinuityStore } from '../../services/MonitoringContinuityStore';
-import {
-  mapMonitoringEventToDomain,
-  OfficialSourcesResolver,
-} from '../../services/OfficialSourcesResolver';
+import { GetDefaultRouteDestinationQuery } from '../../application/queries/GetDefaultRouteDestinationQuery';
+import { GetMonitoringFeedScopedSourcesQuery } from '../../application/queries/GetMonitoringFeedScopedSourcesQuery';
+import { GetMonitoringFeedContinuitySnapshotQuery } from '../../application/queries/GetMonitoringFeedContinuitySnapshotQuery';
+import { GetMonitoringFeedSignalsQuery } from '../../application/queries/GetMonitoringFeedSignalsQuery';
+import type { EpidemicSnapshot } from '../../services/EpidemicService';
+import type { HealthTopItem } from '../../services/EventHubService';
+import type { RiskReport } from '../../services/RiskReportService';
 import { TelemetryService } from '../../services/TelemetryService';
 import { AlertNotification } from '../../types/notifications';
 import { AlertSignal } from '../../types/alertIntelligence';
@@ -74,6 +72,7 @@ import {
   isFiniteCoordinatePair,
 } from '../../utils/locationQuality';
 import { APP_CONFIG } from '../../core/config';
+import type { RootStackParamList } from '../../navigation/types';
 import MonitoringInfoOverlay, {
   MonitoringOverlaySource,
   MonitoringOverlayTrustStatus,
@@ -84,15 +83,48 @@ type FeedItem = { id: string; type: string; icon: string; titleKey: string };
 type PointFeature = {
   type: 'Feature';
   geometry: { type: 'Point'; coordinates: [number, number] };
-  properties: Record<string, any>;
+  properties: Record<string, unknown>;
 };
 type FeatureCollection = { type: 'FeatureCollection'; features: PointFeature[] };
 type PolygonFeature = {
   type: 'Feature';
   geometry: { type: 'Polygon'; coordinates: Array<Array<[number, number]>> };
-  properties: Record<string, any>;
+  properties: Record<string, unknown>;
 };
 type PolygonFeatureCollection = { type: 'FeatureCollection'; features: PolygonFeature[] };
+type ShapeSourceShape = React.ComponentProps<typeof MapLibreGL.ShapeSource>['shape'];
+type FillLayerStyle = NonNullable<React.ComponentProps<typeof MapLibreGL.FillLayer>['style']>;
+type LineLayerStyle = NonNullable<React.ComponentProps<typeof MapLibreGL.LineLayer>['style']>;
+type CircleLayerStyle = NonNullable<React.ComponentProps<typeof MapLibreGL.CircleLayer>['style']>;
+type ViewShotCaptureRef = React.ElementRef<typeof ViewShot> & {
+  capture?: (options?: Record<string, unknown>) => Promise<string | undefined>;
+};
+type MonitoringCoordinate = { latitude: number; longitude: number };
+type MonitoringMapStyle = string | Record<string, unknown>;
+type TranslationFn = (key: string, options?: Record<string, unknown>) => string;
+type FeedMapPageProps = {
+  item: FeedItem;
+  index: number;
+  total: number;
+  active: boolean;
+  locale: string;
+  timeZone: string;
+  userLocation: MonitoringCoordinate | null;
+  targetLocation: MonitoringCoordinate | null;
+  reducedMotion: boolean;
+  initialScope?: FeedScope;
+  initialCenter?: MonitoringCoordinate | null;
+  initialZoom?: number | null;
+  baseMapMode: MapStyleMode;
+  canUseSatellite: boolean;
+  onToggleBaseMapMode: () => void;
+  alertAiEnabled: boolean;
+  screenFocused: boolean;
+  colors: { primary: string; background: string };
+  t: TranslationFn;
+  onBack: () => void;
+};
+type MonitoringFeedScreenProps = NativeStackScreenProps<RootStackParamList, 'MonitoringFeed'>;
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const FEED_PAGE_SIZE = 10;
@@ -102,6 +134,23 @@ const RAIL_OVERLAY_OFFSET = 120;
 const WATERMARK_LOGO = require('../../assets/logo.png');
 const EMPTY_FC: FeatureCollection = { type: 'FeatureCollection', features: [] };
 const EMPTY_POLYGON_FC: PolygonFeatureCollection = { type: 'FeatureCollection', features: [] };
+const toShapeSourceShape = (shape: FeatureCollection | PolygonFeatureCollection): ShapeSourceShape =>
+  shape as unknown as ShapeSourceShape;
+const fillLayerStyle = (style: Record<string, unknown>): FillLayerStyle =>
+  style as unknown as FillLayerStyle;
+const lineLayerStyle = (style: Record<string, unknown>): LineLayerStyle =>
+  style as unknown as LineLayerStyle;
+const circleLayerStyle = (style: Record<string, unknown>): CircleLayerStyle =>
+  style as unknown as CircleLayerStyle;
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+const coordinatePairFromUnknown = (value: unknown): [number, number] | null => {
+  if (!Array.isArray(value) || value.length < 2) return null;
+  const longitude = Number(value[0]);
+  const latitude = Number(value[1]);
+  if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) return null;
+  return [longitude, latitude];
+};
 const FONT_FAMILY =
   Platform.OS === 'ios'
     ? ThemeTokens.typography.families.ios
@@ -181,7 +230,7 @@ const toEpidemicMode = (type: string): 'pandemic' | 'epidemic' =>
 const isWindMainType = (type: string) => type === 'wind';
 const WIND_ALERT_TYPES = new Set(['wind', 'gale', 'wind_gust_10', 'wind_gust_50']);
 
-const trendLabelFromValue = (trend: string, t: (key: string, options?: any) => string) => {
+const trendLabelFromValue = (trend: string, t: TranslationFn) => {
   const normalized = String(trend || '').toLowerCase();
   if (normalized === 'up') {
     return t('monitoring_feed_pandemic_trend_up', { defaultValue: 'Em alta' });
@@ -236,18 +285,21 @@ const withAlpha = (hex: string, alpha: number): string => {
   return `rgba(${r},${g},${b},${Math.max(0, Math.min(1, alpha))})`;
 };
 
-const getCenterFromPayload = (payload: any): [number, number] | null => {
-  const c1 = payload?.geometry?.coordinates;
-  if (Array.isArray(c1) && c1.length >= 2) return [c1[0], c1[1]];
-  const c2 = payload?.properties?.center;
-  if (Array.isArray(c2) && c2.length >= 2) return [c2[0], c2[1]];
-  const c3 = payload?.centerCoordinate;
-  if (Array.isArray(c3) && c3.length >= 2) return [c3[0], c3[1]];
-  return null;
+const getCenterFromPayload = (payload: unknown): [number, number] | null => {
+  if (!isRecord(payload)) return null;
+  const geometry = isRecord(payload.geometry) ? payload.geometry : null;
+  const properties = isRecord(payload.properties) ? payload.properties : null;
+  return (
+    coordinatePairFromUnknown(geometry?.coordinates) ||
+    coordinatePairFromUnknown(properties?.center) ||
+    coordinatePairFromUnknown(payload.centerCoordinate)
+  );
 };
 
-const getZoomFromPayload = (payload: any): number | null => {
-  const zoom = Number(payload?.properties?.zoomLevel ?? payload?.zoomLevel ?? payload?.zoom);
+const getZoomFromPayload = (payload: unknown): number | null => {
+  if (!isRecord(payload)) return null;
+  const properties = isRecord(payload.properties) ? payload.properties : null;
+  const zoom = Number(properties?.zoomLevel ?? payload.zoomLevel ?? payload.zoom);
   return Number.isFinite(zoom) ? zoom : null;
 };
 
@@ -302,13 +354,14 @@ const hasOfficialSource = (sources: MonitoringOverlaySource[]): boolean =>
 
 const mapAiSourceToOverlayOfficiality = (
   source: {
-    officiality: 'OFFICIAL' | 'VERIFIED' | 'REFERENCE';
+    officiality?: 'OFFICIAL' | 'VERIFIED' | 'REFERENCE' | string;
     sourceClass?:
       | 'OFFICIAL'
       | 'TRUSTED_MEDIA'
       | 'TRUSTED_SOCIAL'
       | 'COMMUNITY'
-      | 'ESTIMATED';
+      | 'ESTIMATED'
+      | string;
   },
 ): MonitoringOverlaySource['officiality'] => {
   if (source.sourceClass === 'OFFICIAL') return 'OFFICIAL';
@@ -323,7 +376,7 @@ const mapAiSourceToOverlayOfficiality = (
 
 const formatRelativeAgeLabel = (
   updatedAt: string | undefined,
-  t: (key: string, options?: any) => string,
+  t: TranslationFn,
 ): string => {
   const parsedMs = Date.parse(String(updatedAt || ''));
   if (!Number.isFinite(parsedMs)) {
@@ -376,7 +429,7 @@ const sanitizeFeedText = (value: unknown): string => {
 const buildCasesDeathsSummary = (
   level: { cases?: unknown; deaths?: unknown } | null | undefined,
   locale: string,
-  t: (key: string, options?: any) => string,
+  t: TranslationFn,
 ): string => {
   if (!level) return '';
   const casesValue = parseCountValue(level.cases);
@@ -404,7 +457,7 @@ const normalizeTrustTier = (value: unknown): 'A' | 'B' | 'C' | '' => {
 };
 
 const buildSourceLabelWithTrust = (
-  t: (key: string, options?: any) => string,
+  t: TranslationFn,
   sourceName?: string,
   trustTier?: string,
 ): string => {
@@ -429,7 +482,7 @@ const buildPointsForAlerts = (alerts: AlertNotification[], categoryType: string)
   const features: PointFeature[] = [];
   alerts.forEach(alert => {
     if (categoryType !== 'all' && mapAlertToCategory(alert) !== categoryType) return;
-    const coord = extractAlertCoordinate(alert as any);
+    const coord = extractAlertCoordinate(alert);
     if (!coord) return;
     features.push({
       type: 'Feature',
@@ -468,7 +521,7 @@ const buildSosPoints = (
 
 const buildSinglePointCollection = (
   coordinate: { latitude: number; longitude: number } | null,
-  properties: Record<string, any> = {},
+  properties: Record<string, unknown> = {},
 ): FeatureCollection => {
   if (!coordinate) return EMPTY_FC;
   if (!Number.isFinite(coordinate.latitude) || !Number.isFinite(coordinate.longitude)) {
@@ -545,8 +598,8 @@ const buildAreaPolygonsFromPoints = (
 
 const buildSignalPoints = (signals: AlertSignal[]): FeatureCollection => {
   const features: PointFeature[] = signals
-    .filter(signal => signal?.geometry?.type === 'Point')
     .flatMap(signal => {
+      if (signal?.geometry?.type !== 'Point') return [];
       const coordinates = signal.geometry.coordinates;
       if (!Array.isArray(coordinates) || coordinates.length < 2) return [];
       const longitude = Number(coordinates[0]);
@@ -624,7 +677,7 @@ const AI_SIGNAL_COLOR = [
   'medium',
   '#FFCC00',
   '#4FC3F7',
-] as any;
+] as const;
 
 const AI_SIGNAL_RADIUS = [
   'match',
@@ -636,7 +689,7 @@ const AI_SIGNAL_RADIUS = [
   'medium',
   7,
   6,
-] as any;
+] as const;
 
 const colorForType = (type: string, primary: string) => {
   if (type === 'sos_nearby') return '#FFD600';
@@ -703,12 +756,12 @@ const FeedMapPage = ({
   colors,
   t,
   onBack,
-}: any) => {
+}: FeedMapPageProps) => {
   const { isDark } = useTheme();
   const insets = useSafeAreaInsets();
-  const cameraRef = useRef<any>(null);
-  const mapRef = useRef<any>(null);
-  const viewShotRef = useRef<any>(null);
+  const cameraRef = useRef<React.ElementRef<typeof MapLibreGL.Camera> | null>(null);
+  const mapRef = useRef<React.ElementRef<typeof MapLibreGL.MapView> | null>(null);
+  const viewShotRef = useRef<ViewShotCaptureRef | null>(null);
   const windScrollRef = useRef<ScrollView | null>(null);
   const pandemicScrollRef = useRef<ScrollView | null>(null);
   const mountedRef = useRef(true);
@@ -734,7 +787,9 @@ const FeedMapPage = ({
         : MAP_STYLE_DEFAULT,
     [baseMapMode, canUseSatellite],
   );
-  const [resolvedMapStyle, setResolvedMapStyle] = useState<any>(preferredMapStyle);
+  const [resolvedMapStyle, setResolvedMapStyle] = useState<MonitoringMapStyle>(
+    preferredMapStyle as MonitoringMapStyle,
+  );
   const [usingFallbackStyle, setUsingFallbackStyle] = useState(false);
   const [mapFailed, setMapFailed] = useState(false);
   const [data, setData] = useState<PageData>({
@@ -770,8 +825,6 @@ const FeedMapPage = ({
   const itemTitle = t(item.titleKey);
   const safeInitialScope: FeedScope =
     initialScope === 'STATE' || initialScope === 'COUNTRY' ? initialScope : 'CITY';
-  const monitoringDomain =
-    item.type === 'sos_nearby' ? 'SECURITY' : mapMonitoringEventToDomain(item.type);
   const aiCategory = item.type === 'sos_nearby' ? 'sos' : item.type;
   const autoRefreshMs = useMemo(() => {
     if (item.type === 'sos_nearby') return 20_000;
@@ -832,59 +885,32 @@ const FeedMapPage = ({
       }
 
       try {
-        const context = await AdminContextService.resolveFromLocation(
-          safeUserLocation.latitude,
-          safeUserLocation.longitude,
-          {
-            forceRefresh: force,
-            locale,
-          },
-        );
-
-        if (!context) {
-          return { sources: [], fallbackApplied: true, freshestAt: undefined };
-        }
-
-        const resolved = await OfficialSourcesResolver.resolveOfficialSources(context, [
-          monitoringDomain as any,
-        ]);
-        const targetLevel = SOURCE_LEVEL_BY_SCOPE[scope];
-        const scopedLevel =
-          resolved.levels.find(level => level.level === targetLevel) ||
-          resolved.levels[resolved.levels.length - 1];
-
-        if (!scopedLevel) {
-          return { sources: [], fallbackApplied: true, freshestAt: undefined };
-        }
-
-        const domainSources = scopedLevel.sources.filter(
-          source => source.monitoringDomain === monitoringDomain,
-        );
-        const chosen = (domainSources.length > 0 ? domainSources : scopedLevel.sources).slice(0, 3);
-        const fallbackApplied = Boolean(scopedLevel.fallbackApplied || domainSources.length === 0);
+        const resolved = await GetMonitoringFeedScopedSourcesQuery.execute({
+          latitude: safeUserLocation.latitude,
+          longitude: safeUserLocation.longitude,
+          locale,
+          monitoringType: item.type,
+          targetLevel: SOURCE_LEVEL_BY_SCOPE[scope],
+          force,
+        });
         const sources = dedupeOverlaySources(
-          chosen.map(source => ({
+          resolved.sources.map(source => ({
             name: sanitizeFeedText(source.name),
             url: source.url,
-            officiality:
-              source.officiality === 'OFFICIAL'
-                ? 'OFFICIAL'
-                : fallbackApplied
-                  ? 'REFERENCE'
-                  : 'VERIFIED',
+            officiality: source.officiality,
           })),
         );
 
         return {
           sources,
-          fallbackApplied,
-          freshestAt: scopedLevel.freshestAt || undefined,
+          fallbackApplied: resolved.fallbackApplied,
+          freshestAt: resolved.freshestAt,
         };
       } catch {
         return { sources: [], fallbackApplied: true, freshestAt: undefined };
       }
     },
-    [locale, monitoringDomain, safeUserLocation, scope],
+    [item.type, locale, safeUserLocation, scope],
   );
 
   const buildSnapshotVerifiedSummary = useCallback(
@@ -904,7 +930,7 @@ const FeedMapPage = ({
 
   const restoreContinuitySnapshot = useCallback(async (): Promise<PageData | null> => {
     try {
-      const continuity = await MonitoringContinuityStore.readSnapshot({
+      const continuity = await GetMonitoringFeedContinuitySnapshotQuery.read({
         eventType: item.type,
         scope,
         latitude: safeUserLocation?.latitude,
@@ -970,7 +996,7 @@ const FeedMapPage = ({
       if (nextData.loading) return;
       const hasSummary = String(nextData.summary || '').trim().length > 0;
       if (!hasSummary) return;
-      void MonitoringContinuityStore.saveSnapshot({
+      void GetMonitoringFeedContinuitySnapshotQuery.save({
         eventType: item.type,
         scope,
         latitude: safeUserLocation?.latitude,
@@ -1047,55 +1073,35 @@ const FeedMapPage = ({
       }
 
       try {
-        const [reports, monitoring, snapshot, pandemicTop3, scopedSources, aiSignals] = await Promise.all([
-          RiskReportService.getAll(),
-          item.type === 'sos_nearby' || isEpidemicType(item.type)
-            ? Promise.resolve(null)
-            : MonitoringService.getActiveEvents(
-                safeUserLocation.latitude,
-                safeUserLocation.longitude,
-                0.55,
-              ),
-          isEpidemicType(item.type)
-            ? EpidemicService.getSnapshot(
-                safeUserLocation.latitude,
-                safeUserLocation.longitude,
-                toEpidemicMode(item.type),
-                'all',
-                { force },
-              )
-            : Promise.resolve(null),
-          item.type === 'pandemic'
-            ? EventHubService.getHealthTopByLocation({
-                latitude: safeUserLocation.latitude,
-                longitude: safeUserLocation.longitude,
-                radiusKm: 45,
-              }).catch(() => [] as HealthTopItem[])
-            : Promise.resolve([] as HealthTopItem[]),
+        const [signalSnapshot, scopedSources] = await Promise.all([
+          GetMonitoringFeedSignalsQuery.execute({
+            latitude: safeUserLocation.latitude,
+            longitude: safeUserLocation.longitude,
+            itemType: item.type,
+            locale,
+            timeZone,
+            scope,
+            aiCategory,
+            alertAiEnabled,
+            force,
+          }),
           resolveScopedOfficialSources(force),
-          alertAiEnabled
-            ? AlertIntelligenceService.fetchRealtimeSignals({
-                latitude: safeUserLocation.latitude,
-                longitude: safeUserLocation.longitude,
-                locale,
-                timeZone,
-                category: aiCategory,
-                scope,
-                force,
-              })
-            : Promise.resolve([] as AlertSignal[]),
         ]);
+        const {
+          reports,
+          monitoring,
+          snapshot,
+          pandemicTop3,
+          aiSignals,
+          aiSummary,
+          aiTrustMeta,
+        } = signalSnapshot;
 
         if (!mountedRef.current) return;
 
         const syncCompletedAt = normalizeToIsoDateTime(new Date()) || new Date().toISOString();
         const sosPoints = buildSosPoints(reports, safeUserLocation, targetLocation);
         const aiSignalsNormalized = Array.isArray(aiSignals) ? aiSignals : [];
-        const aiSummary = AlertIntelligenceService.summarizeForUser(
-          aiSignalsNormalized,
-          locale,
-        );
-        const aiTrustMeta = AlertIntelligenceService.getTrustMeta(aiSignalsNormalized);
         const aiOverlaySources = dedupeOverlaySources(
           aiTrustMeta.sources.map(source => ({
             name: sanitizeFeedText(source.name),
@@ -1323,11 +1329,11 @@ const FeedMapPage = ({
                 t,
                 panelSourceName || panelSources[0],
                 normalizeTrustTier(
-                  (topAlert?.data as Record<string, any> | undefined)?.trustTier,
+                  (topAlert?.data as Record<string, unknown> | undefined)?.trustTier,
                 ),
               ),
               sourceTrustTier: normalizeTrustTier(
-                (topAlert?.data as Record<string, any> | undefined)?.trustTier,
+                (topAlert?.data as Record<string, unknown> | undefined)?.trustTier,
               ),
               sourceUrl: topAlert?.sourceUrl,
               updatedAt: normalizedPanelUpdatedAt || syncCompletedAt,
@@ -1393,7 +1399,7 @@ const FeedMapPage = ({
         const normalizedUpdatedAt = normalizeToIsoDateTime(filtered[0]?.timestamp);
         const sourceLineName = sourceNames.slice(0, 3).join(' | ');
         const primaryTrustTier = normalizeTrustTier(
-          (filtered[0]?.data as Record<string, any> | undefined)?.trustTier,
+          (filtered[0]?.data as Record<string, unknown> | undefined)?.trustTier,
         );
         const status =
           monitoring?.activeIds.has(item.type) || filtered.length > 0
@@ -1577,7 +1583,7 @@ const FeedMapPage = ({
     setCameraCenter(center);
   }, [hasUser, isFollowing, userLat, userLon]);
 
-  const onRegionDidChange = useCallback((payload: any) => {
+  const onRegionDidChange = useCallback((payload: unknown) => {
     const center = getCenterFromPayload(payload);
     if (center) {
       setCameraCenter(center);
@@ -1765,8 +1771,10 @@ const FeedMapPage = ({
         <Icon name={icon} size={18} color="#FFF" />
         <Text
           style={styles.railBtnText}
-          numberOfLines={1}
+          numberOfLines={2}
           ellipsizeMode="tail"
+          adjustsFontSizeToFit
+          minimumFontScale={0.78}
           allowFontScaling
           maxFontSizeMultiplier={ThemeTokens.Monitoring.railLabelMaxFontScale}
         >
@@ -2038,7 +2046,7 @@ const FeedMapPage = ({
     });
   }, []);
 
-  const onWindPanelScrollEnd = useCallback((event: any) => {
+  const onWindPanelScrollEnd = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const offsetX = Number(event?.nativeEvent?.contentOffset?.x || 0);
     const nextIndex = Math.max(0, Math.min(1, Math.round(offsetX / WIND_PANEL_PAGE_WIDTH)));
     if (nextIndex !== windPanelIndex) {
@@ -2084,7 +2092,7 @@ const FeedMapPage = ({
     });
   }, []);
 
-  const onPandemicScrollEnd = useCallback((event: any) => {
+  const onPandemicScrollEnd = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const offsetX = Number(event?.nativeEvent?.contentOffset?.x || 0);
     const nextIndex = Math.max(
       0,
@@ -2137,37 +2145,43 @@ const FeedMapPage = ({
         ) : null}
 
         {aiSignalPolygons.features.length > 0 ? (
-          <MapLibreGL.ShapeSource id={`ai-polygons-${item.id}`} shape={aiSignalPolygons as any}>
+          <MapLibreGL.ShapeSource
+            id={`ai-polygons-${item.id}`}
+            shape={toShapeSourceShape(aiSignalPolygons)}
+          >
             <MapLibreGL.FillLayer
               id={`ai-polygons-fill-${item.id}`}
-              style={{
+              style={fillLayerStyle({
                 fillColor: AI_SIGNAL_COLOR,
                 fillOpacity: 0.18,
                 fillAntialias: true,
-              } as any}
+              })}
             />
             <MapLibreGL.LineLayer
               id={`ai-polygons-line-${item.id}`}
-              style={{
+              style={lineLayerStyle({
                 lineColor: AI_SIGNAL_COLOR,
                 lineWidth: 1.4,
                 lineOpacity: 0.75,
-              } as any}
+              })}
             />
           </MapLibreGL.ShapeSource>
         ) : null}
 
         {aiSignalPoints.features.length > 0 ? (
-          <MapLibreGL.ShapeSource id={`ai-points-${item.id}`} shape={aiSignalPoints as any}>
+          <MapLibreGL.ShapeSource
+            id={`ai-points-${item.id}`}
+            shape={toShapeSourceShape(aiSignalPoints)}
+          >
             <MapLibreGL.CircleLayer
               id={`ai-points-core-${item.id}`}
-              style={{
+              style={circleLayerStyle({
                 circleColor: AI_SIGNAL_COLOR,
                 circleRadius: AI_SIGNAL_RADIUS,
                 circleStrokeColor: '#FFFFFF',
                 circleStrokeWidth: 1.2,
                 circleOpacity: 0.92,
-              } as any}
+              })}
             />
           </MapLibreGL.ShapeSource>
         ) : null}
@@ -2175,66 +2189,91 @@ const FeedMapPage = ({
         {officialAreaPolygons.features.length > 0 ? (
           <MapLibreGL.ShapeSource
             id={`official-areas-${item.id}`}
-            shape={officialAreaPolygons as any}
+            shape={toShapeSourceShape(officialAreaPolygons)}
           >
             <MapLibreGL.FillLayer
               id={`official-areas-fill-${item.id}`}
-              style={{
+              style={fillLayerStyle({
                 fillColor: dotColor,
                 fillOpacity: officialAreaOpacity,
                 fillAntialias: true,
-              } as any}
+              })}
             />
             <MapLibreGL.LineLayer
               id={`official-areas-line-${item.id}`}
-              style={{
+              style={lineLayerStyle({
                 lineColor: withAlpha(dotColor, 0.88),
                 lineWidth: 1.15,
                 lineOpacity: 0.72,
-              } as any}
+              })}
             />
           </MapLibreGL.ShapeSource>
         ) : null}
 
         {effectiveOfficialPoints.features.length > 0 ? (
-          <MapLibreGL.ShapeSource id={`official-${item.id}`} shape={effectiveOfficialPoints as any}>
+          <MapLibreGL.ShapeSource
+            id={`official-${item.id}`}
+            shape={toShapeSourceShape(effectiveOfficialPoints)}
+          >
             <MapLibreGL.CircleLayer
               id={`official-circles-${item.id}`}
-              style={{ circleColor: dotColor, circleRadius: 7, circleStrokeColor: '#fff', circleStrokeWidth: 1.2, circleOpacity: 0.92 } as any}
+              style={circleLayerStyle({
+                circleColor: dotColor,
+                circleRadius: 7,
+                circleStrokeColor: '#fff',
+                circleStrokeWidth: 1.2,
+                circleOpacity: 0.92,
+              })}
             />
           </MapLibreGL.ShapeSource>
         ) : null}
 
         {sosAreaPolygons.features.length > 0 ? (
-          <MapLibreGL.ShapeSource id={`sos-areas-${item.id}`} shape={sosAreaPolygons as any}>
+          <MapLibreGL.ShapeSource
+            id={`sos-areas-${item.id}`}
+            shape={toShapeSourceShape(sosAreaPolygons)}
+          >
             <MapLibreGL.FillLayer
               id={`sos-areas-fill-${item.id}`}
-              style={{
+              style={fillLayerStyle({
                 fillColor: '#FFD600',
                 fillOpacity: sosAreaOpacity,
                 fillAntialias: true,
-              } as any}
+              })}
             />
             <MapLibreGL.LineLayer
               id={`sos-areas-line-${item.id}`}
-              style={{
+              style={lineLayerStyle({
                 lineColor: 'rgba(255,214,0,0.9)',
                 lineWidth: 1.0,
                 lineOpacity: 0.68,
-              } as any}
+              })}
             />
           </MapLibreGL.ShapeSource>
         ) : null}
 
         {data.sosPoints.features.length > 0 ? (
-          <MapLibreGL.ShapeSource id={`sos-${item.id}`} shape={data.sosPoints as any}>
+          <MapLibreGL.ShapeSource
+            id={`sos-${item.id}`}
+            shape={toShapeSourceShape(data.sosPoints)}
+          >
             <MapLibreGL.CircleLayer
               id={`sos-halo-${item.id}`}
-              style={{ circleColor: 'rgba(255,214,0,0.22)', circleRadius: 16, circleOpacity: 0.9 } as any}
+              style={circleLayerStyle({
+                circleColor: 'rgba(255,214,0,0.22)',
+                circleRadius: 16,
+                circleOpacity: 0.9,
+              })}
             />
             <MapLibreGL.CircleLayer
               id={`sos-core-${item.id}`}
-              style={{ circleColor: '#FFD600', circleRadius: 8, circleStrokeColor: 'rgba(0,0,0,0.55)', circleStrokeWidth: 1.4, circleOpacity: 0.95 } as any}
+              style={circleLayerStyle({
+                circleColor: '#FFD600',
+                circleRadius: 8,
+                circleStrokeColor: 'rgba(0,0,0,0.55)',
+                circleStrokeWidth: 1.4,
+                circleOpacity: 0.95,
+              })}
             />
           </MapLibreGL.ShapeSource>
         ) : null}
@@ -2294,8 +2333,10 @@ const FeedMapPage = ({
           <Icon name="robot-outline" size={18} color="#FFF" />
           <Text
             style={styles.railBtnText}
-            numberOfLines={1}
+            numberOfLines={2}
             ellipsizeMode="tail"
+            adjustsFontSizeToFit
+            minimumFontScale={0.78}
             allowFontScaling
             maxFontSizeMultiplier={ThemeTokens.Monitoring.railLabelMaxFontScale}
           >
@@ -2314,8 +2355,10 @@ const FeedMapPage = ({
           <Icon name="share-variant" size={18} color="#FFF" />
           <Text
             style={styles.railBtnText}
-            numberOfLines={1}
+            numberOfLines={2}
             ellipsizeMode="tail"
+            adjustsFontSizeToFit
+            minimumFontScale={0.78}
             allowFontScaling
             maxFontSizeMultiplier={ThemeTokens.Monitoring.railLabelMaxFontScale}
           >
@@ -2342,8 +2385,10 @@ const FeedMapPage = ({
           )}
           <Text
             style={styles.railBtnText}
-            numberOfLines={1}
+            numberOfLines={2}
             ellipsizeMode="tail"
+            adjustsFontSizeToFit
+            minimumFontScale={0.78}
             allowFontScaling
             maxFontSizeMultiplier={ThemeTokens.Monitoring.railLabelMaxFontScale}
           >
@@ -2616,7 +2661,7 @@ const FeedMapPage = ({
   );
 };
 
-const MonitoringFeedScreen = ({ navigation, route }: any) => {
+const MonitoringFeedScreen = ({ navigation, route }: MonitoringFeedScreenProps) => {
   const { colors } = useTheme();
   const { securityState } = useSecurity();
   const { t, i18n } = useTranslation();
@@ -2654,7 +2699,7 @@ const MonitoringFeedScreen = ({ navigation, route }: any) => {
     () =>
       resolveTimeZone(
         typeof route?.params?.timeZone === 'string' ? route.params.timeZone : undefined,
-      ),
+      ) || 'UTC',
     [route?.params?.timeZone],
   );
   const securityLat =
@@ -2665,8 +2710,11 @@ const MonitoringFeedScreen = ({ navigation, route }: any) => {
     typeof securityState.location?.longitude === 'number'
       ? securityState.location.longitude
       : null;
-  const userLocation =
-    canUseLocationForRiskMaps(securityState) && isFiniteCoordinatePair(securityLat, securityLon)
+  const userLocation: MonitoringCoordinate | null =
+    canUseLocationForRiskMaps(securityState) &&
+    securityLat !== null &&
+    securityLon !== null &&
+    isFiniteCoordinatePair(securityLat, securityLon)
       ? { latitude: securityLat, longitude: securityLon }
       : null;
 
@@ -2702,7 +2750,7 @@ const MonitoringFeedScreen = ({ navigation, route }: any) => {
   }, []);
 
   useEffect(() => {
-    void RouteDestinationService.getDefaultDestination()
+    void GetDefaultRouteDestinationQuery.execute()
       .then(dest => {
         if (!dest) return;
         setTargetLocation({ latitude: dest.latitude, longitude: dest.longitude });
@@ -2892,7 +2940,7 @@ const styles = StyleSheet.create({
   },
   rail: {
     position: 'absolute',
-    width: 112,
+    width: 160,
     gap: ThemeTokens.Monitoring.railGap,
   },
   railLtr: {
@@ -2908,7 +2956,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.16)',
     backgroundColor: 'rgba(0,0,0,0.58)',
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
     paddingVertical: 8,
     flexDirection: 'row',
     alignItems: 'center',
@@ -3120,7 +3168,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     opacity: 0.28,
   },
-  watermarkLogo: { width: 24, height: 24 },
+  watermarkLogo: {
+    width: 24,
+    height: 24,
+    backgroundColor: 'transparent',
+    overflow: 'hidden',
+  },
   watermarkText: {
     color: '#FFF',
     fontSize: 11,

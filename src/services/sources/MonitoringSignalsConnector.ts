@@ -46,7 +46,16 @@ export const MonitoringSignalsConnector: AlertSignalsConnector = {
   },
   async fetchSignals(context) {
     const { latitude, longitude, category } = context;
-    const monitoring = await MonitoringService.getActiveEvents(latitude, longitude, 0.55);
+    const safeLatitude = Number(latitude);
+    const safeLongitude = Number(longitude);
+    if (!Number.isFinite(safeLatitude) || !Number.isFinite(safeLongitude)) {
+      return [];
+    }
+    const monitoring = await MonitoringService.getActiveEvents(
+      safeLatitude,
+      safeLongitude,
+      0.55,
+    );
     const targetCategory = String(category || '').trim().toLowerCase();
     const rows = Array.isArray(monitoring?.alerts) ? monitoring.alerts : [];
 
@@ -86,4 +95,3 @@ export const MonitoringSignalsConnector: AlertSignalsConnector = {
 };
 
 export default MonitoringSignalsConnector;
-

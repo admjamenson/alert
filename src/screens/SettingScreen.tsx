@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   Alert,
   BackHandler,
@@ -11,14 +11,22 @@ import {
   Platform,
   Image,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { CommonActions, useFocusEffect } from '@react-navigation/native';
-import { useTheme } from '../context/ThemeContext';
+import {SafeAreaView} from 'react-native-safe-area-context';
+import {CommonActions, useFocusEffect} from '@react-navigation/native';
+import {NativeStackScreenProps} from '@react-navigation/native-stack';
+import {useTheme} from '../context/ThemeContext';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { useTranslation } from 'react-i18next';
-import { ThemeTokens } from '../constants/ThemeTokens';
-import LocaleService, { LanguagePreference } from '../services/LocaleService';
-import { EntitlementService } from '../services/EntitlementService';
+import {useTranslation} from 'react-i18next';
+import {ThemeTokens} from '../constants/ThemeTokens';
+import {RootStackParamList} from '../navigation/types';
+import LocaleService, {LanguagePreference} from '../services/LocaleService';
+import {
+  getUserTemperaturePreference,
+  setUserTemperaturePreference,
+  TemperatureUnit,
+} from '../utils/measurementUnits';
+import {GetPremiumBillingStateQuery} from '../application/queries/GetPremiumBillingStateQuery';
+import {KyberNetworkService} from '../services/KyberNetworkService';
 import AdSlot from '../ads/AdSlot';
 import AlertLogo from '../assets/logo.png';
 import AppText from '../components/ui/AppText';
@@ -33,9 +41,20 @@ interface ThemeOptionProps {
   readonly icon: string;
   readonly label: string;
   readonly currentMode: string;
-  readonly colors: any;
+  readonly colors: ReturnType<typeof useTheme>['colors'];
   readonly onSelect: (mode: 'light' | 'dark' | 'system') => void;
 }
+
+interface TemperatureOptionProps {
+  readonly mode: TemperatureUnit | 'auto';
+  readonly icon: string;
+  readonly label: string;
+  readonly currentMode: TemperatureUnit | 'auto';
+  readonly colors: ReturnType<typeof useTheme>['colors'];
+  readonly onSelect: (mode: TemperatureUnit | 'auto') => void;
+}
+
+type Props = NativeStackScreenProps<RootStackParamList, 'Settings'>;
 
 const ThemeOption: React.FC<ThemeOptionProps> = ({
   mode,
@@ -57,8 +76,7 @@ const ThemeOption: React.FC<ThemeOptionProps> = ({
           borderColor: colors.primary,
         },
       ]}
-      onPress={() => onSelect(mode)}
-    >
+      onPress={() => onSelect(mode)}>
       <Icon
         name={icon}
         size={24}
@@ -67,10 +85,50 @@ const ThemeOption: React.FC<ThemeOptionProps> = ({
       <Text
         style={[
           styles.optionText,
-          { color: colors.text },
-          isActive && { color: colors.primary, fontWeight: '700' },
-        ]}
-      >
+          {color: colors.text},
+          isActive && {color: colors.primary, fontWeight: '700'},
+        ]}>
+        {label}
+      </Text>
+      {isActive && (
+        <Icon name="check-circle" size={20} color={colors.primary} />
+      )}
+    </TouchableOpacity>
+  );
+};
+
+const TemperatureOption: React.FC<TemperatureOptionProps> = ({
+  mode,
+  icon,
+  label,
+  currentMode,
+  colors,
+  onSelect,
+}) => {
+  const isActive = currentMode === mode;
+
+  return (
+    <TouchableOpacity
+      activeOpacity={0.7}
+      style={[
+        styles.optionButton,
+        isActive && {
+          backgroundColor: colors.primary + '15',
+          borderColor: colors.primary,
+        },
+      ]}
+      onPress={() => onSelect(mode)}>
+      <Icon
+        name={icon}
+        size={24}
+        color={isActive ? colors.primary : colors.textSecondary}
+      />
+      <Text
+        style={[
+          styles.optionText,
+          {color: colors.text},
+          isActive && {color: colors.primary, fontWeight: '700'},
+        ]}>
         {label}
       </Text>
       {isActive && (
@@ -113,8 +171,7 @@ const HeaderBackButton: React.FC<HeaderBackButtonProps> = ({
       accessibilityLabel={accessibilityLabel}
       accessibilityHint={accessibilityHint}
       hitSlop={ThemeTokens.SecurityMap.hitSlopDefault}
-      testID="settings-back-button"
-    >
+      testID="settings-back-button">
       <Icon
         name={iconName}
         size={iconSize}
@@ -125,11 +182,15 @@ const HeaderBackButton: React.FC<HeaderBackButtonProps> = ({
   );
 };
 
-const SettingScreen: React.FC = ({ navigation }: any) => {
-  const { themeMode, setThemeMode, colors } = useTheme();
-  const { t } = useTranslation();
-  const [languagePreference, setLanguagePreference] = useState<LanguagePreference>('system');
+const SettingScreen = ({navigation}: Props) => {
+  const {themeMode, setThemeMode, colors} = useTheme();
+  const {t} = useTranslation();
+  const [languagePreference, setLanguagePreference] =
+    useState<LanguagePreference>('system');
   const [selectedLanguageLabel, setSelectedLanguageLabel] = useState('');
+  const [userTempPreference, setUserTempPreferenceState] = useState<
+    TemperatureUnit | 'auto'
+  >('auto');
   const [isPremium, setIsPremium] = useState(false);
   const mountedRef = useRef(true);
 
@@ -160,11 +221,21 @@ const SettingScreen: React.FC = ({ navigation }: any) => {
     void syncLanguageLabel();
   }, [syncLanguageLabel]);
 
+  const syncTemperaturePreference = useCallback(async () => {
+    const stored = await getUserTemperaturePreference();
+    if (!mountedRef.current) return;
+    setUserTempPreferenceState(stored || 'auto');
+  }, []);
+
+  useEffect(() => {
+    void syncTemperaturePreference();
+  }, [syncTemperaturePreference]);
+
   const syncEntitlements = useCallback(async () => {
     try {
-      const entitlements = await EntitlementService.getEntitlements();
+      const billingState = await GetPremiumBillingStateQuery.execute();
       if (!mountedRef.current) return;
-      setIsPremium(entitlements.isPremium);
+      setIsPremium(billingState.premium);
     } catch {
       if (!mountedRef.current) return;
       setIsPremium(false);
@@ -178,18 +249,24 @@ const SettingScreen: React.FC = ({ navigation }: any) => {
   useEffect(() => {
     const unsubscribe = navigation.addListener?.('focus', () => {
       void syncLanguageLabel();
+      void syncTemperaturePreference();
       void syncEntitlements();
     });
     return () => {
       if (typeof unsubscribe === 'function') unsubscribe();
     };
-  }, [navigation, syncEntitlements, syncLanguageLabel]);
+  }, [
+    navigation,
+    syncEntitlements,
+    syncLanguageLabel,
+    syncTemperaturePreference,
+  ]);
 
   const handleOpenCrystalsKybesInfo = useCallback(() => {
     Alert.alert(
       t('settings_crystals_kybes_info_title'),
       t('settings_crystals_kybes_info_body'),
-      [{ text: t('settings_crystals_kybes_info_cta') }],
+      [{text: t('settings_crystals_kybes_info_cta')}],
     );
   }, [t]);
 
@@ -202,6 +279,15 @@ const SettingScreen: React.FC = ({ navigation }: any) => {
       // Ignore haptic failures to avoid blocking navigation.
     }
   }, []);
+
+  const handleSelectTemperatureUnit = useCallback(
+    async (unit: TemperatureUnit | 'auto') => {
+      triggerLightHaptic();
+      setUserTempPreferenceState(unit);
+      await setUserTemperaturePreference(unit);
+    },
+    [triggerLightHaptic],
+  );
 
   const handleBackPress = useCallback(() => {
     if (navigation?.canGoBack?.()) {
@@ -219,7 +305,7 @@ const SettingScreen: React.FC = ({ navigation }: any) => {
       navigation?.dispatch?.(
         CommonActions.reset({
           index: 0,
-          routes: [{ name: 'Home' }],
+          routes: [{name: 'Home'}],
         }),
       );
     } catch {
@@ -227,7 +313,7 @@ const SettingScreen: React.FC = ({ navigation }: any) => {
         navigation?.dispatch?.(
           CommonActions.reset({
             index: 0,
-            routes: [{ name: 'FastHome' }],
+            routes: [{name: 'FastHome'}],
           }),
         );
       } catch {
@@ -240,6 +326,28 @@ const SettingScreen: React.FC = ({ navigation }: any) => {
     triggerLightHaptic();
     handleBackPress();
   }, [handleBackPress, triggerLightHaptic]);
+
+  const crystalsKybesStatus = useMemo(() => {
+    const capabilities = KyberNetworkService.getCapabilityStatus();
+    const active =
+      capabilities.secureDispatch &&
+      capabilities.offlineQueue &&
+      capabilities.integrityProtection;
+
+    return {
+      active,
+      icon: active ? 'shield-check' : 'shield-alert-outline',
+      cardBackgroundColor: active ? colors.primary + '12' : colors.alert + '12',
+      subtitle: active
+        ? t('settings_system_running')
+        : t('settings_system_degraded'),
+      pillBackgroundColor: active ? colors.primary + '24' : colors.alert + '24',
+      pillColor: active ? colors.primary : colors.alert,
+      pillLabel: active
+        ? t('settings_alert_active')
+        : t('settings_system_limited'),
+    };
+  }, [colors.alert, colors.primary, t]);
 
   useFocusEffect(
     useCallback(() => {
@@ -263,9 +371,8 @@ const SettingScreen: React.FC = ({ navigation }: any) => {
 
   return (
     <SafeAreaView
-      style={[styles.container, { backgroundColor: colors.background }]}
-      edges={['top']}
-    >
+      style={[styles.container, {backgroundColor: colors.background}]}
+      edges={['top']}>
       <View style={styles.header}>
         <View style={styles.headerTitleRow}>
           <HeaderBackButton
@@ -280,9 +387,8 @@ const SettingScreen: React.FC = ({ navigation }: any) => {
               tone="default"
               accessibilityRole="header"
               accessibilityLabel={t('settings_title')}
-              style={[styles.headerTitle, { color: colors.text }]}
-              numberOfLines={1}
-            >
+              style={[styles.headerTitle, {color: colors.text}]}
+              numberOfLines={1}>
               {t('settings_title')}
             </AppText>
           </View>
@@ -290,63 +396,64 @@ const SettingScreen: React.FC = ({ navigation }: any) => {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        <View style={[styles.section, { backgroundColor: colors.surface }]}
-        >
-          <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>
+        <View style={[styles.section, {backgroundColor: colors.surface}]}>
+          <Text style={[styles.sectionHeader, {color: colors.textSecondary}]}>
             {t('settings_account_security')}
           </Text>
           <TouchableOpacity
             style={styles.linkRow}
-            onPress={() => navigation.navigate('Profile')}
-          >
+            onPress={() => navigation.navigate('Profile')}>
             <Icon name="account-circle" size={22} color={colors.text} />
-            <Text style={[styles.linkText, { color: colors.text }]}>
+            <Text style={[styles.linkText, {color: colors.text}]}>
               {t('settings_profile')}
             </Text>
             <Icon name="chevron-right" size={22} color={colors.textSecondary} />
           </TouchableOpacity>
-          <View style={[styles.separator, { backgroundColor: colors.border }]} />
+          <View style={[styles.separator, {backgroundColor: colors.border}]} />
           <TouchableOpacity
             style={styles.linkRow}
-            onPress={() => navigation.navigate('Guardians')}
-          >
+            onPress={() => navigation.navigate('Guardians')}>
             <Icon name="account-heart" size={22} color={colors.text} />
-            <Text style={[styles.linkText, { color: colors.text }]}>
+            <Text style={[styles.linkText, {color: colors.text}]}>
               {t('settings_guardians')}
             </Text>
             <Icon name="chevron-right" size={22} color={colors.textSecondary} />
           </TouchableOpacity>
-          <View style={[styles.separator, { backgroundColor: colors.border }]} />
+          <View style={[styles.separator, {backgroundColor: colors.border}]} />
           <TouchableOpacity
             style={styles.linkRow}
-            onPress={() => navigation.navigate('RouteSettings')}
-          >
+            onPress={() => navigation.navigate('RouteSettings')}>
             <Icon name="map-marker-path" size={22} color={colors.text} />
-            <Text style={[styles.linkText, { color: colors.text }]}>
+            <Text style={[styles.linkText, {color: colors.text}]}>
               {t('settings_route_default')}
             </Text>
             <Icon name="chevron-right" size={22} color={colors.textSecondary} />
           </TouchableOpacity>
-          <View style={[styles.separator, { backgroundColor: colors.border }]} />
+          <View style={[styles.separator, {backgroundColor: colors.border}]} />
           <TouchableOpacity
             style={[
               styles.linkRow,
               !isPremium && styles.premiumRowAttention,
-              !isPremium && { backgroundColor: colors.alert + '14', borderColor: colors.alert + '55' },
+              !isPremium && {
+                backgroundColor: colors.alert + '14',
+                borderColor: colors.alert + '55',
+              },
             ]}
-            onPress={() => navigation.navigate('Checkout')}
-          >
-            <Image source={AlertLogo} style={styles.premiumLogo} resizeMode="contain" />
+            onPress={() => navigation.navigate('Checkout')}>
+            <Image
+              source={AlertLogo}
+              style={styles.premiumLogo}
+              resizeMode="contain"
+            />
             <View style={styles.premiumRowTextWrap}>
-              <Text style={[styles.linkText, { color: colors.text }]}>
+              <Text style={[styles.linkText, {color: colors.text}]}>
                 {t('settings_alert_premium')}
               </Text>
               <Text
                 style={[
                   styles.premiumHint,
-                  { color: isPremium ? colors.textSecondary : colors.alert },
-                ]}
-              >
+                  {color: isPremium ? colors.textSecondary : colors.alert},
+                ]}>
                 {isPremium
                   ? t('settings_alert_premium_hint_active')
                   : t('settings_alert_premium_hint_free')}
@@ -354,22 +461,55 @@ const SettingScreen: React.FC = ({ navigation }: any) => {
             </View>
             <Icon name="chevron-right" size={22} color={colors.textSecondary} />
           </TouchableOpacity>
-          <View style={[styles.separator, { backgroundColor: colors.border }]} />
+          <View style={[styles.separator, {backgroundColor: colors.border}]} />
           <TouchableOpacity
             style={styles.linkRow}
-            onPress={() => navigation.navigate('History')}
-          >
+            onPress={() => navigation.navigate('History')}>
             <Icon name="history" size={22} color={colors.text} />
-            <Text style={[styles.linkText, { color: colors.text }]}>
+            <Text style={[styles.linkText, {color: colors.text}]}>
               {t('settings_history')}
             </Text>
             <Icon name="chevron-right" size={22} color={colors.textSecondary} />
           </TouchableOpacity>
         </View>
 
-        <View style={[styles.section, { backgroundColor: colors.surface }]}
-        >
-          <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>
+        <View style={[styles.section, {backgroundColor: colors.surface}]}>
+          <Text style={[styles.sectionHeader, {color: colors.textSecondary}]}>
+            {t('settings_temperature')}
+          </Text>
+
+          <TemperatureOption
+            mode="auto"
+            icon="thermostat-auto"
+            label={t('settings_temperature_auto')}
+            currentMode={userTempPreference}
+            colors={colors}
+            onSelect={handleSelectTemperatureUnit}
+          />
+          <View style={[styles.separator, {backgroundColor: colors.border}]} />
+
+          <TemperatureOption
+            mode="celsius"
+            icon="temperature-celsius"
+            label={t('settings_temperature_celsius')}
+            currentMode={userTempPreference}
+            colors={colors}
+            onSelect={handleSelectTemperatureUnit}
+          />
+          <View style={[styles.separator, {backgroundColor: colors.border}]} />
+
+          <TemperatureOption
+            mode="fahrenheit"
+            icon="temperature-fahrenheit"
+            label={t('settings_temperature_fahrenheit')}
+            currentMode={userTempPreference}
+            colors={colors}
+            onSelect={handleSelectTemperatureUnit}
+          />
+        </View>
+
+        <View style={[styles.section, {backgroundColor: colors.surface}]}>
+          <Text style={[styles.sectionHeader, {color: colors.textSecondary}]}>
             {t('settings_appearance')}
           </Text>
 
@@ -381,7 +521,7 @@ const SettingScreen: React.FC = ({ navigation }: any) => {
             colors={colors}
             onSelect={setThemeMode}
           />
-          <View style={[styles.separator, { backgroundColor: colors.border }]} />
+          <View style={[styles.separator, {backgroundColor: colors.border}]} />
 
           <ThemeOption
             mode="light"
@@ -391,7 +531,7 @@ const SettingScreen: React.FC = ({ navigation }: any) => {
             colors={colors}
             onSelect={setThemeMode}
           />
-          <View style={[styles.separator, { backgroundColor: colors.border }]} />
+          <View style={[styles.separator, {backgroundColor: colors.border}]} />
 
           <ThemeOption
             mode="dark"
@@ -406,51 +546,100 @@ const SettingScreen: React.FC = ({ navigation }: any) => {
         <View
           style={[
             styles.section,
-            { backgroundColor: colors.surface, marginTop: 24 },
-          ]}
-        >
-          <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>
+            {backgroundColor: colors.surface, marginTop: 24},
+          ]}>
+          <Text style={[styles.sectionHeader, {color: colors.textSecondary}]}>
             {t('settings_system')}
           </Text>
 
-          <TouchableOpacity
-            activeOpacity={0.85}
-            accessibilityRole="button"
-            accessibilityLabel={t('settings_crystals_kybes')}
-            accessibilityHint={t('settings_crystals_kybes_info_hint')}
-            onPress={handleOpenCrystalsKybesInfo}
-          >
-            <View style={[styles.systemStatusCard, { backgroundColor: colors.primary + '12' }]}>
+          {__DEV__ ? (
+            <>
+              <TouchableOpacity
+                style={styles.linkRow}
+                onPress={() => navigation.navigate('PopupValidation')}
+                accessibilityRole="button"
+                accessibilityLabel="Popup validation">
+                <Icon name="bug-check-outline" size={22} color={colors.text} />
+                <Text style={[styles.linkText, {color: colors.text}]}>
+                  Popup validation
+                </Text>
+                <Icon
+                  name="chevron-right"
+                  size={22}
+                  color={colors.textSecondary}
+                />
+              </TouchableOpacity>
+              <View
+                style={[
+                  styles.separator,
+                  {backgroundColor: colors.border, marginLeft: 16},
+                ]}
+              />
+            </>
+          ) : null}
+
+          <View
+            accessibilityRole="summary"
+            accessibilityLabel={t('settings_crystals_kybes')}>
+            <View
+              style={[
+                styles.systemStatusCard,
+                {backgroundColor: crystalsKybesStatus.cardBackgroundColor},
+              ]}>
               <View style={styles.systemStatusMain}>
-                <Icon name="shield-check" size={18} color={colors.primary} />
+                <Icon
+                  name={crystalsKybesStatus.icon}
+                  size={18}
+                  color={crystalsKybesStatus.pillColor}
+                />
                 <View style={styles.systemStatusTextWrap}>
-                  <Text style={[styles.systemStatusTitle, { color: colors.text }]}>
+                  <Text
+                    style={[styles.systemStatusTitle, {color: colors.text}]}>
                     {t('settings_crystals_kybes')}
                   </Text>
-                  <Text style={[styles.systemStatusSubtitle, { color: colors.textSecondary }]}>
-                    {t('settings_system_running')}
+                  <Text
+                    style={[
+                      styles.systemStatusSubtitle,
+                      {color: colors.textSecondary},
+                    ]}>
+                    {crystalsKybesStatus.subtitle}
                   </Text>
                 </View>
               </View>
-              <View style={[styles.systemStatusPill, { backgroundColor: colors.primary + '24' }]}>
-                <Text style={[styles.systemStatusPillText, { color: colors.primary }]}>
-                  {t('settings_alert_active')}
+              <View
+                style={[
+                  styles.systemStatusPill,
+                  {backgroundColor: crystalsKybesStatus.pillBackgroundColor},
+                ]}>
+                <Text
+                  style={[
+                    styles.systemStatusPillText,
+                    {color: crystalsKybesStatus.pillColor},
+                  ]}>
+                  {crystalsKybesStatus.pillLabel}
                 </Text>
               </View>
             </View>
-          </TouchableOpacity>
+          </View>
 
-          <Text style={[styles.infoLabel, { color: colors.text, marginLeft: 16, marginTop: 14 }]}>
+          <Text
+            style={[
+              styles.infoLabel,
+              {color: colors.text, marginLeft: 16, marginTop: 14},
+            ]}>
             {t('settings_language')}
           </Text>
           <TouchableOpacity
             activeOpacity={0.75}
-            style={[styles.languagePickerButton, { borderColor: colors.border }]}
-            onPress={() => navigation.navigate('LanguageSelector')}
-          >
+            style={[styles.languagePickerButton, {borderColor: colors.border}]}
+            onPress={() => navigation.navigate('LanguageSelector')}>
             <View style={styles.languagePickerLeft}>
-              <Icon name={languagePreference === 'system' ? 'web' : 'translate'} size={18} color={colors.textSecondary} />
-              <Text style={[styles.languagePickerText, { color: colors.text }]}>
+              <Icon
+                name={languagePreference === 'system' ? 'web' : 'translate'}
+                size={18}
+                color={colors.textSecondary}
+              />
+              <Text style={[styles.languagePickerText, {color: colors.text}]}>
                 {selectedLanguageLabel || t('settings_language_auto')}
               </Text>
             </View>
@@ -460,7 +649,7 @@ const SettingScreen: React.FC = ({ navigation }: any) => {
           <View
             style={[
               styles.separator,
-              { backgroundColor: colors.border, marginLeft: 16 },
+              {backgroundColor: colors.border, marginLeft: 16},
             ]}
           />
 
@@ -469,28 +658,46 @@ const SettingScreen: React.FC = ({ navigation }: any) => {
             onPress={() => navigation.navigate('AdPrivacy')}
             accessibilityRole="button"
             accessibilityLabel={t('settings_ads_privacy_title')}
-            accessibilityHint={t('settings_ads_privacy_hint')}
-          >
+            accessibilityHint={t('settings_ads_privacy_hint')}>
             <Icon name="shield-lock-outline" size={22} color={colors.text} />
-            <Text style={[styles.linkText, { color: colors.text }]}>
+            <Text style={[styles.linkText, {color: colors.text}]}>
               {t('settings_ads_privacy_title')}
             </Text>
             <Icon name="chevron-right" size={22} color={colors.textSecondary} />
           </TouchableOpacity>
-          <View style={[styles.separator, { backgroundColor: colors.border }]} />
+
+          <View
+            style={[
+              styles.separator,
+              {backgroundColor: colors.border, marginLeft: 16},
+            ]}
+          />
+          <TouchableOpacity
+            style={styles.linkRow}
+            onPress={() => navigation.navigate('LegalNotice')}
+            accessibilityRole="button"
+            accessibilityLabel={t('settings_legal_notice_title')}
+            accessibilityHint={t('settings_legal_notice_hint')}>
+            <Icon name="file-document-outline" size={22} color={colors.text} />
+            <Text style={[styles.linkText, {color: colors.text}]}>
+              {t('settings_legal_notice_title')}
+            </Text>
+            <Icon name="chevron-right" size={22} color={colors.textSecondary} />
+          </TouchableOpacity>
+          <View style={[styles.separator, {backgroundColor: colors.border}]} />
           <TouchableOpacity
             style={styles.linkRow}
             onPress={() => navigation.navigate('Support')}
             accessibilityRole="button"
             accessibilityLabel={t('settings_support_title')}
-            accessibilityHint={t('settings_support_hint')}
-          >
+            accessibilityHint={t('settings_support_hint')}>
             <Icon name="lifebuoy" size={22} color={colors.text} />
             <View style={styles.linkTextWrap}>
-              <Text style={[styles.linkText, { color: colors.text }]}>
+              <Text style={[styles.linkText, {color: colors.text}]}>
                 {t('settings_support_title')}
               </Text>
-              <Text style={[styles.linkSubtitle, { color: colors.textSecondary }]}>
+              <Text
+                style={[styles.linkSubtitle, {color: colors.textSecondary}]}>
                 {t('settings_support_subtitle')}
               </Text>
             </View>
@@ -500,13 +707,12 @@ const SettingScreen: React.FC = ({ navigation }: any) => {
 
         <AdSlot placementId="settings_inline_banner" screenId="Settings" />
       </ScrollView>
-
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
+  container: {flex: 1},
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -528,7 +734,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  scrollContent: { paddingHorizontal: 20, paddingBottom: 40 },
+  scrollContent: {paddingHorizontal: 20, paddingBottom: 40},
   headerTitleWrap: {
     flexShrink: 1,
     minWidth: 0,
@@ -602,6 +808,8 @@ const styles = StyleSheet.create({
   premiumLogo: {
     width: 34,
     height: 34,
+    backgroundColor: 'transparent',
+    overflow: 'hidden',
   },
   premiumRowAttention: {
     borderWidth: 1,
@@ -646,7 +854,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
   },
-  systemStatusTextWrap: { flex: 1 },
+  systemStatusTextWrap: {flex: 1},
   systemStatusTitle: {
     fontFamily: FONT_FAMILY,
     fontSize: ThemeTokens.typography.sizes.body,

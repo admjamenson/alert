@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { NativeModules, Platform, TurboModuleRegistry } from 'react-native';
 
 type GoogleMobileAdsSdk = {
   default?: () => { initialize?: () => Promise<unknown> | unknown } | null;
@@ -20,7 +20,19 @@ type GoogleMobileAdsSdk = {
 
 let cachedSdk: GoogleMobileAdsSdk | null | undefined;
 
-const shouldLoadNativeGoogleMobileAds = () => Platform.OS === 'ios';
+const hasNativeGoogleMobileAdsModule = () => {
+  const turboModule =
+    typeof TurboModuleRegistry?.get === 'function'
+      ? TurboModuleRegistry.get('RNGoogleMobileAdsModule')
+      : null;
+  const bridgedModule = (NativeModules as Record<string, unknown>)
+    ?.RNGoogleMobileAdsModule;
+  return Boolean(turboModule || bridgedModule);
+};
+
+const shouldLoadNativeGoogleMobileAds = () =>
+  (Platform.OS === 'ios' || Platform.OS === 'android') &&
+  hasNativeGoogleMobileAdsModule();
 
 export const getGoogleMobileAdsSdk = () => {
   if (!shouldLoadNativeGoogleMobileAds()) {

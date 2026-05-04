@@ -1,4 +1,4 @@
-import { APP_CONFIG } from '../core/config';
+import { getAlertApiBaseUrl } from '../core/config';
 import { AlertNotification } from '../types/notifications';
 import {
   formatUpdatedAtDisplay,
@@ -8,6 +8,7 @@ import {
   resolveLocale,
   resolveTimeZone,
 } from '../utils/dateTimeFormat';
+import { toUrlEncodedString } from '../utils/urlEncoding';
 import { EntitlementService } from './EntitlementService';
 import { CostGuard } from './cost/CostGuard';
 import CostPolicy from '../domain/cost/CostPolicy';
@@ -151,12 +152,7 @@ const typeToIcon: Record<string, string> = {
   wind_gust_50: 'weather-windy',
 };
 
-const getApiBaseUrl = () => {
-  const globalOverride = (globalThis as any)?.ALERT_API_URL || (globalThis as any)?.__ALERT_API_URL__;
-  const envOverride =
-    typeof process !== 'undefined' ? (process as any)?.env?.ALERT_API_URL : undefined;
-  return (globalOverride || envOverride || APP_CONFIG.API_BASE_URL || '').trim();
-};
+const getApiBaseUrl = () => getAlertApiBaseUrl();
 
 const fetchJsonWithTimeout = async (url: string, timeoutMs = 1800): Promise<any | null> => {
   const controller = typeof AbortController === 'function' ? new AbortController() : null;
@@ -465,16 +461,21 @@ export const EventHubService = {
       });
     };
 
-    const query = new URLSearchParams();
-    query.set('bbox', params.bbox);
-    if (params.types && params.types.length > 0) query.set('types', params.types.join(','));
-    if (params.since) query.set('since', params.since);
-    if (params.country) query.set('country', params.country);
-    if (Number.isFinite(params.limit as number)) query.set('limit', String(params.limit));
-    if (typeof params.sosPublicOptIn === 'boolean') {
-      query.set('sosPublicOptIn', params.sosPublicOptIn ? '1' : '0');
-    }
-    const cacheKey = query.toString();
+    const query = toUrlEncodedString({
+      bbox: params.bbox,
+      types:
+        params.types && params.types.length > 0 ? params.types.join(',') : undefined,
+      since: params.since,
+      country: params.country,
+      limit: Number.isFinite(params.limit as number) ? String(params.limit) : undefined,
+      sosPublicOptIn:
+        typeof params.sosPublicOptIn === 'boolean'
+          ? params.sosPublicOptIn
+            ? '1'
+            : '0'
+          : undefined,
+    });
+    const cacheKey = query;
     const cached = readEventsCache(cacheKey);
     if (cached) {
       await recordEventHubCost(true);
@@ -489,13 +490,15 @@ export const EventHubService = {
         },
       };
     }
-    const budget = await CostGuard.evaluate({
+
+    const decision = await CostGuard.evaluate({
       feature: 'eventhub.monitoring',
       provider: 'eventhub',
       tier,
       region,
     });
-    if (!budget.allow) {
+
+    if (!decision.allow) {
       return {
         unifiedEvents: [],
         mapEvents: [],
@@ -505,12 +508,14 @@ export const EventHubService = {
           failClosed: true,
           hubAvailable: false,
           cacheHit: false,
+          // note: we couldn't even reach the cache hit check for stale data if we wanted to be strict, 
+          // but here we already checked the fresh cache above.
         },
       };
     }
 
     const trimmedBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
-    const url = `${trimmedBase}/v1/events?${query.toString()}`;
+    const url = `${trimmedBase}/v1/events?${query}`;
     try {
       const json = (await fetchJsonWithTimeout(url, 1800)) as EventHubResponse | null;
       if (!json) {
@@ -618,25 +623,30 @@ export const EventHubService = {
     const radiusKm = Number.isFinite(params.radiusKm as number) ? Number(params.radiusKm) : 35;
     const bbox = buildBboxFromPoint(params.latitude, params.longitude, radiusKm);
 
-    const query = new URLSearchParams();
-    query.set('bbox', bbox);
-    if (params.country) query.set('country', params.country);
-    const cacheKey = query.toString();
+    const query = toUrlEncodedString({
+      bbox,
+      country: params.country,
+    });
+    const cacheKey = query;
     const cached = readHealthTopCache(cacheKey);
     if (cached) {
       await recordHealthCost(true);
       return cached.items;
     }
-    const budget = await CostGuard.evaluate({
+
+    const decision = await CostGuard.evaluate({
       feature: 'eventhub.monitoring',
       provider: 'eventhub',
       tier,
       region,
     });
-    if (!budget.allow) return [];
+
+    if (!decision.allow) {
+      return [];
+    }
 
     const trimmedBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
-    const url = `${trimmedBase}/v1/health/top?${query.toString()}`;
+    const url = `${trimmedBase}/v1/health/top?${query}`;
     const json = (await fetchJsonWithTimeout(url, 1800)) as HealthTopResponse | null;
     const rows = Array.isArray(json?.items) ? json.items : [];
     const items = rows

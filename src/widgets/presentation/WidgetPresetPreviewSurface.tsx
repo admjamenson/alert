@@ -308,6 +308,8 @@ const styles = StyleSheet.create({
     width: 18,
     height: 18,
     borderRadius: 4,
+    backgroundColor: 'transparent',
+    overflow: 'hidden',
   },
   brandText: {
     color: '#FFFFFF',
@@ -422,6 +424,8 @@ const styles = StyleSheet.create({
     width: 14,
     height: 14,
     borderRadius: 4,
+    backgroundColor: 'transparent',
+    overflow: 'hidden',
   },
   tickerBrandText: {
     color: '#FFFFFF',

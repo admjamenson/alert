@@ -17,7 +17,8 @@ import { useTheme } from '../../context/ThemeContext';
 import { useSecurity } from '../../context/SecurityContext';
 import { ThemeTokens } from '../../constants/ThemeTokens';
 import { MONITORING_EVENTS } from '../../constants/MonitoringEvents';
-import { EpidemicMode, EpidemicService, EpidemicSnapshot } from '../../services/EpidemicService';
+import { GetRealtimeInsightsSnapshotQuery } from '../../application/queries/GetRealtimeInsightsSnapshotQuery';
+import type { EpidemicMode, EpidemicSnapshot } from '../../services/EpidemicService';
 import { TelemetryService } from '../../services/TelemetryService';
 import { RealtimeSeriesChart, RealtimeSeriesPoint } from '../../components/realtime/RealtimeSeriesChart';
 import { RealtimeMapOverlayLayer } from '../../components/realtime/RealtimeMapOverlayLayer';
@@ -187,13 +188,20 @@ const RealtimeInsightsScreen = ({ navigation, route }: any) => {
       }
       try {
         const mode = toEpidemicMode(selectedCategory);
-        const snap = await EpidemicService.getSnapshot(
-          userLat,
-          userLon,
+        const snap = await GetRealtimeInsightsSnapshotQuery.execute({
+          latitude: userLat,
+          longitude: userLon,
           mode,
-          'all',
-          { force },
-        );
+          window: 'all',
+          force,
+        });
+        if (!snap) {
+          if (mountedRef.current) {
+            setSnapshot(null);
+            setError(t('common_try_again'));
+          }
+          return;
+        }
         if (!mountedRef.current) return;
         const completedAt = normalizeToIsoDateTime(new Date()) || new Date().toISOString();
         setSnapshot(snap);

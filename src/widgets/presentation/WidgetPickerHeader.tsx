@@ -64,6 +64,8 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 8,
+    backgroundColor: 'transparent',
+    overflow: 'hidden',
   },
   appName: {
     fontSize: 22,
@@ -76,4 +78,3 @@ const styles = StyleSheet.create({
     fontFamily: FONT_FAMILY,
   },
 });
-

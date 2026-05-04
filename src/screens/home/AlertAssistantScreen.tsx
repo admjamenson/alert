@@ -15,12 +15,14 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { getLocales } from 'react-native-localize';
 import { useTranslation } from 'react-i18next';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { GetAlertAssistantReplyQuery } from '../../application/queries/GetAlertAssistantReplyQuery';
 import { ThemeTokens } from '../../constants/ThemeTokens';
 import { useSecurity } from '../../context/SecurityContext';
 import { useTheme } from '../../context/ThemeContext';
 import { AlertAssistantReplyReadModel } from '../../domain/trust/AlertAssistant';
+import { RootStackParamList } from '../../navigation/types';
 import { resolveLocale, resolveTimeZone } from '../../utils/dateTimeFormat';
 import { detectAssistantLocale } from '../../utils/assistantLanguage';
 import {
@@ -40,7 +42,9 @@ type ChatMessage = {
   reply?: AlertAssistantReplyReadModel;
 };
 
-export const AlertAssistantScreen = ({ navigation }: any) => {
+type Props = NativeStackScreenProps<RootStackParamList, 'AlertAssistant'>;
+
+export const AlertAssistantScreen = ({ navigation }: Props) => {
   const { colors, isDark } = useTheme();
   const { securityState } = useSecurity();
   const { t, i18n } = useTranslation();
@@ -94,8 +98,8 @@ export const AlertAssistantScreen = ({ navigation }: any) => {
           question: trimmed,
           locale: effectiveLocale,
           timeZone,
-          latitude: hasPreciseLocation ? Number(latitude) : null,
-          longitude: hasPreciseLocation ? Number(longitude) : null,
+          latitude: hasPreciseLocation ? Number(latitude) : undefined,
+          longitude: hasPreciseLocation ? Number(longitude) : undefined,
         });
 
         setMessages(prev => [
@@ -239,14 +243,20 @@ export const AlertAssistantScreen = ({ navigation }: any) => {
           {reply?.trustLabel || reply?.updatedLabel ? (
             <View style={styles.metaRow}>
               {reply?.trustLabel ? (
-                <Text style={[styles.metaText, { color: colors.textSecondary }]}>
-                  {reply.trustLabel}
-                </Text>
+                <View style={styles.metaItem}>
+                  <Icon name="shield-check" size={13} color={colors.textSecondary} />
+                  <Text style={[styles.metaText, { color: colors.textSecondary }]}>
+                    {reply.trustLabel}
+                  </Text>
+                </View>
               ) : null}
               {reply?.updatedLabel ? (
-                <Text style={[styles.metaText, { color: colors.textSecondary }]}>
-                  {reply.updatedLabel}
-                </Text>
+                <View style={styles.metaItem}>
+                  <Icon name="clock-outline" size={13} color={colors.textSecondary} />
+                  <Text style={[styles.metaText, { color: colors.textSecondary }]}>
+                    {reply.updatedLabel}
+                  </Text>
+                </View>
               ) : null}
             </View>
           ) : null}
@@ -346,12 +356,14 @@ export const AlertAssistantScreen = ({ navigation }: any) => {
               <TextInput
                 value={input}
                 onChangeText={setInput}
-                placeholder=""
+                placeholder={t('assistant_input_placeholder')}
                 placeholderTextColor={colors.textSecondary}
                 style={[styles.input, { color: colors.text }]}
                 multiline
                 allowFontScaling
                 maxFontSizeMultiplier={ThemeTokens.typography.maxFontScale.body}
+                accessibilityLabel={t('assistant_input_placeholder')}
+                testID="alert-assistant-input"
               />
 
               <View style={styles.composerActionsRow}>
@@ -366,6 +378,9 @@ export const AlertAssistantScreen = ({ navigation }: any) => {
                       opacity: loading || !input.trim() ? 0.56 : 1,
                     },
                   ]}
+                  accessibilityRole="button"
+                  accessibilityLabel={actionLabel}
+                  testID="alert-assistant-send"
                 >
                   <Icon name="arrow-up" size={20} color="#FFFFFF" />
                   <Text style={styles.primaryActionText}>{actionLabel}</Text>
@@ -409,6 +424,8 @@ const styles = StyleSheet.create({
   topBrandIcon: {
     width: 26,
     height: 26,
+    backgroundColor: 'transparent',
+    overflow: 'hidden',
   },
   headerTitleWrap: {
     alignItems: 'center',
@@ -448,6 +465,8 @@ const styles = StyleSheet.create({
   emptyBrandMark: {
     width: 92,
     height: 92,
+    backgroundColor: 'transparent',
+    overflow: 'hidden',
   },
   emptyTitle: {
     fontSize: ThemeTokens.typography.sizes.title,
@@ -573,6 +592,11 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: ThemeTokens.spacing.md,
     marginTop: ThemeTokens.spacing.xs,
+  },
+  metaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   metaText: {
     fontSize: 12,

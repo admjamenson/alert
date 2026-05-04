@@ -6,17 +6,15 @@ import {
   FlatList,
   TouchableOpacity,
   Alert,
-  Modal,
-  Pressable,
   Platform,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useTheme } from '../../context/ThemeContext';
 import { AlertNotification, NotificationType, SosPayload, GuardianRequestPayload } from '../../types/notifications';
+import { GetRiskFeedQuery } from '../../application/queries/GetRiskFeedQuery';
 import { NotificationService } from '../../services/NotificationService';
 import { ImportantAlertsService } from '../../services/ImportantAlertsService';
-import { WeatherService } from '../../services/WeatherService';
 import { useSecurity } from '../../context/SecurityContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getLocales } from 'react-native-localize';
@@ -24,6 +22,7 @@ import { GuardianNetworkService } from '../../services/GuardianNetworkService';
 import { useTranslation } from 'react-i18next';
 import { ThemeTokens } from '../../constants/ThemeTokens';
 import { ImportantAlert } from '../../services/importantAlertUtils';
+import BasePopup from '../../components/ui/BasePopup';
 
 const typeIcon: Record<NotificationType, string> = {
   hazard: 'weather-lightning-rainy',
@@ -116,7 +115,11 @@ export const NotificationsScreen = ({ navigation }: any) => {
           : securityState.riskLevel === 'medium'
             ? 0.55
             : 0.2;
-      alerts = await WeatherService.getAlerts(lat, lon, riskScore);
+      alerts = await GetRiskFeedQuery.execute({
+        latitude: lat,
+        longitude: lon,
+        riskScore,
+      });
     }
 
     const centerState = await ImportantAlertsService.getState();
@@ -139,7 +142,8 @@ export const NotificationsScreen = ({ navigation }: any) => {
     }
 
     const combined = dedupeByIdKeepFirst([...importantItems, ...stored, ...alerts]).sort(
-      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+      (a, b) =>
+        new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime(),
     );
     setItems(combined);
     await Promise.all([
@@ -320,7 +324,7 @@ export const NotificationsScreen = ({ navigation }: any) => {
                   {item.summary}
                 </Text>
                 <Text style={[styles.cardTime, { color: colors.textSecondary }]}>
-                  {new Date(item.timestamp).toLocaleString(localeTag)}
+                  {new Date(item.timestamp || 0).toLocaleString(localeTag)}
                 </Text>
                 {item.type === 'guardian_request' && (
                   <View style={styles.guardianActions}>
@@ -347,57 +351,54 @@ export const NotificationsScreen = ({ navigation }: any) => {
         }}
       />
 
-      <Modal
+      <BasePopup
+        accessibilityLabel={selected?.title}
+        contentStyle={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+        maxWidth={540}
+        onClose={() => setDetailsVisible(false)}
+        placement="center"
         visible={detailsVisible && Boolean(selected)}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setDetailsVisible(false)}
       >
-        <Pressable style={styles.modalOverlay} onPress={() => setDetailsVisible(false)}>
-          <Pressable
-            style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}
-            onPress={() => {}}
+        <Text style={[styles.modalTitle, { color: colors.text }]}>{selected?.title}</Text>
+        <Text style={[styles.modalBody, { color: colors.textSecondary }]}>
+          {selected?.summary}
+        </Text>
+        <Text style={[styles.modalTime, { color: colors.textSecondary }]}>
+          {selected?.timestamp
+            ? new Date(selected.timestamp).toLocaleString(getLocales()?.[0]?.languageTag || 'pt-BR')
+            : ''}
+        </Text>
+        {selected?.sourceName ? (
+          <Text style={[styles.modalSource, { color: colors.textSecondary }]}>
+            {t('notifications_source_label', { name: selected.sourceName })}
+          </Text>
+        ) : null}
+        {selectedArea ? (
+          <Text style={[styles.modalSource, { color: colors.textSecondary }]}>
+            {t('notifications_area_label', { name: selectedArea })}
+          </Text>
+        ) : null}
+        <View style={styles.modalActions}>
+          {!selectedIsImportant ? (
+            <TouchableOpacity
+              accessibilityRole="button"
+              style={[styles.modalDelete, { borderColor: colors.alert }]}
+              onPress={() => selected && handleDelete(selected)}
+            >
+              <Text style={[styles.modalDeleteText, { color: colors.alert }]}>
+                {t('notifications_delete_confirm')}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+          <TouchableOpacity
+            accessibilityRole="button"
+            style={[styles.modalClose, { backgroundColor: colors.primary }]}
+            onPress={() => setDetailsVisible(false)}
           >
-            <Text style={[styles.modalTitle, { color: colors.text }]}>{selected?.title}</Text>
-            <Text style={[styles.modalBody, { color: colors.textSecondary }]}>
-              {selected?.summary}
-            </Text>
-            <Text style={[styles.modalTime, { color: colors.textSecondary }]}>
-              {selected?.timestamp
-                ? new Date(selected.timestamp).toLocaleString(getLocales()?.[0]?.languageTag || 'pt-BR')
-                : ''}
-            </Text>
-            {selected?.sourceName ? (
-              <Text style={[styles.modalSource, { color: colors.textSecondary }]}>
-                {t('notifications_source_label', { name: selected.sourceName })}
-              </Text>
-            ) : null}
-            {selectedArea ? (
-              <Text style={[styles.modalSource, { color: colors.textSecondary }]}>
-                {t('notifications_area_label', { name: selectedArea })}
-              </Text>
-            ) : null}
-            <View style={styles.modalActions}>
-              {!selectedIsImportant ? (
-                <TouchableOpacity
-                  style={[styles.modalDelete, { borderColor: colors.alert }]}
-                  onPress={() => selected && handleDelete(selected)}
-                >
-                  <Text style={[styles.modalDeleteText, { color: colors.alert }]}>
-                    {t('notifications_delete_confirm')}
-                  </Text>
-                </TouchableOpacity>
-              ) : null}
-              <TouchableOpacity
-                style={[styles.modalClose, { backgroundColor: colors.primary }]}
-                onPress={() => setDetailsVisible(false)}
-              >
-                <Text style={styles.modalCloseText}>{t('close')}</Text>
-              </TouchableOpacity>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
+            <Text style={styles.modalCloseText}>{t('close')}</Text>
+          </TouchableOpacity>
+        </View>
+      </BasePopup>
 
       {undoItem ? (
         <View
@@ -519,15 +520,9 @@ const styles = StyleSheet.create({
     letterSpacing: ThemeTokens.typography.letterSpacing.caption,
     fontFamily: FONT_FAMILY,
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    justifyContent: 'center',
-    padding: ThemeTokens.spacing.xl,
-  },
   modalCard: {
-    borderRadius: ThemeTokens.radius.lg,
-    padding: ThemeTokens.spacing.lg,
+    borderRadius: 28,
+    padding: ThemeTokens.spacing.xl,
     borderWidth: 1,
   },
   modalTitle: {
@@ -565,9 +560,9 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalDelete: {
-    height: 44,
+    minHeight: 50,
     paddingHorizontal: ThemeTokens.spacing.md,
-    borderRadius: ThemeTokens.radius.pill,
+    borderRadius: 15,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
@@ -580,9 +575,9 @@ const styles = StyleSheet.create({
     fontFamily: FONT_FAMILY,
   },
   modalClose: {
-    height: 44,
+    minHeight: 50,
     paddingHorizontal: ThemeTokens.spacing.md,
-    borderRadius: ThemeTokens.radius.pill,
+    borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -1,0 +1,17 @@
+<resources>
+    <color name="widget_bg">#0B1222</color>
+    <color name="widget_border">#1F2A44</color>
+    <color name="widget_text_primary">#FFFFFF</color>
+    <color name="widget_text_secondary">#A7B4CC</color>
+    <color name="widget_text_inverse">#FFFFFF</color>
+    <color name="widget_icon_tint">#6F7E97</color>
+    <color name="widget_ring">#57E06F</color>
+    <color name="widget_ring_yellow">#F5C542</color>
+    <color name="widget_ring_red">#E54040</color>
+    <color name="widget_pill">#2D7B3F</color>
+    <color name="widget_pill_yellow">#7A5A14</color>
+    <color name="widget_pill_red">#7A1E24</color>
+    <color name="widget_bar">#57E06F</color>
+    <color name="widget_bar_yellow">#F5C542</color>
+    <color name="widget_bar_red">#E54040</color>
+</resources>

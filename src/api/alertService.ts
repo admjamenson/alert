@@ -15,6 +15,7 @@ import {
   requestPermission,
 } from '@react-native-firebase/messaging';
 import { handleRemoteMessage } from '../services/PushNotificationService';
+import TelemetryService from '../services/TelemetryService';
 
 type RemoteMessage = FirebaseMessagingTypes.RemoteMessage;
 const messagingClient = getMessaging();
@@ -71,7 +72,11 @@ export const setupPushNotifications = async (): Promise<void> => {
         authStatus === AuthorizationStatus.PROVISIONAL;
 
       if (!enabled) {
-        throw new Error('Notification permission denied on iOS.');
+        TelemetryService.trackEvent('permission_notifications_unavailable', {
+          screen: 'startup',
+          platform: Platform.OS,
+        });
+        return;
       }
     }
 
@@ -107,11 +112,11 @@ export const setupPushNotifications = async (): Promise<void> => {
     }
   } catch (error) {
     console.error('[AlertService] Error configuring notifications:', error);
-    RNAlert.alert(
-      'Erro de notificacao',
-      'Nao foi possivel configurar as notificacoes agora. Tente novamente.',
-    );
-    throw error;
+    TelemetryService.trackEvent('push_setup_degraded', {
+      screen: 'startup',
+      platform: Platform.OS,
+      reason: error instanceof Error ? error.name : 'unknown',
+    });
   }
 };
 

@@ -5,7 +5,7 @@ import NetInfo, {
   NetInfoSubscription,
 } from '@react-native-community/netinfo';
 import CryptoJS from 'crypto-js';
-import { APP_CONFIG } from '../core/config';
+import { getAlertApiBaseUrl } from '../core/config';
 import {
   RelayMetricsSample,
   RelayMetricsState,
@@ -23,11 +23,7 @@ const RELAY_METRICS_KEY = '@Alert:StarlinkRelayMetricsV1';
 
 const RELAY_PING_TIMEOUT_MS = 3500;
 
-const getApiBaseUrl = () => {
-  const envOverride =
-    typeof process !== 'undefined' ? (process as any)?.env?.ALERT_API_URL : undefined;
-  return String(envOverride || APP_CONFIG.API_BASE_URL || '').trim();
-};
+const getApiBaseUrl = () => getAlertApiBaseUrl();
 
 const normalizeSsid = (ssid?: string | null) =>
   String(ssid || '')

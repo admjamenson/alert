@@ -8,7 +8,8 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useTranslation } from 'react-i18next';
 
@@ -24,11 +25,15 @@ const buildPrivateConversationId = (a: string, b: string) =>
   [a, b].sort((x, y) => x.localeCompare(y)).join('__');
 
 const PrivateReplyScreen: React.FC = () => {
-  const navigation = useNavigation<any>();
-  const route = useRoute();
+  const navigation =
+    useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const route = useRoute<RouteProp<RootStackParamList, 'PrivateReply'>>();
   const { colors } = useTheme();
   const { t } = useTranslation();
-  const params = (route.params || {}) as PrivateReplyRouteParams;
+  const params: PrivateReplyRouteParams = route.params || {};
+  const targetUserId = String(params.targetUserId || '').trim();
+  const targetUserName = params.targetUserName || t('messages_unknown');
+  const quote = params.quote as ChatReplyRef | undefined;
 
   const [me, setMe] = useState<{ id: string; name: string } | null>(null);
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
@@ -43,19 +48,19 @@ const PrivateReplyScreen: React.FC = () => {
   }, []);
 
   const conversationId = useMemo(() => {
-    if (!me?.id) return '';
-    return buildPrivateConversationId(me.id, params.targetUserId);
-  }, [me?.id, params.targetUserId]);
+    if (!me?.id || !targetUserId) return '';
+    return buildPrivateConversationId(me.id, targetUserId);
+  }, [me?.id, targetUserId]);
 
   useEffect(() => {
     if (!conversationId || !me?.id) return;
     void ChatThreadService.ensureConversation({
       conversationId,
       type: 'private',
-      title: params.targetUserName || t('messages_unknown'),
-      members: [me.id, params.targetUserId],
+      title: targetUserName,
+      members: [me.id, targetUserId],
     });
-  }, [conversationId, me?.id, params.targetUserId, params.targetUserName, t]);
+  }, [conversationId, me?.id, targetUserId, targetUserName, t]);
 
   useEffect(() => {
     if (!conversationId) return;
@@ -78,11 +83,11 @@ const PrivateReplyScreen: React.FC = () => {
       conversationId,
       type: 'text',
       text: trimmed,
-      replyTo: params.quote as ChatReplyRef | undefined,
+      replyTo: quote,
       conversation: {
-        title: params.targetUserName || t('messages_unknown'),
+        title: targetUserName,
         type: 'private',
-        members: [me.id, params.targetUserId],
+        members: [me.id, targetUserId],
       },
     });
     TelemetryService.trackEvent('chat_private_reply_send');
@@ -97,7 +102,7 @@ const PrivateReplyScreen: React.FC = () => {
         </TouchableOpacity>
         <View style={styles.headerMiddle}>
           <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
-            {params.targetUserName || t('messages_unknown')}
+            {targetUserName}
           </Text>
           <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
             {t('chat_private_reply')}
@@ -105,11 +110,11 @@ const PrivateReplyScreen: React.FC = () => {
         </View>
       </View>
 
-      {params.quote ? (
+      {quote ? (
         <View style={[styles.quoteCard, { borderColor: colors.border, backgroundColor: colors.card }]}>
-          <Text style={[styles.quoteTitle, { color: colors.primary }]}>{params.quote.senderName}</Text>
+          <Text style={[styles.quoteTitle, { color: colors.primary }]}>{quote.senderName}</Text>
           <Text style={[styles.quoteText, { color: colors.textSecondary }]} numberOfLines={2}>
-            {params.quote.preview}
+            {quote.preview}
           </Text>
         </View>
       ) : null}

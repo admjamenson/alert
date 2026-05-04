@@ -1,5 +1,6 @@
-const { EventHubService } = require('../eventHub/EventHubService');
-const { bboxFromPoint, nowIso } = require('../eventHub/utils');
+const {EventHubService} = require('../eventHub/EventHubService');
+const {bboxFromPoint, nowIso} = require('../eventHub/utils');
+const {createCacheStore} = require('../platform/cache/createCacheStore');
 
 const DEFAULT_RISK_FEED_TYPES = [
   'sos',
@@ -44,6 +45,139 @@ const MAX_RISK_FEED_CACHE_ENTRIES = Math.max(
   Number(process.env.ALERT_RISK_FEED_CACHE_MAX_ENTRIES || 250),
 );
 
+// Circuit breaker para evitar avalanche de requests
+const CIRCUIT_BREAKER_CONFIG = {
+  failureThreshold: Number(
+    process.env.ALERT_RISK_FEED_CB_FAILURE_THRESHOLD || 5,
+  ),
+  resetTimeout: Number(process.env.ALERT_RISK_FEED_CB_RESET_TIMEOUT || 30000),
+  monitoringPeriod: Number(
+    process.env.ALERT_RISK_FEED_CB_MONITORING_PERIOD || 60000,
+  ),
+};
+
+const circuitBreakerState = {
+  failures: 0,
+  lastFailureTime: 0,
+  state: 'CLOSED', // CLOSED, OPEN, HALF_OPEN
+  nextAttempt: 0,
+};
+
+const shouldAllowRequest = () => {
+  const now = Date.now();
+  if (circuitBreakerState.state === 'CLOSED') return true;
+  if (circuitBreakerState.state === 'OPEN') {
+    if (now >= circuitBreakerState.nextAttempt) {
+      circuitBreakerState.state = 'HALF_OPEN';
+      return true;
+    }
+    return false;
+  }
+  // HALF_OPEN: permite apenas 1 request de teste
+  return true;
+};
+
+const recordSuccess = () => {
+  circuitBreakerState.failures = 0;
+  circuitBreakerState.state = 'CLOSED';
+};
+
+const recordFailure = () => {
+  const now = Date.now();
+  circuitBreakerState.failures++;
+  circuitBreakerState.lastFailureTime = now;
+
+  if (circuitBreakerState.failures >= CIRCUIT_BREAKER_CONFIG.failureThreshold) {
+    circuitBreakerState.state = 'OPEN';
+    circuitBreakerState.nextAttempt = now + CIRCUIT_BREAKER_CONFIG.resetTimeout;
+    console.warn(
+      `[risk-feed] Circuit breaker OPENED after ${circuitBreakerState.failures} failures`,
+    );
+  }
+};
+
+// Cache Redis para safe mode / load test
+let riskFeedRedisCache = null;
+let riskFeedRedisCacheInitialized = false;
+
+const initRiskFeedRedisCache = () => {
+  if (riskFeedRedisCacheInitialized) return riskFeedRedisCache;
+  riskFeedRedisCacheInitialized = true;
+
+  // Apenas inicializar Redis em safe mode ou se explicitamente configurado
+  if (
+    process.env.ALERT_LOAD_TEST_SAFE_MODE !== 'true' &&
+    process.env.ALERT_RISK_FEED_REDIS_CACHE !== 'true'
+  ) {
+    return null;
+  }
+
+  try {
+    riskFeedRedisCache = createCacheStore({
+      name: 'risk-feed',
+      prefix: 'alert:risk-feed',
+      driver: 'redis',
+    });
+    console.log('[risk-feed] Redis cache initialized for safe mode');
+  } catch (error) {
+    console.warn(
+      '[risk-feed] Failed to initialize Redis cache, falling back to memory',
+      error?.message,
+    );
+    riskFeedRedisCache = null;
+  }
+  return riskFeedRedisCache;
+};
+
+// Métricas internas para observabilidade
+const RISK_FEED_METRICS = {
+  cacheHits: 0,
+  cacheMisses: 0,
+  cacheStaleHits: 0,
+  providerCalls: 0,
+  firestoreCalls: 0,
+  timeouts: 0,
+  errors: 0,
+  coalescedRequests: 0,
+  totalRequests: 0,
+  lastResetAt: Date.now(),
+};
+
+const incrementMetric = (key, value = 1) => {
+  if (RISK_FEED_METRICS[key] !== undefined) {
+    RISK_FEED_METRICS[key] += value;
+  }
+};
+
+const getRiskFeedMetrics = () => ({
+  ...RISK_FEED_METRICS,
+  cacheHitRate:
+    RISK_FEED_METRICS.totalRequests > 0
+      ? RISK_FEED_METRICS.cacheHits / RISK_FEED_METRICS.totalRequests
+      : 0,
+  uptimeMs: Date.now() - RISK_FEED_METRICS.lastResetAt,
+});
+
+const resetRiskFeedMetrics = () => {
+  RISK_FEED_METRICS.cacheHits = 0;
+  RISK_FEED_METRICS.cacheMisses = 0;
+  RISK_FEED_METRICS.cacheStaleHits = 0;
+  RISK_FEED_METRICS.providerCalls = 0;
+  RISK_FEED_METRICS.firestoreCalls = 0;
+  RISK_FEED_METRICS.timeouts = 0;
+  RISK_FEED_METRICS.errors = 0;
+  RISK_FEED_METRICS.coalescedRequests = 0;
+  RISK_FEED_METRICS.totalRequests = 0;
+  RISK_FEED_METRICS.lastResetAt = Date.now();
+};
+
+const recordRiskFeedUpstreamCall = db => {
+  incrementMetric('providerCalls');
+  if (db) {
+    incrementMetric('firestoreCalls');
+  }
+};
+
 const parseFiniteNumber = value => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
@@ -67,19 +201,32 @@ const readRiskFeedTimeoutMs = () => {
 };
 
 const readRiskFeedCacheTtlMs = () => {
+  // Em safe mode, usar TTL mais agressivo (15-60s)
+  if (process.env.ALERT_LOAD_TEST_SAFE_MODE === 'true') {
+    const parsed = Number(process.env.ALERT_RISK_FEED_CACHE_TTL_MS || 30_000);
+    return Number.isFinite(parsed)
+      ? Math.max(15_000, Math.round(parsed))
+      : 30_000;
+  }
   const parsed = Number(process.env.ALERT_RISK_FEED_CACHE_TTL_MS || 60_000);
   return Number.isFinite(parsed) ? Math.max(250, Math.round(parsed)) : 60_000;
 };
 
 const readRiskFeedStaleTtlMs = () => {
   const parsed = Number(process.env.ALERT_RISK_FEED_STALE_TTL_MS || 5 * 60_000);
-  return Number.isFinite(parsed) ? Math.max(readRiskFeedCacheTtlMs(), Math.round(parsed)) : 5 * 60_000;
+  return Number.isFinite(parsed)
+    ? Math.max(readRiskFeedCacheTtlMs(), Math.round(parsed))
+    : 5 * 60_000;
 };
 
 const readRiskFeedTypes = () => {
   const raw = String(process.env.ALERT_RISK_FEED_TYPES || '').trim();
   const items = (raw ? raw.split(',') : DEFAULT_RISK_FEED_TYPES)
-    .map(item => String(item || '').trim().toLowerCase())
+    .map(item =>
+      String(item || '')
+        .trim()
+        .toLowerCase(),
+    )
     .filter(Boolean);
   return Array.from(new Set(items));
 };
@@ -111,7 +258,31 @@ const pruneRiskFeedCache = () => {
   }
 };
 
-const readRiskFeedCacheEntry = key => {
+const readRiskFeedCacheEntry = async key => {
+  // Tentar Redis primeiro em safe mode
+  const redisCache = initRiskFeedRedisCache();
+  if (redisCache && typeof redisCache.getJson === 'function') {
+    try {
+      const cached = await redisCache.getJson(key);
+      if (cached) {
+        incrementMetric('cacheHits');
+        return {
+          payload: cached,
+          fresh: cached.fresh !== false,
+          source: 'redis',
+        };
+      }
+      incrementMetric('cacheMisses');
+    } catch (error) {
+      // Fallback para memória se Redis falhar
+      console.warn(
+        '[risk-feed] Redis cache read failed, using memory',
+        error?.message,
+      );
+    }
+  }
+
+  // Fallback para cache em memória
   const row = RISK_FEED_CACHE.get(key);
   if (!row) return null;
   const now = Date.now();
@@ -122,10 +293,22 @@ const readRiskFeedCacheEntry = key => {
   return {
     payload: cloneRiskFeedPayload(row.payload),
     fresh: row.expiresAt > now,
+    source: 'memory',
   };
 };
 
-const writeRiskFeedCacheEntry = (key, payload) => {
+const writeRiskFeedCacheEntry = async (key, payload) => {
+  // Escrever no Redis primeiro em safe mode
+  const redisCache = initRiskFeedRedisCache();
+  if (redisCache && typeof redisCache.setJson === 'function') {
+    try {
+      await redisCache.setJson(key, payload, readRiskFeedCacheTtlMs());
+    } catch (error) {
+      console.warn('[risk-feed] Redis cache write failed', error?.message);
+    }
+  }
+
+  // Também escrever no cache em memória (fallback)
   RISK_FEED_CACHE.delete(key);
   RISK_FEED_CACHE.set(key, {
     payload: cloneRiskFeedPayload(payload),
@@ -193,7 +376,9 @@ const toAlertNotification = event => {
     severity: riskLevelFromSeverity(event?.severity),
     data: {
       kind: 'event_hub',
-      eventType: String(event?.type || '').trim().toLowerCase(),
+      eventType: String(event?.type || '')
+        .trim()
+        .toLowerCase(),
       severity: String(event?.severity || ''),
       urgency: String(event?.urgency || ''),
       certainty: String(event?.certainty || ''),
@@ -220,7 +405,7 @@ const shouldPreAlert = (alerts, riskScore) => {
   );
 };
 
-const buildRiskFeedTimeoutPayload = ({ riskFeedTypes }) => ({
+const buildRiskFeedTimeoutPayload = ({riskFeedTypes}) => ({
   alerts: [],
   providers: [],
   preAlert: {
@@ -238,6 +423,64 @@ const buildRiskFeedTimeoutPayload = ({ riskFeedTypes }) => ({
     types: riskFeedTypes,
   },
 });
+
+// Safe mode: retorna payload sintético determinístico
+const buildSafeModePayload = ({riskFeedTypes, lat, lon}) => {
+  // Gera alerts sintéticos baseados na localização (determinístico)
+  const seed = Math.abs(Math.floor(lat * 1000 + lon * 100)) % 100;
+  const alerts = [];
+
+  // Gera 0-3 alerts sintéticos baseado no seed
+  const alertCount = seed % 4;
+  for (let i = 0; i < alertCount; i++) {
+    const typeIndex = (seed + i) % riskFeedTypes.length;
+    alerts.push({
+      id: `safe-${seed}-${i}`,
+      type: 'hazard',
+      title:
+        riskFeedTypes[typeIndex]
+          ?.replace(/_/g, ' ')
+          .replace(/\b\w/g, c => c.toUpperCase()) || 'Alert',
+      summary: 'Safe mode synthetic alert for load testing.',
+      timestamp: nowIso(),
+      sourceName: 'Alert Safe Mode',
+      severity: ['Minor', 'Moderate', 'Severe'][i % 3],
+      data: {
+        kind: 'safe_mode',
+        eventType: riskFeedTypes[typeIndex] || 'unknown',
+        location: {latitude: lat, longitude: lon},
+      },
+    });
+  }
+
+  return {
+    alerts,
+    providers: [
+      {
+        id: 'safe_mode',
+        name: 'Safe Mode Provider',
+        ok: true,
+      },
+    ],
+    preAlert: {
+      shouldNotify:
+        alerts.length > 0 && alerts.some(a => a.severity === 'Severe'),
+      reasonCodes: alerts.length > 0 ? ['safe_mode_alerts'] : [],
+    },
+    meta: {
+      generatedAt: nowIso(),
+      failClosed: true,
+      cacheHit: false,
+      hubAvailable: false,
+      degraded: false,
+      safeMode: true,
+      reason: 'safe_mode_synthetic',
+      types: riskFeedTypes,
+    },
+  };
+};
+
+const isSafeMode = () => process.env.ALERT_LOAD_TEST_SAFE_MODE === 'true';
 
 const buildRiskFeedStalePayload = ({
   cachedPayload,
@@ -265,9 +508,10 @@ const buildRiskFeedStalePayload = ({
 });
 
 const getRiskFeed = async (
-  { latitude, longitude, radiusKm, limit, riskScore, sosPublicOptIn },
-  { db } = {},
+  {latitude, longitude, radiusKm, limit, riskScore, sosPublicOptIn},
+  {db} = {},
 ) => {
+  incrementMetric('totalRequests');
   const lat = parseFiniteNumber(latitude);
   const lon = parseFiniteNumber(longitude);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
@@ -297,8 +541,9 @@ const getRiskFeed = async (
     sosPublicOptIn,
     riskFeedTypes,
   });
-  const cached = readRiskFeedCacheEntry(cacheKey);
+  const cached = await readRiskFeedCacheEntry(cacheKey);
   if (cached?.fresh) {
+    incrementMetric('cacheHits');
     return {
       ...cached.payload,
       preAlert: {
@@ -318,11 +563,14 @@ const getRiskFeed = async (
     };
   }
 
+  incrementMetric('cacheMisses');
+
   const existing = RISK_FEED_INFLIGHT.get(cacheKey);
   if (cached?.payload) {
     if (!existing) {
       const backgroundRefresh = (async () => {
         try {
+          recordRiskFeedUpstreamCall(db);
           const payload = await withTimeout(
             EventHubService.getEvents(
               {
@@ -359,7 +607,9 @@ const getRiskFeed = async (
           const notify = shouldPreAlert(alerts, riskScore);
           const result = {
             alerts,
-            providers: Array.isArray(payload?.providers) ? payload.providers : [],
+            providers: Array.isArray(payload?.providers)
+              ? payload.providers
+              : [],
             preAlert: {
               shouldNotify: notify,
               reasonCodes: notify ? ['elevated_risk_signal'] : [],
@@ -413,6 +663,7 @@ const getRiskFeed = async (
   }
 
   if (existing) {
+    incrementMetric('coalescedRequests');
     const payload = await existing;
     return {
       ...payload,
@@ -424,78 +675,133 @@ const getRiskFeed = async (
     };
   }
 
-  const request = (async () => {
-    const payload = await withTimeout(
-      EventHubService.getEvents(
-        {
-          bbox: [
-            bbox.minLon.toFixed(4),
-            bbox.minLat.toFixed(4),
-            bbox.maxLon.toFixed(4),
-            bbox.maxLat.toFixed(4),
-          ].join(','),
-          types: riskFeedTypes.join(','),
-          limit: clampLimit(limit),
-          sosPublicOptIn,
-        },
-        {
-          db,
-          providerIdsOverride: HOT_PATH_PROVIDER_IDS,
-        },
-      ),
-      readRiskFeedTimeoutMs(),
-    );
-
-    if (payload?.timedOut) {
-      if (cached?.payload) {
-        return {
-          ...cached.payload,
-          preAlert: {
-            shouldNotify: shouldPreAlert(cached.payload.alerts, riskScore),
-            reasonCodes: ['risk_feed_timeout_stale'],
-          },
-          meta: {
-            ...cached.payload.meta,
-            generatedAt: nowIso(),
-            cacheHit: true,
-            cacheLayer: 'risk_feed',
-            stale: true,
-            hubAvailable: false,
-            degraded: true,
-            reason: 'risk_feed_timeout_stale',
-            timeoutMs: readRiskFeedTimeoutMs(),
-            types: riskFeedTypes,
-          },
-        };
-      }
-      return buildRiskFeedTimeoutPayload({ riskFeedTypes });
-    }
-
-    const alerts = Array.isArray(payload?.events)
-      ? payload.events.map(toAlertNotification).filter(alert => alert.id)
-      : [];
-    const notify = shouldPreAlert(alerts, riskScore);
-
-    const result = {
-      alerts,
-      providers: Array.isArray(payload?.providers) ? payload.providers : [],
+  // SAFE MODE HARD OVERRIDE: Não chamar EventHubService em safe mode
+  // Retorna payload sintético determinístico e cacheia
+  if (isSafeMode()) {
+    const safePayload = buildSafeModePayload({riskFeedTypes, lat, lon});
+    // Cacheia o payload safe mode para próximas requisições
+    await writeRiskFeedCacheEntry(cacheKey, {
+      ...safePayload,
+      meta: {
+        ...safePayload.meta,
+        generatedAt: nowIso(),
+        cacheHit: false,
+        hubAvailable: false,
+        safeMode: true,
+      },
+    });
+    recordSuccess();
+    return {
+      ...safePayload,
       preAlert: {
-        shouldNotify: notify,
-        reasonCodes: notify ? ['elevated_risk_signal'] : [],
+        shouldNotify: shouldPreAlert(safePayload.alerts, riskScore),
+        reasonCodes: shouldPreAlert(safePayload.alerts, riskScore)
+          ? ['elevated_risk_signal']
+          : [],
       },
       meta: {
-        generatedAt: payload?.meta?.generatedAt || nowIso(),
-        failClosed: Boolean(payload?.meta?.failClosed ?? true),
-        cacheHit: Boolean(payload?.meta?.cacheHit),
-        cacheLayer: payload?.meta?.cacheHit ? payload?.meta?.cacheDriver || 'event_hub' : 'none',
-        hubAvailable: true,
+        ...safePayload.meta,
+        generatedAt: nowIso(),
+        cacheHit: false,
+        cacheLayer: 'safe_mode',
         stale: false,
         coalesced: false,
-        types: riskFeedTypes,
       },
     };
-    writeRiskFeedCacheEntry(cacheKey, result);
-    return result;
+  }
+
+  // Verificar circuit breaker antes de fazer request ao provider
+  if (!shouldAllowRequest()) {
+    incrementMetric('timeouts');
+    recordFailure();
+    if (cached?.payload) {
+      return buildRiskFeedStalePayload({
+        cachedPayload: cached.payload,
+        riskFeedTypes,
+        reason: 'circuit_breaker_open',
+        riskScore,
+      });
+    }
+    return buildRiskFeedTimeoutPayload({riskFeedTypes});
+  }
+
+  const request = (async () => {
+    try {
+      recordRiskFeedUpstreamCall(db);
+      const payload = await withTimeout(
+        EventHubService.getEvents(
+          {
+            bbox: [
+              bbox.minLon.toFixed(4),
+              bbox.minLat.toFixed(4),
+              bbox.maxLon.toFixed(4),
+              bbox.maxLat.toFixed(4),
+            ].join(','),
+            types: riskFeedTypes.join(','),
+            limit: clampLimit(limit),
+            sosPublicOptIn,
+          },
+          {
+            db,
+            providerIdsOverride: HOT_PATH_PROVIDER_IDS,
+          },
+        ),
+        readRiskFeedTimeoutMs(),
+      );
+
+      if (payload?.timedOut) {
+        if (cached?.payload) {
+          return buildRiskFeedStalePayload({
+            cachedPayload: cached.payload,
+            riskFeedTypes,
+            reason: 'risk_feed_timeout_stale',
+            riskScore,
+          });
+        }
+        return buildRiskFeedTimeoutPayload({riskFeedTypes});
+      }
+
+      const alerts = Array.isArray(payload?.events)
+        ? payload.events.map(toAlertNotification).filter(alert => alert.id)
+        : [];
+      const notify = shouldPreAlert(alerts, riskScore);
+
+      const result = {
+        alerts,
+        providers: Array.isArray(payload?.providers) ? payload.providers : [],
+        preAlert: {
+          shouldNotify: notify,
+          reasonCodes: notify ? ['elevated_risk_signal'] : [],
+        },
+        meta: {
+          generatedAt: payload?.meta?.generatedAt || nowIso(),
+          failClosed: Boolean(payload?.meta?.failClosed ?? true),
+          cacheHit: Boolean(payload?.meta?.cacheHit),
+          cacheLayer: payload?.meta?.cacheHit
+            ? payload?.meta?.cacheDriver || 'event_hub'
+            : 'none',
+          hubAvailable: true,
+          stale: false,
+          coalesced: false,
+          types: riskFeedTypes,
+        },
+      };
+      writeRiskFeedCacheEntry(cacheKey, result);
+      recordSuccess();
+      return result;
+    } catch (error) {
+      incrementMetric('errors');
+      recordFailure();
+      if (cached?.payload) {
+        return buildRiskFeedStalePayload({
+          cachedPayload: cached.payload,
+          riskFeedTypes,
+          reason: 'risk_feed_error_fallback',
+          riskScore,
+        });
+      }
+      return buildRiskFeedTimeoutPayload({riskFeedTypes});
+    }
   })();
 
   RISK_FEED_INFLIGHT.set(cacheKey, request);
@@ -512,8 +818,11 @@ module.exports = {
   readRiskFeedStaleTtlMs,
   readRiskFeedTimeoutMs,
   readRiskFeedTypes,
+  getRiskFeedMetrics,
+  resetRiskFeedMetrics,
   __dangerousResetRiskFeedCacheForTests: () => {
     RISK_FEED_CACHE.clear();
     RISK_FEED_INFLIGHT.clear();
+    resetRiskFeedMetrics();
   },
 };

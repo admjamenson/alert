@@ -1,5 +1,10 @@
 {
   "extends": "@react-native/typescript-config/tsconfig.json",
+  "compilerOptions": {
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    "noFallthroughCasesInSwitch": true
+  },
   "exclude": [
     "_cmake_test",
     "__tests__",

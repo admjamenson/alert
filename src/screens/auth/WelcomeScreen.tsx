@@ -18,10 +18,15 @@ import { useTheme } from '../../context/ThemeContext';
 import { AppModal } from '../../components/ui/AppModal';
 import { ThemeTokens } from '../../constants/ThemeTokens';
 import AppText from '../../components/ui/AppText';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { RootStackParamList } from '../../navigation/types';
+
+type Props = NativeStackScreenProps<RootStackParamList, 'Welcome'>;
 
 const ONBOARDING_KEY = '@Alert:OnboardingComplete';
 
-const WelcomeScreen = ({ navigation }: any) => {
+const WelcomeScreen = ({ navigation }: Props) => {
   const { t } = useTranslation();
   const { colors, themeMode } = useTheme();
   const [modalVisible, setModalVisible] = useState(false);
@@ -39,6 +44,7 @@ const WelcomeScreen = ({ navigation }: any) => {
       ? t('settings_language_pt')
       : t('settings_language_en');
   const systemLangLabel = t('settings_language_system', { lang: deviceLangLabel });
+  const [termsAccepted, setTermsAccepted] = useState(false);
 
   const openModal = (type: 'privacy' | 'terms') => {
     setModalContent(type);
@@ -290,17 +296,41 @@ const WelcomeScreen = ({ navigation }: any) => {
             </View>
 
             <TouchableOpacity
+              style={[styles.complianceRow]}
+              activeOpacity={0.7}
+              onPress={() => setTermsAccepted(!termsAccepted)}
+            >
+              <View
+                style={[
+                  styles.checkbox,
+                  { borderColor: termsAccepted ? colors.primary : colors.border },
+                  termsAccepted && { backgroundColor: colors.primary },
+                ]}
+              >
+                {termsAccepted && <Icon name="check" size={14} color="#FFFFFF" />}
+              </View>
+              <AppText variant="caption1" tone="secondary" style={styles.complianceText}>
+                {t('legal_terms_acceptance_label')}
+              </AppText>
+            </TouchableOpacity>
+
+            <TouchableOpacity
               style={[
                 styles.button,
-                { backgroundColor: colors.primary },
+                {
+                  backgroundColor: colors.primary,
+                  opacity: termsAccepted ? 1 : 0.5,
+                },
                 ThemeTokens.shadows.soft.ios,
               ]}
               onPress={async () => {
+                if (!termsAccepted) return;
                 triggerLightHaptic();
                 await AsyncStorage.setItem(ONBOARDING_KEY, 'true');
                 navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
               }}
               activeOpacity={0.8}
+              disabled={!termsAccepted}
             >
               <AppText variant="button" tone="inverse" style={styles.buttonText}>
                 {t('welcome_enter_now')}
@@ -309,12 +339,14 @@ const WelcomeScreen = ({ navigation }: any) => {
 
             <TouchableOpacity
               onPress={async () => {
+                if (!termsAccepted) return;
                 triggerLightHaptic();
                 await AsyncStorage.setItem(ONBOARDING_KEY, 'true');
                 navigation.navigate('Login');
               }}
               activeOpacity={0.7}
-              style={styles.linkButton}
+              style={[styles.linkButton, { opacity: termsAccepted ? 1 : 0.5 }]}
+              disabled={!termsAccepted}
             >
               <AppText
                 variant="body"
@@ -373,7 +405,12 @@ const styles = StyleSheet.create({
     paddingVertical: ThemeTokens.spacing.xxxl,
   },
   imageContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  logoImage: { width: 220, height: 220 },
+  logoImage: {
+    width: 220,
+    height: 220,
+    backgroundColor: 'transparent',
+    overflow: 'hidden',
+  },
   textSection: { alignItems: 'center', width: '100%', marginBottom: 20 },
   title: { marginBottom: ThemeTokens.spacing.md, textAlign: 'center' },
   termsContainer: { paddingHorizontal: 10, marginTop: 8 },
@@ -422,6 +459,25 @@ const styles = StyleSheet.create({
   },
   languageText: {},
   languageTextActive: {},
+  complianceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: ThemeTokens.spacing.lg,
+    paddingHorizontal: 10,
+    gap: 12,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  complianceText: {
+    flex: 1,
+    lineHeight: 18,
+  },
 });
 
 export default WelcomeScreen;

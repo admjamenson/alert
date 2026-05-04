@@ -1,4 +1,4 @@
-import { APP_CONFIG } from '../../core/config';
+import { getAlertApiBaseUrl } from '../../core/config';
 import { UserIdentityService } from '../UserIdentityService';
 import type { ChatMessageType, ChatReplyRef } from '../ChatThreadService';
 
@@ -40,11 +40,7 @@ export type ChatSyncMessageDTO = {
   deletedAtMs?: number | null;
 };
 
-const getApiBaseUrl = () => {
-  const envOverride =
-    typeof process !== 'undefined' ? (process as any)?.env?.ALERT_API_URL : undefined;
-  return String(envOverride || APP_CONFIG.API_BASE_URL || '').trim();
-};
+const getApiBaseUrl = () => getAlertApiBaseUrl();
 
 const toQuery = (params: Record<string, string | number | undefined | null>) => {
   const query = Object.entries(params)

@@ -84,6 +84,14 @@ export const ensureAnonymousAuth = async (): Promise<boolean> => {
   return authEnsureInFlight;
 };
 
+export const getAnonymousAuthStatus = () => ({
+  enabled: APP_CONFIG.AUTH_ANONYMOUS_ENABLED,
+  hasCurrentUser: Boolean(authClient.currentUser),
+  hasCurrentUserId: Boolean(authClient.currentUser?.uid),
+  blockedForSession: authAnonymousUnavailableForSession,
+  blockedUntilMs: authBlockedUntilMs,
+});
+
 export const __resetAnonymousAuthStateForTests = () => {
   authEnsureInFlight = null;
   authLastAttemptMs = 0;

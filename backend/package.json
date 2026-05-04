@@ -10,10 +10,10 @@
     "verify:epidemic": "node scripts/verify-epidemic-data.js",
     "doctor:billing": "node scripts/check-billing-infra.js",
     "test:runtime": "node src/config/runtime.test.js",
-    "test:billing": "node src/billing/runBillingChecks.js",
+    "test:billing": "node src/billing/runBillingChecks.js && node src/billing/costEngine.test.js && node src/billing/billingUsageRepository.test.js && node src/billing/registerStripeBilling.test.js",
     "test:routing": "node src/config/runtime.test.js && node src/eventHub/adapters/routingOsrmAdapter.test.js && node src/services/RouteOptionsService.test.js && node src/routes/registerMapsRoutes.test.js",
     "test:http": "node src/http/errorContract.test.js",
-    "test:ops": "node src/eventHub/fetcher.test.js && node src/eventHub/EventHubService.test.js && node src/eventHub/adapters/meteoAdapter.test.js && node src/eventHub/adapters/routingOsrmAdapter.test.js && node src/eventHub/adapters/weatherFeedOpenMeteoAdapter.test.js && node src/scale/InMemoryJobQueue.test.js && node src/scale/BullMqJobQueue.test.js && node src/platform/cache/CacheStore.test.js && node src/services/EntitlementSnapshotService.test.js && node src/services/SosFanoutDispatcher.test.js && node src/services/SosFanoutDeliveryProof.test.js && node src/services/createSosFanoutQueue.test.js && node src/services/RiskFeedService.test.js && node src/routes/registerMapsRoutes.test.js && node src/observability/guardianSosOperationalLogger.test.js && node src/observability/relaySosOperationalLogger.test.js && node src/release/releasePolicy.test.js",
+    "test:ops": "node src/eventHub/fetcher.test.js && node src/eventHub/EventHubService.test.js && node src/eventHub/adapters/meteoAdapter.test.js && node src/eventHub/adapters/routingOsrmAdapter.test.js && node src/eventHub/adapters/weatherFeedOpenMeteoAdapter.test.js && node src/scale/InMemoryJobQueue.test.js && node src/scale/BullMqJobQueue.test.js && node src/platform/cache/CacheStore.test.js && node src/services/EntitlementSnapshotService.test.js && node src/services/SosFanoutDispatcher.test.js && node src/services/SosFanoutDeliveryProof.test.js && node src/services/createSosFanoutQueue.test.js && node src/services/RiskFeedService.test.js && node src/routes/registerMapsRoutes.test.js && node src/observability/guardianSosOperationalLogger.test.js && node src/observability/relaySosOperationalLogger.test.js && node src/observability/requestMetricTracker.test.js && node src/release/releasePolicy.test.js",
     "test:release": "node src/release/releasePolicy.test.js",
     "release:gate": "node scripts/release-gate.js",
     "load:local": "node scripts/load-local.js",
@@ -24,7 +24,11 @@
     "worker:sos-fanout": "node scripts/sos-fanout-worker.js",
     "economics:model": "node scripts/unit-economics-model.js",
     "economics:guardrail": "node scripts/economics-guardrail.js",
-    "test:economics": "node src/economics/unitEconomics.test.js && node src/economics/priceBook.test.js"
+    "test:economics": "node src/economics/unitEconomics.test.js && node src/economics/priceBook.test.js",
+    "load:cheap": "node scripts/load-smoke-cheap.js",
+    "scale:check": "node scripts/check-scale-readiness.js",
+    "scale:foundation:check": "node scripts/check-30m-foundation.js",
+    "load:mixed:30m:foundation": "node scripts/load-mixed-30m-foundation.js"
   },
   "dependencies": {
     "@msgpack/msgpack": "^3.1.3",

@@ -2,10 +2,52 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 apply plugin: "com.google.gms.google-services"
+apply plugin: "com.google.firebase.crashlytics"
 apply from: file("../../node_modules/react-native-vector-icons/fonts.gradle")
+apply from: project(":react-native-config").projectDir.getPath() + "/dotenv.gradle"
 
 def alertBundleDebugJs =
     (project.findProperty("alertBundleDebugJs") ?: "true").toString().toBoolean()
+
+def alertReleaseSigningPropertiesFile = rootProject.file("keystore.properties")
+def alertReleaseSigningProperties = new Properties()
+if (alertReleaseSigningPropertiesFile.exists()) {
+    alertReleaseSigningPropertiesFile.withInputStream { alertReleaseSigningProperties.load(it) }
+}
+
+def alertReleaseSigningValue = { String key ->
+    def gradlePropertyName = "alertRelease${key.capitalize()}"
+    def envName = "ALERT_RELEASE_${key.replaceAll(/([A-Z])/, '_$1').toUpperCase()}"
+    return project.findProperty(gradlePropertyName)
+        ?: alertReleaseSigningProperties.getProperty(key)
+        ?: System.getenv(envName)
+}
+
+def alertResolveReleaseStoreFile = { String path ->
+    def moduleRelativeFile = file(path)
+    return moduleRelativeFile.exists() ? moduleRelativeFile : rootProject.file(path)
+}
+
+def alertReleaseStoreFile = alertReleaseSigningValue("storeFile")
+def alertReleaseStorePassword = alertReleaseSigningValue("storePassword")
+def alertReleaseKeyAlias = alertReleaseSigningValue("keyAlias")
+def alertReleaseKeyPassword = alertReleaseSigningValue("keyPassword")
+def alertReleaseSigningReady = [
+    alertReleaseStoreFile,
+    alertReleaseStorePassword,
+    alertReleaseKeyAlias,
+    alertReleaseKeyPassword,
+].every { it != null && it.toString().trim() }
+
+def alertRequireReleaseSigning =
+    (project.findProperty("alertRequireReleaseSigning")
+        ?: System.getenv("ALERT_REQUIRE_RELEASE_SIGNING")
+        ?: "false").toString().toBoolean()
+
+def alertDebugUseReleaseSigning =
+    (project.findProperty("alertDebugUseReleaseSigning")
+        ?: System.getenv("ALERT_DEBUG_USE_RELEASE_SIGNING")
+        ?: "false").toString().toBoolean()
 
 /**
  * This is the configuration block to customize your React Native Android app.
@@ -96,10 +138,12 @@ android {
     namespace "com.company.alert"
     defaultConfig {
         applicationId "com.company.alert"
+        resValue "string", "build_config_package", "com.company.alert"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0"
+        buildConfigField "boolean", "BUNDLED_DEBUG_JS", alertBundleDebugJs.toString()
         ndk {
             abiFilters "armeabi-v7a", "arm64-v8a"
         }
@@ -111,15 +155,23 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            if (alertReleaseSigningReady) {
+                storeFile alertResolveReleaseStoreFile(alertReleaseStoreFile.toString())
+                storePassword alertReleaseStorePassword.toString()
+                keyAlias alertReleaseKeyAlias.toString()
+                keyPassword alertReleaseKeyPassword.toString()
+            }
+        }
     }
     buildTypes {
         debug {
-            signingConfig signingConfigs.debug
+            signingConfig alertDebugUseReleaseSigning && alertReleaseSigningReady
+                ? signingConfigs.release
+                : signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            signingConfig alertReleaseSigningReady ? signingConfigs.release : signingConfigs.debug
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
@@ -134,6 +186,8 @@ android {
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
+    implementation platform("com.google.firebase:firebase-bom:33.9.0")
+    implementation("com.google.firebase:firebase-crashlytics")
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")
@@ -148,4 +202,26 @@ afterEvaluate {
         .configureEach {
             dependsOn("copyReactNativeVectorIconFonts")
         }
+}
+
+tasks.register("validateAlertReleaseSigning") {
+    doLast {
+        if (!alertReleaseSigningReady) {
+            throw new GradleException(
+                "Release signing is not configured. Provide storeFile, storePassword, keyAlias and keyPassword " +
+                    "via android/keystore.properties, -PalertRelease*, or ALERT_RELEASE_* environment variables."
+            )
+        }
+    }
+}
+
+gradle.taskGraph.whenReady { taskGraph ->
+    def releaseArtifactRequested = taskGraph.allTasks.any {
+        it.path in [":app:assembleRelease", ":app:bundleRelease", ":app:installRelease"]
+    }
+    if (alertRequireReleaseSigning && releaseArtifactRequested && !alertReleaseSigningReady) {
+        throw new GradleException(
+            "Store-ready release signing was required, but release signing credentials are not configured."
+        )
+    }
 }

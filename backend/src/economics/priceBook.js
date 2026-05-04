@@ -3,8 +3,32 @@
 const fs = require('node:fs');
 
 const TRUSTED_STRICT_ORIGINS = new Set(['real', 'estimated_reliable']);
+const ORIGIN_PRIORITY = {
+  absent: 0,
+  modeled: 1,
+  estimated_reliable: 2,
+  real: 3,
+};
 
 const COST_DEFINITIONS = [
+  {
+    key: 'queueRedisMonthlyUsd',
+    label: 'queue_redis_monthly',
+    defaultValue: 0,
+    required: true,
+  },
+  {
+    key: 'cacheRedisMonthlyUsd',
+    label: 'cache_redis_monthly',
+    defaultValue: 0,
+    required: true,
+  },
+  {
+    key: 'workerComputeMonthlyUsd',
+    label: 'worker_compute_monthly',
+    defaultValue: 0,
+    required: true,
+  },
   {
     key: 'feedServingCostUsd',
     label: 'feed_serving',
@@ -18,15 +42,22 @@ const COST_DEFINITIONS = [
     required: true,
   },
   {
-    key: 'weatherProviderMissCostUsd',
+    key: 'weatherMissCostUsd',
     label: 'weather_miss',
     defaultValue: 0.0009,
     required: true,
+    aliases: ['weatherProviderMissCostUsd'],
   },
   {
     key: 'mapSessionCostUsd',
     label: 'maps',
     defaultValue: 0.00003,
+    required: true,
+  },
+  {
+    key: 'routingCostUsd',
+    label: 'routing',
+    defaultValue: 0.00004,
     required: true,
   },
   {
@@ -36,10 +67,11 @@ const COST_DEFINITIONS = [
     required: true,
   },
   {
-    key: 'pushCostUsd',
-    label: 'push',
+    key: 'pushFanoutCostUsd',
+    label: 'push_fanout',
     defaultValue: 0.00001,
     required: true,
+    aliases: ['pushCostUsd'],
   },
   {
     key: 'queueJobCostUsd',
@@ -60,15 +92,23 @@ const COST_DEFINITIONS = [
     required: true,
   },
   {
-    key: 'storageGbMonthCostUsd',
+    key: 'storageCostUsd',
     label: 'storage',
     defaultValue: 0.026,
     required: true,
+    aliases: ['storageGbMonthCostUsd'],
   },
   {
-    key: 'backendRequestCostUsd',
-    label: 'backend_serving',
+    key: 'webServingCostUsd',
+    label: 'web_serving',
     defaultValue: 0.000004,
+    required: true,
+    aliases: ['backendRequestCostUsd'],
+  },
+  {
+    key: 'backgroundWorkerExecutionCostUsd',
+    label: 'background_worker_execution',
+    defaultValue: 0.000003,
     required: true,
   },
   {
@@ -78,20 +118,32 @@ const COST_DEFINITIONS = [
     required: true,
   },
   {
-    key: 'paymentProcessorFixedUsd',
+    key: 'paymentProcessorFixedFeeUsd',
     label: 'payment_processor_fixed',
     defaultValue: 0.3,
     required: true,
+    aliases: ['paymentProcessorFixedUsd'],
   },
   {
     key: 'appStoreFeePercent',
-    label: 'store_fee_percent',
+    label: 'app_store_fee_percent',
+    defaultValue: 0.15,
+    required: true,
+  },
+  {
+    key: 'playStoreFeePercent',
+    label: 'play_store_fee_percent',
     defaultValue: 0.15,
     required: true,
   },
 ];
 
 const COST_KEYS = COST_DEFINITIONS.map(definition => definition.key);
+const LEGACY_COST_ALIASES = Object.fromEntries(
+  COST_DEFINITIONS.flatMap(definition =>
+    (definition.aliases || []).map(alias => [alias, definition.key]),
+  ),
+);
 const REQUIRED_COST_KEYS = COST_DEFINITIONS.filter(definition => definition.required).map(
   definition => definition.key,
 );
@@ -129,11 +181,12 @@ const normalizeOrigin = (value, fallback = 'modeled') => {
 const readCostContainer = input =>
   input && typeof input === 'object' && input.costs ? input.costs : input;
 
-const parseCostEntry = ({ definition, raw, source, path }) => {
+const parseCostEntry = ({ definition, raw, source, path, sourceKey }) => {
   if (typeof raw === 'number') {
     if (!Number.isFinite(raw) || raw < 0) return null;
     return {
       key: definition.key,
+      sourceKey: sourceKey || definition.key,
       label: definition.label,
       value: raw,
       origin: source === 'model_defaults' ? 'modeled' : 'estimated_reliable',
@@ -147,25 +200,24 @@ const parseCostEntry = ({ definition, raw, source, path }) => {
 
   if (!raw || typeof raw !== 'object') return null;
 
+  const origin = normalizeOrigin(
+    raw.origin || raw.classification || raw.sourceType,
+    source === 'model_defaults' ? 'modeled' : 'estimated_reliable',
+  );
   const value = Number(raw.value ?? raw.amountUsd ?? raw.costUsd ?? raw.rate);
-  if (!Number.isFinite(value) || value < 0) return null;
-
-  const fallbackOrigin =
-    source === 'model_defaults' ? 'modeled' : 'estimated_reliable';
+  if ((!Number.isFinite(value) || value < 0) && origin !== 'absent') return null;
 
   return {
     key: definition.key,
+    sourceKey: sourceKey || definition.key,
     label: definition.label,
-    value,
-    origin: normalizeOrigin(
-      raw.origin || raw.classification || raw.sourceType,
-      fallbackOrigin,
-    ),
+    value: Number.isFinite(value) && value >= 0 ? value : 0,
+    origin,
     source: raw.source || source,
     path: path || null,
-    evidence: raw.evidence || raw.invoice || raw.note || null,
+    evidence: raw.evidence || raw.invoice || raw.note || raw.notes || null,
     required: definition.required,
-    status: 'provided',
+    status: origin === 'absent' ? 'absent' : 'provided',
   };
 };
 
@@ -194,12 +246,15 @@ const parseProvidedEntries = ({ input, source, path }) => {
 
   return COST_DEFINITIONS.reduce(
     (acc, definition) => {
-      if (!(definition.key in container)) return acc;
+      const candidateKeys = [definition.key, ...(definition.aliases || [])];
+      const sourceKey = candidateKeys.find(key => key in container);
+      if (!sourceKey) return acc;
       const parsed = parseCostEntry({
         definition,
-        raw: container[definition.key],
+        raw: container[sourceKey],
         source,
         path,
+        sourceKey,
       });
       if (!parsed) {
         acc.invalidCostKeys.push(definition.key);
@@ -220,6 +275,306 @@ const summarizeByOrigin = classifications =>
     return acc;
   }, {});
 
+const addCompatibilityAliases = values => {
+  const next = { ...values };
+  Object.entries(LEGACY_COST_ALIASES).forEach(([alias, canonical]) => {
+    if (canonical in next && !(alias in next)) {
+      next[alias] = next[canonical];
+    }
+  });
+  return next;
+};
+
+const weakestOrigin = (...values) =>
+  values
+    .map(value => normalizeOrigin(value, 'absent'))
+    .reduce(
+      (weakest, current) =>
+        ORIGIN_PRIORITY[current] < ORIGIN_PRIORITY[weakest]
+          ? current
+          : weakest,
+      'real',
+    );
+
+const getStructuredValue = (input, pathSegments) => {
+  if (!input || typeof input !== 'object') return undefined;
+  return pathSegments.reduce((current, segment) => {
+    if (!current || typeof current !== 'object') return undefined;
+    return current[segment];
+  }, input);
+};
+
+const parseStructuredClassifiedNumber = ({
+  raw,
+  pathSegments,
+}) => {
+  const structuredPath = pathSegments.join('.');
+
+  if (typeof raw === 'number') {
+    return Number.isFinite(raw) && raw >= 0
+      ? {
+          value: raw,
+          origin: 'estimated_reliable',
+          evidence: null,
+          path: structuredPath,
+        }
+      : {
+          value: null,
+          origin: 'absent',
+          evidence: `invalid_numeric_value:${structuredPath}`,
+          path: structuredPath,
+        };
+  }
+
+  if (!raw || typeof raw !== 'object') {
+    return {
+      value: null,
+      origin: 'absent',
+      evidence: `missing_structured_value:${structuredPath}`,
+      path: structuredPath,
+    };
+  }
+
+  const origin = normalizeOrigin(
+    raw.origin || raw.classification || raw.sourceType,
+    raw.value === null || typeof raw.value === 'undefined'
+      ? 'absent'
+      : 'estimated_reliable',
+  );
+  const value = Number(raw.value ?? raw.amountUsd ?? raw.costUsd ?? raw.rate);
+
+  if ((!Number.isFinite(value) || value < 0) && origin !== 'absent') {
+    return {
+      value: null,
+      origin: 'absent',
+      evidence: `invalid_structured_value:${structuredPath}`,
+      path: structuredPath,
+    };
+  }
+
+  return {
+    value: Number.isFinite(value) && value >= 0 ? value : null,
+    origin,
+    evidence: raw.evidence || raw.invoice || raw.note || raw.notes || null,
+    path: structuredPath,
+  };
+};
+
+const MONTHLY_INFRASTRUCTURE_DEFINITIONS = [
+  {
+    key: 'queueRedisMonthlyUsd',
+    path: ['monthlyInfrastructure', 'queueRedisMonthlyUsd'],
+  },
+  {
+    key: 'cacheRedisMonthlyUsd',
+    path: ['monthlyInfrastructure', 'cacheRedisMonthlyUsd'],
+  },
+  {
+    key: 'workerComputeMonthlyUsd',
+    path: ['monthlyInfrastructure', 'workerComputeMonthlyUsd'],
+  },
+  {
+    key: 'webServingMonthlyUsd',
+    path: ['monthlyInfrastructure', 'webServingMonthlyUsd'],
+  },
+];
+
+const DEFAULT_BILLING_ECONOMIC_POLICY = Object.freeze({
+  sampleWindow: 'calendar_month_utc',
+  tiers: {
+    free: {
+      targetCostCapPercent: 0.2,
+    },
+    premium: {
+      targetCostCapPercent: 0.3,
+    },
+  },
+  lowSampleProtection: {
+    minObservedActiveUsers: 100,
+    minTotalSuccessfulCalls: 1000,
+  },
+  sharedPlatformAllocation: {
+    rateioFormula:
+      'sharedMonthlyInfrastructureUsd / max(observedActiveUsers, minObservedActiveUsers)',
+    classificationBelowThreshold: 'estimated_reliable',
+  },
+  requestMarginalCostFallback: {
+    rateioFormula:
+      'fixed_platform_cost_stays_in_platformAllocationCost; use_marginal_request_proxy_when_external_provider_unit_cost_is_absent',
+    routingCostUsdPerCall: {
+      value: 0.000004,
+      classification: 'modeled',
+      evidence:
+        'Modeled marginal backend serving proxy for routing requests. Keep modeled until measured or invoice-backed per-request cost exists for the active routing path.',
+      source: 'alert_unit_economics_marginal_proxy',
+    },
+    weatherCostUsdPerCall: {
+      value: 0.000004,
+      classification: 'modeled',
+      evidence:
+        'Modeled marginal backend serving proxy for weather requests. Keep modeled until measured or invoice-backed per-request cost exists for the active weather path.',
+      source: 'alert_unit_economics_marginal_proxy',
+    },
+  },
+});
+
+const readMonthlyInfrastructureSnapshot = priceBook => {
+  const document =
+    priceBook && typeof priceBook === 'object' && priceBook.document
+      ? priceBook.document
+      : null;
+
+  const entries = MONTHLY_INFRASTRUCTURE_DEFINITIONS.map(definition => {
+    const raw = getStructuredValue(document, definition.path);
+    const parsed = parseStructuredClassifiedNumber({
+      raw,
+      pathSegments: definition.path,
+    });
+    return {
+      key: definition.key,
+      ...parsed,
+    };
+  });
+
+  const missingKeys = entries
+    .filter(entry => entry.origin === 'absent' || entry.value === null)
+    .map(entry => entry.key);
+  const totalMonthlyUsd =
+    missingKeys.length > 0
+      ? null
+      : entries.reduce((sum, entry) => sum + Number(entry.value || 0), 0);
+
+  return {
+    totalMonthlyUsd,
+    classification:
+      missingKeys.length > 0
+        ? 'absent'
+        : weakestOrigin(...entries.map(entry => entry.origin)),
+    entries,
+    missingKeys,
+    evidence: entries
+      .map(entry => entry.evidence)
+      .filter(Boolean)
+      .join(' | ') || null,
+  };
+};
+
+const readEconomicPolicyConfig = priceBook => {
+  const document =
+    priceBook && typeof priceBook === 'object' && priceBook.document
+      ? priceBook.document
+      : null;
+  const raw =
+    document && typeof document.economicPolicy === 'object'
+      ? document.economicPolicy
+      : {};
+  const freeTargetCostCapPercent = Number(
+    raw?.tiers?.free?.targetCostCapPercent ??
+      DEFAULT_BILLING_ECONOMIC_POLICY.tiers.free.targetCostCapPercent,
+  );
+  const premiumTargetCostCapPercent = Number(
+    raw?.tiers?.premium?.targetCostCapPercent ??
+      DEFAULT_BILLING_ECONOMIC_POLICY.tiers.premium.targetCostCapPercent,
+  );
+  const minObservedActiveUsers = Number(
+    raw?.lowSampleProtection?.minObservedActiveUsers ??
+      DEFAULT_BILLING_ECONOMIC_POLICY.lowSampleProtection.minObservedActiveUsers,
+  );
+  const minTotalSuccessfulCalls = Number(
+    raw?.lowSampleProtection?.minTotalSuccessfulCalls ??
+      DEFAULT_BILLING_ECONOMIC_POLICY.lowSampleProtection.minTotalSuccessfulCalls,
+  );
+  const normalizeFallbackEntry = (entry, fallback) => {
+    const parsed = parseStructuredClassifiedNumber({
+      raw: entry ?? fallback,
+      pathSegments: ['economicPolicy'],
+    });
+    return {
+      value: parsed.value,
+      classification: parsed.origin,
+      evidence:
+        entry?.evidence ||
+        entry?.note ||
+        fallback.evidence ||
+        parsed.evidence ||
+        null,
+      source:
+        (entry && typeof entry.source === 'string' && entry.source.trim()) ||
+        fallback.source ||
+        null,
+    };
+  };
+
+  return {
+    sampleWindow:
+      String(
+        raw?.sampleWindow || DEFAULT_BILLING_ECONOMIC_POLICY.sampleWindow,
+      ).trim() || DEFAULT_BILLING_ECONOMIC_POLICY.sampleWindow,
+    tiers: {
+      free: {
+        targetCostCapPercent:
+          Number.isFinite(freeTargetCostCapPercent) &&
+          freeTargetCostCapPercent > 0
+            ? freeTargetCostCapPercent
+            : DEFAULT_BILLING_ECONOMIC_POLICY.tiers.free.targetCostCapPercent,
+      },
+      premium: {
+        targetCostCapPercent:
+          Number.isFinite(premiumTargetCostCapPercent) &&
+          premiumTargetCostCapPercent > 0
+            ? premiumTargetCostCapPercent
+            : DEFAULT_BILLING_ECONOMIC_POLICY.tiers.premium.targetCostCapPercent,
+      },
+    },
+    lowSampleProtection: {
+      minObservedActiveUsers:
+        Number.isFinite(minObservedActiveUsers) && minObservedActiveUsers > 0
+          ? minObservedActiveUsers
+          : DEFAULT_BILLING_ECONOMIC_POLICY.lowSampleProtection
+              .minObservedActiveUsers,
+      minTotalSuccessfulCalls:
+        Number.isFinite(minTotalSuccessfulCalls) && minTotalSuccessfulCalls > 0
+          ? minTotalSuccessfulCalls
+          : DEFAULT_BILLING_ECONOMIC_POLICY.lowSampleProtection
+              .minTotalSuccessfulCalls,
+    },
+    sharedPlatformAllocation: {
+      rateioFormula:
+        String(
+          raw?.sharedPlatformAllocation?.rateioFormula ||
+            DEFAULT_BILLING_ECONOMIC_POLICY.sharedPlatformAllocation
+              .rateioFormula,
+        ).trim() ||
+        DEFAULT_BILLING_ECONOMIC_POLICY.sharedPlatformAllocation.rateioFormula,
+      classificationBelowThreshold: normalizeOrigin(
+        raw?.sharedPlatformAllocation?.classificationBelowThreshold,
+        DEFAULT_BILLING_ECONOMIC_POLICY.sharedPlatformAllocation
+          .classificationBelowThreshold,
+      ),
+    },
+    requestMarginalCostFallback: {
+      rateioFormula:
+        String(
+          raw?.requestMarginalCostFallback?.rateioFormula ||
+            DEFAULT_BILLING_ECONOMIC_POLICY.requestMarginalCostFallback
+              .rateioFormula,
+        ).trim() ||
+        DEFAULT_BILLING_ECONOMIC_POLICY.requestMarginalCostFallback
+          .rateioFormula,
+      routingCostUsdPerCall: normalizeFallbackEntry(
+        raw?.requestMarginalCostFallback?.routingCostUsdPerCall,
+        DEFAULT_BILLING_ECONOMIC_POLICY.requestMarginalCostFallback
+          .routingCostUsdPerCall,
+      ),
+      weatherCostUsdPerCall: normalizeFallbackEntry(
+        raw?.requestMarginalCostFallback?.weatherCostUsdPerCall,
+        DEFAULT_BILLING_ECONOMIC_POLICY.requestMarginalCostFallback
+          .weatherCostUsdPerCall,
+      ),
+    },
+  };
+};
+
 const buildPriceBook = ({
   source,
   path,
@@ -232,6 +587,10 @@ const buildPriceBook = ({
       source,
       path: path || null,
       status: 'fail',
+      schemaVersion: null,
+      baseCurrency: null,
+      displayCurrency: null,
+      document: null,
       error,
       operationalGaps: {
         missingCostKeys: REQUIRED_COST_KEYS,
@@ -265,6 +624,9 @@ const buildPriceBook = ({
   };
   const providedKeys = Object.keys(providedEntries);
   const missingCostKeys = REQUIRED_COST_KEYS.filter(key => !(key in providedEntries));
+  const absentCostKeys = REQUIRED_COST_KEYS.filter(
+    key => providedEntries[key]?.origin === 'absent',
+  );
   const untrustedCostKeys = REQUIRED_COST_KEYS.filter(
     key =>
       key in providedEntries &&
@@ -274,6 +636,7 @@ const buildPriceBook = ({
     ...(missingCostKeys.length > 0 ? ['missing_required_cost_inputs'] : []),
     ...(invalidCostKeys.length > 0 ? ['invalid_cost_inputs'] : []),
     ...(untrustedCostKeys.length > 0 ? ['untrusted_cost_inputs'] : []),
+    ...(absentCostKeys.length > 0 ? ['absent_required_cost_inputs'] : []),
   ];
   const strictOk = strictBlockers.length === 0;
 
@@ -294,8 +657,21 @@ const buildPriceBook = ({
     source,
     path: path || null,
     status,
+    schemaVersion: Number.isFinite(Number(parsedInput?.schemaVersion))
+      ? Number(parsedInput.schemaVersion)
+      : null,
+    baseCurrency:
+      typeof parsedInput?.baseCurrency === 'string'
+        ? parsedInput.baseCurrency
+        : null,
+    displayCurrency:
+      typeof parsedInput?.displayCurrency === 'string'
+        ? parsedInput.displayCurrency
+        : null,
+    document: parsedInput && typeof parsedInput === 'object' ? parsedInput : null,
     operationalGaps: {
       missingCostKeys,
+      absentCostKeys,
       invalidCostKeys,
       untrustedCostKeys,
     },
@@ -305,18 +681,30 @@ const buildPriceBook = ({
       blockers: strict ? strictBlockers : [],
       trustedOrigins: Array.from(TRUSTED_STRICT_ORIGINS),
     },
-    values: Object.fromEntries(
-      Object.entries(classifications).map(([key, entry]) => [key, entry.value]),
+    values: addCompatibilityAliases(
+      Object.fromEntries(
+        Object.entries(classifications).map(([key, entry]) => [key, entry.value]),
+      ),
     ),
-    providedValues: Object.fromEntries(
-      Object.entries(providedEntries).map(([key, entry]) => [key, entry.value]),
+    providedValues: addCompatibilityAliases(
+      Object.fromEntries(
+        Object.entries(providedEntries).map(([key, entry]) => [key, entry.value]),
+      ),
     ),
     classifications,
     costsByClassification: summarizeByOrigin(classifications),
     missingCostKeys,
+    absentCostKeys,
     invalidCostKeys,
     untrustedCostKeys,
     requiredCostKeys: REQUIRED_COST_KEYS,
+    aliases: LEGACY_COST_ALIASES,
+    inputKeyMap: Object.fromEntries(
+      Object.entries(providedEntries).map(([key, entry]) => [
+        key,
+        entry.sourceKey || key,
+      ]),
+    ),
   };
 };
 
@@ -379,16 +767,48 @@ const loadOperationalPriceBook = ({
   });
 };
 
-const applyPriceBookToUsage = (usage = {}, priceBook = {}) => ({
-  ...usage,
-  ...(priceBook.values || {}),
-});
+const applyPriceBookToUsage = (
+  usage = {},
+  priceBook = {},
+  options = {},
+) => {
+  const merged = {
+    ...usage,
+    ...(priceBook.values || {}),
+  };
+
+  if (!options.useModeledDefaultsForAbsentCosts) {
+    return merged;
+  }
+
+  const classifications =
+    priceBook && typeof priceBook === 'object' ? priceBook.classifications : {};
+
+  COST_DEFINITIONS.forEach(definition => {
+    const entry =
+      classifications && typeof classifications === 'object'
+        ? classifications[definition.key]
+        : null;
+    const origin = normalizeOrigin(
+      entry?.origin || entry?.classification,
+      'absent',
+    );
+    if (origin === 'absent') {
+      merged[definition.key] = definition.defaultValue;
+    }
+  });
+
+  return addCompatibilityAliases(merged);
+};
 
 module.exports = {
   COST_DEFINITIONS,
   COST_KEYS,
+  LEGACY_COST_ALIASES,
   REQUIRED_COST_KEYS,
   applyPriceBookToUsage,
   loadOperationalPriceBook,
   normalizeOrigin,
+  readEconomicPolicyConfig,
+  readMonthlyInfrastructureSnapshot,
 };

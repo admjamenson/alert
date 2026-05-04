@@ -278,7 +278,7 @@ export const SecurityMapView: React.FC<Props> = ({
             coordinate={[userLocation.longitude, userLocation.latitude]}
             anchor={{ x: 0.5, y: 0.5 }}
           >
-            <View style={styles.userMarker}>
+            <View style={[styles.userMarker, isDark && styles.userMarkerDark]}>
               {avatarUri ? (
                 <Image source={{ uri: avatarUri }} style={styles.userAvatar} />
               ) : (
@@ -475,6 +475,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
   },
+  userMarkerDark: {
+    backgroundColor: 'rgba(7,14,24,0.92)',
+  },
   userAvatar: {
     width: 24,
     height: 24,
@@ -483,6 +486,8 @@ const styles = StyleSheet.create({
   userLogo: {
     width: 18,
     height: 18,
+    backgroundColor: 'transparent',
+    overflow: 'hidden',
   },
   watermarkOverlay: {
     position: 'absolute',
@@ -496,6 +501,8 @@ const styles = StyleSheet.create({
   watermarkLogo: {
     width: 36,
     height: 36,
+    backgroundColor: 'transparent',
+    overflow: 'hidden',
   },
   watermarkText: {
     color: '#FFFFFF',

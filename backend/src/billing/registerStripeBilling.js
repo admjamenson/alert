@@ -1,7 +1,10 @@
 ﻿const fs = require('fs');
 const crypto = require('crypto');
 const path = require('path');
-const { StripeBillingRepository, premiumActiveForStatus } = require('./stripeBillingRepository');
+const {
+  StripeBillingRepository,
+  premiumActiveForStatus,
+} = require('./stripeBillingRepository');
 const {
   resolveBillingRuntimeConfig,
   validateStripeBillingRuntime,
@@ -11,11 +14,40 @@ const {
   buildBillingAuthToken,
   getAuthenticatedBillingIdentity,
 } = require('./billingAuth');
+const {
+  loadOperationalPriceBook,
+  readEconomicPolicyConfig,
+} = require('../economics/priceBook');
+const {evaluatePerUserCostPolicy} = require('../economics/unitEconomics');
+const {
+  analyzeCostAndMargin,
+  buildCommercialTermsFromPriceBook,
+  buildOperationalCostsFromPriceBook,
+  buildRevenueSnapshot,
+  buildUsageMetrics,
+} = require('./costEngine');
+const {
+  readBillingUsageSnapshot,
+  readOperationalUnitCostSnapshots,
+  readPlatformAllocationSnapshot,
+} = require('./billingUsageRepository');
 
-const BILLING_FRONTEND_ROUTES = ['/checkout', '/success', '/cancel', '/account/billing'];
+const BILLING_FRONTEND_ROUTES = [
+  '/checkout',
+  '/success',
+  '/cancel',
+  '/account/billing',
+];
+const TRUSTED_MARGIN_CLASSIFICATIONS = new Set(['real', 'estimated_reliable']);
+const CLASSIFICATION_PRIORITY = {
+  absent: 0,
+  modeled: 1,
+  estimated_reliable: 2,
+  real: 3,
+};
 
 const getStripeClient = () => {
-  const { secretKey } = resolveBillingRuntimeConfig({}, process.env);
+  const {secretKey} = resolveBillingRuntimeConfig({}, process.env);
   const Stripe = require('stripe');
   return new Stripe(secretKey, {
     apiVersion: '2024-06-20',
@@ -50,7 +82,10 @@ const logBilling = (level, message, extra = {}) => {
   console.log(line);
 };
 
-const safeRequestId = value => String(value || '').trim().slice(0, 120) || null;
+const safeRequestId = value =>
+  String(value || '')
+    .trim()
+    .slice(0, 120) || null;
 const SUPPORTED_BILLING_INTERVALS = new Set(['day', 'week', 'month', 'year']);
 const BILLING_OFFER_CACHE_TTL_MS = 60_000;
 const billingOfferCache = new Map();
@@ -70,11 +105,16 @@ const normalizeStripeTimestamp = value => {
   return null;
 };
 
-const toCurrencyCode = value => String(value || '').trim().toUpperCase() || null;
+const toCurrencyCode = value =>
+  String(value || '')
+    .trim()
+    .toUpperCase() || null;
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 const normalizeBillingInterval = value => {
-  const normalized = String(value || '').trim().toLowerCase();
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase();
   return SUPPORTED_BILLING_INTERVALS.has(normalized) ? normalized : null;
 };
 
@@ -93,15 +133,17 @@ const buildUnavailableBillingOffer = (config, reasonCode) => ({
   livemode: false,
 });
 
-const buildBillingOfferFromStripePrice = ({ config, price }) => {
+const buildBillingOfferFromStripePrice = ({config, price}) => {
   const product =
-    price?.product && typeof price.product === 'object' && !price.product.deleted
+    price?.product &&
+    typeof price.product === 'object' &&
+    !price.product.deleted
       ? price.product
       : null;
   const active =
     Boolean(price?.active) &&
     Boolean(price?.recurring) &&
-    (product?.active !== false);
+    product?.active !== false;
   const interval = normalizeBillingInterval(price?.recurring?.interval);
   const intervalCount = Number.isFinite(price?.recurring?.interval_count)
     ? price.recurring.interval_count
@@ -113,8 +155,8 @@ const buildBillingOfferFromStripePrice = ({ config, price }) => {
       !price?.active
         ? 'stripe_price_inactive'
         : !price?.recurring
-        ? 'stripe_price_not_recurring'
-        : 'stripe_price_interval_invalid',
+          ? 'stripe_price_not_recurring'
+          : 'stripe_price_interval_invalid',
     );
   }
 
@@ -156,7 +198,7 @@ const writeCachedBillingOffer = (cacheKey, offer) => {
   return offer;
 };
 
-const loadBillingOffer = async ({ stripe, config }) => {
+const loadBillingOffer = async ({stripe, config}) => {
   const cacheKey = `${String(config?.priceId || '').trim()}::${String(
     config?.market?.currency || '',
   ).trim()}`;
@@ -165,12 +207,15 @@ const loadBillingOffer = async ({ stripe, config }) => {
     return cached;
   }
 
-  const price = await stripe.prices.retrieve(String(config?.priceId || '').trim(), {
-    expand: ['product'],
-  });
+  const price = await stripe.prices.retrieve(
+    String(config?.priceId || '').trim(),
+    {
+      expand: ['product'],
+    },
+  );
   return writeCachedBillingOffer(
     cacheKey,
-    buildBillingOfferFromStripePrice({ config, price }),
+    buildBillingOfferFromStripePrice({config, price}),
   );
 };
 
@@ -179,8 +224,10 @@ const buildInvoiceSummary = invoice => ({
   number: invoice?.number || null,
   status: invoice?.status || null,
   currency: toCurrencyCode(invoice?.currency),
-  amountPaid: typeof invoice?.amount_paid === 'number' ? invoice.amount_paid : null,
-  amountDue: typeof invoice?.amount_due === 'number' ? invoice.amount_due : null,
+  amountPaid:
+    typeof invoice?.amount_paid === 'number' ? invoice.amount_paid : null,
+  amountDue:
+    typeof invoice?.amount_due === 'number' ? invoice.amount_due : null,
   createdAt: normalizeStripeTimestamp(invoice?.created),
   hostedInvoiceUrl: invoice?.hosted_invoice_url || null,
   invoicePdf: invoice?.invoice_pdf || null,
@@ -204,13 +251,17 @@ const buildPaymentMethodSummary = paymentMethod => {
   };
 };
 
-const resolveDefaultPaymentMethod = ({ subscription, customer }) => {
+const resolveDefaultPaymentMethod = ({subscription, customer}) => {
   const subscriptionPaymentMethod = subscription?.default_payment_method;
-  if (subscriptionPaymentMethod && typeof subscriptionPaymentMethod === 'object') {
+  if (
+    subscriptionPaymentMethod &&
+    typeof subscriptionPaymentMethod === 'object'
+  ) {
     return subscriptionPaymentMethod;
   }
 
-  const customerPaymentMethod = customer?.invoice_settings?.default_payment_method;
+  const customerPaymentMethod =
+    customer?.invoice_settings?.default_payment_method;
   if (customerPaymentMethod && typeof customerPaymentMethod === 'object') {
     return customerPaymentMethod;
   }
@@ -236,13 +287,472 @@ const resolveStripeBillingCurrency = (...values) => {
   return null;
 };
 
+const dedupeStrings = values => Array.from(new Set(values.filter(Boolean)));
+const toFiniteNumberOrNull = value => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string' && value.trim() === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const weakestClassification = (...values) =>
+  values
+    .map(
+      value =>
+        String(value || 'absent')
+          .trim()
+          .toLowerCase() || 'absent',
+    )
+    .reduce(
+      (weakest, current) =>
+        CLASSIFICATION_PRIORITY[current] < CLASSIFICATION_PRIORITY[weakest]
+          ? current
+          : weakest,
+      'real',
+    );
+
+const resolveBillingEconomicTier = record =>
+  premiumActiveForStatus(record?.subscription_status) ||
+  record?.premium_active === true
+    ? 'premium'
+    : 'free';
+
+const resolveUsdToRevenueRate = ({revenueCurrency, fxNormalization}) => {
+  const normalizedRevenueCurrency = toCurrencyCode(revenueCurrency);
+  if (!normalizedRevenueCurrency) return null;
+  if (normalizedRevenueCurrency === 'USD') return 1;
+  const entries = Array.isArray(fxNormalization?.entries)
+    ? fxNormalization.entries
+    : [];
+  const direct = entries.find(
+    entry =>
+      toCurrencyCode(entry?.baseCurrency) === 'USD' &&
+      toCurrencyCode(entry?.targetCurrency) === normalizedRevenueCurrency &&
+      Number.isFinite(Number(entry?.rate)) &&
+      Number(entry.rate) > 0,
+  );
+  if (direct) return Number(direct.rate);
+
+  const inverse = entries.find(
+    entry =>
+      toCurrencyCode(entry?.baseCurrency) === normalizedRevenueCurrency &&
+      toCurrencyCode(entry?.targetCurrency) === 'USD' &&
+      Number.isFinite(Number(entry?.rate)) &&
+      Number(entry.rate) > 0,
+  );
+  return inverse ? 1 / Number(inverse.rate) : null;
+};
+
+const buildBillingEconomicPolicy = ({
+  record,
+  revenue,
+  analysis,
+  priceBook,
+  usageSnapshot,
+  routingUnitCostSnapshot,
+  weatherUnitCostSnapshot,
+  platformAllocationSnapshot,
+}) => {
+  const tier = resolveBillingEconomicTier(record);
+  const policyConfig = readEconomicPolicyConfig(priceBook);
+  const targetCostCapPercent =
+    tier === 'premium'
+      ? policyConfig.tiers.premium.targetCostCapPercent
+      : policyConfig.tiers.free.targetCostCapPercent;
+  const policy = evaluatePerUserCostPolicy({
+    tier,
+    revenueAmount: revenue?.amount,
+    totalCostAmount: analysis?.marginAnalysis?.totalCost,
+    targetCostCapPercent,
+  });
+  const sampleWindow =
+    platformAllocationSnapshot?.sampleWindow ||
+    routingUnitCostSnapshot?.sampleWindow ||
+    weatherUnitCostSnapshot?.sampleWindow ||
+    policyConfig.sampleWindow;
+  const sharedMonthlyInfrastructureUsd = toFiniteNumberOrNull(
+    platformAllocationSnapshot?.sharedMonthlyInfrastructureUsd,
+  );
+  const paymentProcessorCost = toFiniteNumberOrNull(
+    analysis?.costBreakdown?.paymentProcessorCost,
+  );
+  const routingCost = toFiniteNumberOrNull(
+    analysis?.costBreakdown?.routingCost,
+  );
+  const weatherCost = toFiniteNumberOrNull(
+    analysis?.costBreakdown?.weatherCost,
+  );
+  const usdToRevenueRate = resolveUsdToRevenueRate({
+    revenueCurrency: revenue?.currency,
+    fxNormalization: analysis?.fxNormalization,
+  });
+  const remainingSharedBudgetAmount =
+    Number.isFinite(policy.maxCostAmount) &&
+    Number.isFinite(paymentProcessorCost) &&
+    Number.isFinite(routingCost) &&
+    Number.isFinite(weatherCost)
+      ? policy.maxCostAmount - paymentProcessorCost - routingCost - weatherCost
+      : null;
+  const sharedMonthlyInfrastructureInRevenueCurrency =
+    Number.isFinite(sharedMonthlyInfrastructureUsd) &&
+    Number.isFinite(usdToRevenueRate)
+      ? sharedMonthlyInfrastructureUsd * usdToRevenueRate
+      : revenue?.currency === 'USD' &&
+          Number.isFinite(sharedMonthlyInfrastructureUsd)
+        ? sharedMonthlyInfrastructureUsd
+        : null;
+  const requiredActiveUsersForTargetCap =
+    Number.isFinite(sharedMonthlyInfrastructureInRevenueCurrency) &&
+    Number.isFinite(remainingSharedBudgetAmount) &&
+    remainingSharedBudgetAmount > 0
+      ? Math.ceil(
+          sharedMonthlyInfrastructureInRevenueCurrency /
+            remainingSharedBudgetAmount,
+        )
+      : null;
+  const observedActiveUsers =
+    toFiniteNumberOrNull(platformAllocationSnapshot?.observedActiveUsers) ??
+    toFiniteNumberOrNull(platformAllocationSnapshot?.activeUsers);
+  const effectiveAllocationUsers =
+    toFiniteNumberOrNull(
+      platformAllocationSnapshot?.effectiveAllocationUsers,
+    ) ?? observedActiveUsers;
+
+  return {
+    tier,
+    classification: weakestClassification(
+      analysis?.marginAnalysis?.classification,
+      routingUnitCostSnapshot?.classification,
+      weatherUnitCostSnapshot?.classification,
+      platformAllocationSnapshot?.classification,
+    ),
+    targetCostCapPercent: policy.targetCostCapPercent,
+    actualCostRatio: policy.actualCostRatio,
+    maxCostAmount: policy.maxCostAmount,
+    remainingBudgetAmount: policy.remainingBudgetAmount,
+    overBudgetAmount: policy.overBudgetAmount,
+    withinTargetCostCap: policy.withinGuardrail,
+    requires_cheaper_path: policy.requiresCheaperPath,
+    block_or_degrade: policy.blockOrDegrade,
+    decision: policy.decision,
+    sampleWindow,
+    sampleVolume: {
+      routingCalls: toFiniteNumberOrNull(usageSnapshot?.routingCalls),
+      weatherCalls: toFiniteNumberOrNull(usageSnapshot?.weatherCalls),
+      totalSuccessfulCalls:
+        toFiniteNumberOrNull(
+          routingUnitCostSnapshot?.sampleVolume?.totalSuccessfulCalls,
+        ) ??
+        toFiniteNumberOrNull(
+          weatherUnitCostSnapshot?.sampleVolume?.totalSuccessfulCalls,
+        ),
+      billingUsageDocuments:
+        toFiniteNumberOrNull(
+          routingUnitCostSnapshot?.sampleVolume?.docsCount,
+        ) ??
+        toFiniteNumberOrNull(weatherUnitCostSnapshot?.sampleVolume?.docsCount),
+      observedActiveUsers,
+      effectiveAllocationUsers,
+      requiredActiveUsersForTargetCap,
+      observedActiveUsersBelowRequiredForTargetCap:
+        Number.isFinite(observedActiveUsers) &&
+        Number.isFinite(requiredActiveUsersForTargetCap)
+          ? observedActiveUsers < requiredActiveUsersForTargetCap
+          : null,
+    },
+    minSampleThreshold: {
+      activeUsers: policyConfig.lowSampleProtection.minObservedActiveUsers,
+      totalSuccessfulCalls:
+        policyConfig.lowSampleProtection.minTotalSuccessfulCalls,
+    },
+    rateioFormula: {
+      platformAllocation:
+        platformAllocationSnapshot?.rateioFormula ||
+        policyConfig.sharedPlatformAllocation.rateioFormula,
+      routingUnitCost:
+        routingUnitCostSnapshot?.rateioFormula ||
+        policyConfig.requestMarginalCostFallback.rateioFormula,
+      weatherUnitCost:
+        weatherUnitCostSnapshot?.rateioFormula ||
+        policyConfig.requestMarginalCostFallback.rateioFormula,
+    },
+    sharedCostAllocation: {
+      sharedMonthlyInfrastructureUsd: sharedMonthlyInfrastructureUsd,
+      platformAllocationCostUsd: toFiniteNumberOrNull(
+        platformAllocationSnapshot?.amountUsd,
+      ),
+      observedActiveUsers,
+      effectiveAllocationUsers,
+      requiredActiveUsersForTargetCap,
+      lowSampleProtectionApplied: Boolean(
+        platformAllocationSnapshot?.lowSampleProtectionApplied,
+      ),
+    },
+  };
+};
+
+const buildEmptyBillingEconomics = ({
+  blockers,
+  usageMetrics,
+  operationalCosts,
+  revenueEvidence,
+}) => ({
+  revenue: buildRevenueSnapshot({
+    amount: null,
+    currency: null,
+    classification: 'absent',
+    evidence: revenueEvidence || 'billing_revenue_unavailable',
+  }),
+  commercialTerms: null,
+  operationalCosts,
+  usageMetrics,
+  costBreakdown: {
+    paymentProcessorPercentCost: null,
+    paymentProcessorPercentCostCurrency: null,
+    paymentProcessorFixedCost: null,
+    paymentProcessorFixedCostCurrency: null,
+    paymentProcessorCost: null,
+    paymentProcessorCostCurrency: null,
+    routingCost: null,
+    routingCostCurrency: 'USD',
+    weatherCost: null,
+    weatherCostCurrency: 'USD',
+    platformAllocationCost: null,
+    platformAllocationCostCurrency: 'USD',
+    totalCost: null,
+    totalCostCurrency: null,
+    classification: 'absent',
+    blockers: dedupeStrings(blockers),
+  },
+  marginAnalysis: {
+    totalCost: null,
+    margin: null,
+    marginPercent: null,
+    classification: 'absent',
+    blockers: dedupeStrings(blockers),
+  },
+  fxNormalization: {
+    calculationCurrency: null,
+    classification: 'absent',
+    blockers: [],
+    entries: [],
+  },
+  economicPolicy: {
+    tier: null,
+    classification: 'absent',
+    targetCostCapPercent: null,
+    actualCostRatio: null,
+    maxCostAmount: null,
+    remainingBudgetAmount: null,
+    overBudgetAmount: null,
+    withinTargetCostCap: false,
+    requires_cheaper_path: false,
+    block_or_degrade: false,
+    decision: 'insufficient_data',
+    sampleWindow: null,
+    sampleVolume: {},
+    minSampleThreshold: {},
+    rateioFormula: {},
+    sharedCostAllocation: {},
+  },
+});
+
+const normalizeBillingCostProvider = value => {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase();
+  if (normalized === 'stripe') return 'stripe';
+  if (
+    normalized === 'app_store' ||
+    normalized === 'appstore' ||
+    normalized === 'apple'
+  ) {
+    return 'app_store';
+  }
+  if (
+    normalized === 'play_store' ||
+    normalized === 'play' ||
+    normalized === 'google_play'
+  ) {
+    return 'play_store';
+  }
+  return null;
+};
+
+const resolveBillingRevenueSnapshot = ({
+  provider,
+  subscription,
+  invoices,
+  record,
+  fallbackRevenueSnapshot,
+  userId,
+}) => {
+  if (provider === 'app_store' || provider === 'play_store') {
+    return buildRevenueSnapshot({
+      amount: null,
+      currency: null,
+      classification: 'absent',
+      evidence: `provider_revenue_not_available:${provider}`,
+    });
+  }
+
+  if (provider === null) {
+    // Freemium: use ad revenue
+    const {getAdRevenueSnapshot} = require('./adRevenueRepository');
+    return getAdRevenueSnapshot(userId);
+  }
+
+  // Stripe logic
+  const subscriptionAmount = Number.isFinite(
+    subscription?.items?.data?.[0]?.price?.unit_amount,
+  )
+    ? subscription.items.data[0].price.unit_amount / 100
+    : null;
+  const subscriptionCurrency = resolveStripeBillingCurrency(
+    extractSubscriptionCurrency(subscription),
+    record?.billing_currency,
+  );
+
+  if (subscriptionAmount !== null && subscriptionCurrency) {
+    return buildRevenueSnapshot({
+      amount: subscriptionAmount,
+      currency: subscriptionCurrency,
+      classification: 'real',
+      evidence: 'stripe_subscription_price',
+    });
+  }
+
+  const invoice = Array.isArray(invoices)
+    ? invoices.find(item => Number.isFinite(item?.amount_paid))
+    : null;
+  const invoiceAmount = Number.isFinite(invoice?.amount_paid)
+    ? invoice.amount_paid / 100
+    : null;
+  const invoiceCurrency = resolveStripeBillingCurrency(
+    invoice?.currency,
+    extractInvoiceLineCurrency(invoice),
+    record?.billing_currency,
+  );
+
+  if (invoiceAmount !== null && invoiceCurrency) {
+    return buildRevenueSnapshot({
+      amount: invoiceAmount,
+      currency: invoiceCurrency,
+      classification: 'real',
+      evidence: 'stripe_invoice_amount_paid',
+    });
+  }
+
+  if (
+    fallbackRevenueSnapshot?.amount !== null &&
+    fallbackRevenueSnapshot?.currency
+  ) {
+    return fallbackRevenueSnapshot;
+  }
+
+  return buildRevenueSnapshot({
+    amount: null,
+    currency: resolveStripeBillingCurrency(record?.billing_currency),
+    classification: 'absent',
+    evidence: 'missing_stripe_revenue_amount',
+  });
+};
+
+const buildBillingAccountCostSnapshot = ({
+  record,
+  subscription,
+  invoices,
+  priceBook = loadOperationalPriceBook(),
+  usageMetrics,
+  platformAllocationCostUsd,
+  routingUnitCostUsd,
+  weatherUnitCostUsd,
+  fallbackRevenueSnapshot,
+  userId,
+}) => {
+  const normalizedUsageMetrics = buildUsageMetrics({
+    routingCalls: usageMetrics?.routingCalls ?? null,
+    weatherCalls: usageMetrics?.weatherCalls ?? null,
+    classification: usageMetrics?.classification || 'absent',
+  });
+  const operationalCosts = buildOperationalCostsFromPriceBook({
+    priceBook,
+    platformAllocationCostUsd: platformAllocationCostUsd || {
+      amountUsd: null,
+      classification: 'absent',
+      evidence:
+        'missing per-user platform allocation for billing account cost engine',
+    },
+    routingUnitCostUsd,
+    weatherUnitCostUsd,
+  });
+  const provider = normalizeBillingCostProvider(
+    record?.billing_provider ||
+      (record?.stripe_subscription_id ? 'stripe' : null),
+  );
+
+  // provider can be null for freemium users (no billing provider)
+  // this is now a valid state, treat it as freemium
+  const isFreemium = provider === null;
+
+  const revenue = resolveBillingRevenueSnapshot({
+    provider,
+    subscription,
+    invoices,
+    record,
+    fallbackRevenueSnapshot,
+    userId,
+  });
+  const commercialTerms = buildCommercialTermsFromPriceBook({
+    provider,
+    priceBook,
+    revenueCurrency: revenue.currency,
+  });
+  const analysis = analyzeCostAndMargin({
+    revenue,
+    commercialTerms,
+    operationalCosts,
+    usageMetrics: normalizedUsageMetrics,
+    priceBook,
+  });
+  const economicPolicy = buildBillingEconomicPolicy({
+    record,
+    revenue,
+    analysis,
+    priceBook,
+    usageSnapshot: usageMetrics,
+    routingUnitCostSnapshot: routingUnitCostUsd,
+    weatherUnitCostSnapshot: weatherUnitCostUsd,
+    platformAllocationSnapshot: platformAllocationCostUsd,
+  });
+
+  if (provider !== 'stripe' && !isFreemium) {
+    analysis.marginAnalysis.blockers = dedupeStrings(
+      analysis.marginAnalysis.blockers.concat('provider_revenue_not_available'),
+    );
+  }
+
+  return {
+    provider,
+    ...analysis,
+    economicPolicy,
+  };
+};
+
 const expressStaticSafe = dir => {
   const express = require('express');
   return express.static(dir);
 };
 
 const mountBillingFrontend = app => {
-  const billingDist = path.join(__dirname, '..', '..', '..', 'billing-web', 'dist');
+  const billingDist = path.join(
+    __dirname,
+    '..',
+    '..',
+    '..',
+    'billing-web',
+    'dist',
+  );
   if (!fs.existsSync(billingDist)) {
     return;
   }
@@ -264,9 +774,12 @@ const buildPortalReturnUrl = appUrl => `${appUrl}/account/billing`;
 const wantsRedirectResponse = req => {
   const contentType = String(req.headers['content-type'] || '').toLowerCase();
   const accept = String(req.headers.accept || '').toLowerCase();
-  const mobileBillingHeader = String(req.headers['x-alert-mobile-billing'] || '').trim();
-  const mobileBillingBody =
-    String(req.body?.mobile_billing || req.body?.mobileBilling || '').trim();
+  const mobileBillingHeader = String(
+    req.headers['x-alert-mobile-billing'] || '',
+  ).trim();
+  const mobileBillingBody = String(
+    req.body?.mobile_billing || req.body?.mobileBilling || '',
+  ).trim();
 
   if (
     mobileBillingHeader === '1' ||
@@ -285,19 +798,28 @@ const wantsRedirectResponse = req => {
 const readRequestValue = (req, ...keys) => {
   for (const key of keys) {
     const headerValue = req?.headers?.[key];
-    if (typeof headerValue === 'string' && headerValue.trim()) return headerValue.trim();
+    if (typeof headerValue === 'string' && headerValue.trim())
+      return headerValue.trim();
 
     const bodyValue = req?.body?.[key];
-    if (typeof bodyValue === 'string' && bodyValue.trim()) return bodyValue.trim();
+    if (typeof bodyValue === 'string' && bodyValue.trim())
+      return bodyValue.trim();
 
     const queryValue = req?.query?.[key];
-    if (typeof queryValue === 'string' && queryValue.trim()) return queryValue.trim();
+    if (typeof queryValue === 'string' && queryValue.trim())
+      return queryValue.trim();
   }
   return '';
 };
 
 const extractBillingMarketInput = req => ({
-  locale: readRequestValue(req, 'x-alert-user-locale', 'user_locale', 'userLocale', 'locale'),
+  locale: readRequestValue(
+    req,
+    'x-alert-user-locale',
+    'user_locale',
+    'userLocale',
+    'locale',
+  ),
   countryCode: readRequestValue(
     req,
     'x-alert-country-code',
@@ -306,18 +828,25 @@ const extractBillingMarketInput = req => ({
     'country',
     'cc',
   ),
-  cityName: readRequestValue(req, 'x-alert-city-name', 'city_name', 'cityName', 'city'),
+  cityName: readRequestValue(
+    req,
+    'x-alert-city-name',
+    'city_name',
+    'cityName',
+    'city',
+  ),
 });
 
-const getBillingConfig = req => resolveBillingRuntimeConfig(extractBillingMarketInput(req), process.env);
+const getBillingConfig = req =>
+  resolveBillingRuntimeConfig(extractBillingMarketInput(req), process.env);
 
 const mapMobileBillingError = (error, intent) => {
   const fallbackError =
     intent === 'payment'
       ? 'payment_intent_unavailable'
       : intent === 'checkout'
-      ? 'checkout_session_unavailable'
-      : 'portal_session_unavailable';
+        ? 'checkout_session_unavailable'
+        : 'portal_session_unavailable';
   const message = String(error?.message || '').trim();
 
   if (!message) {
@@ -388,7 +917,7 @@ const toSafeMetadataValue = value => {
   return stableValue ? stableValue.slice(0, 500) : '';
 };
 
-const buildBillingMetadata = ({ userId, market, priceId }) => ({
+const buildBillingMetadata = ({userId, market, priceId}) => ({
   user_id: toSafeMetadataValue(userId),
   billing_country_code: toSafeMetadataValue(market?.countryCode),
   billing_currency: toSafeMetadataValue(market?.currency),
@@ -422,10 +951,20 @@ const buildCustomerPreferredLocales = locale => {
   const normalized = String(locale || '').trim();
   if (!normalized) return undefined;
   const languageOnly = normalized.split('-')[0];
-  return Array.from(new Set([normalized, languageOnly].filter(Boolean))).slice(0, 2);
+  return Array.from(new Set([normalized, languageOnly].filter(Boolean))).slice(
+    0,
+    2,
+  );
 };
 
-const ensureStripeCustomer = async ({ stripe, repo, auth, current, config, requestId }) => {
+const ensureStripeCustomer = async ({
+  stripe,
+  repo,
+  auth,
+  current,
+  config,
+  requestId,
+}) => {
   const metadata = buildBillingMetadata({
     userId: auth.userId,
     market: config.market,
@@ -512,12 +1051,17 @@ const ensureStripeCustomer = async ({ stripe, repo, auth, current, config, reque
 };
 
 const extractBillingMetadata = (primary = {}, fallback = {}) => ({
-  billingCurrency: primary?.billing_currency || fallback?.billing_currency || null,
-  billingCountryCode: primary?.billing_country_code || fallback?.billing_country_code || null,
+  billingCurrency:
+    primary?.billing_currency || fallback?.billing_currency || null,
+  billingCountryCode:
+    primary?.billing_country_code || fallback?.billing_country_code || null,
   billingLocale: primary?.billing_locale || fallback?.billing_locale || null,
-  billingCityName: primary?.billing_city_name || fallback?.billing_city_name || null,
-  billingMarketTier: primary?.billing_market_tier || fallback?.billing_market_tier || null,
-  billingMarketKey: primary?.billing_market_key || fallback?.billing_market_key || null,
+  billingCityName:
+    primary?.billing_city_name || fallback?.billing_city_name || null,
+  billingMarketTier:
+    primary?.billing_market_tier || fallback?.billing_market_tier || null,
+  billingMarketKey:
+    primary?.billing_market_key || fallback?.billing_market_key || null,
 });
 
 const MOBILE_PAYMENT_SHEET_RETURN_URL = 'alertapp://billing-return';
@@ -552,7 +1096,9 @@ const buildMobilePaymentSheetResponse = ({
   const publishableKey = String(config?.publishableKey || '').trim();
   const customerEphemeralKeySecret = String(ephemeralKeySecret || '').trim();
   const paymentIntent = getPaymentIntentFromSubscription(subscription);
-  const paymentIntentClientSecret = String(paymentIntent?.client_secret || '').trim();
+  const paymentIntentClientSecret = String(
+    paymentIntent?.client_secret || '',
+  ).trim();
   const paymentIntentId = String(paymentIntent?.id || '').trim();
 
   if (!publishableKey) {
@@ -561,7 +1107,11 @@ const buildMobilePaymentSheetResponse = ({
     throw error;
   }
 
-  if (!customerEphemeralKeySecret || !paymentIntentClientSecret || !paymentIntentId) {
+  if (
+    !customerEphemeralKeySecret ||
+    !paymentIntentClientSecret ||
+    !paymentIntentId
+  ) {
     const error = new Error('stripe_payment_missing_client_secret');
     error.statusCode = 502;
     throw error;
@@ -599,7 +1149,11 @@ const readSubscriptionInput = req =>
       '',
   ).trim();
 
-const resolveExpandedInvoiceSubscription = async ({ stripe, paymentIntent, subscriptionId }) => {
+const resolveExpandedInvoiceSubscription = async ({
+  stripe,
+  paymentIntent,
+  subscriptionId,
+}) => {
   let invoice = null;
   let subscription = null;
 
@@ -632,12 +1186,15 @@ const syncSubscriptionFromPaymentConfirmation = async ({
   paymentIntent,
   subscriptionId,
 }) => {
-  const { invoice, subscription } = await resolveExpandedInvoiceSubscription({
+  const {invoice, subscription} = await resolveExpandedInvoiceSubscription({
     stripe,
     paymentIntent,
     subscriptionId,
   });
-  const customerId = String(paymentIntent?.customer || current?.stripe_customer_id || '').trim() || null;
+  const customerId =
+    String(
+      paymentIntent?.customer || current?.stripe_customer_id || '',
+    ).trim() || null;
 
   if (
     current?.stripe_customer_id &&
@@ -663,7 +1220,8 @@ const syncSubscriptionFromPaymentConfirmation = async ({
       invoice?.lines?.data?.[0]?.price?.id ||
       current?.stripe_price_id ||
       null,
-    stripePaymentIntentId: paymentIntent?.id || current?.stripe_payment_intent_id || null,
+    stripePaymentIntentId:
+      paymentIntent?.id || current?.stripe_payment_intent_id || null,
     subscriptionStatus:
       subscription?.status ||
       current?.subscription_status ||
@@ -671,10 +1229,9 @@ const syncSubscriptionFromPaymentConfirmation = async ({
     currentPeriodEnd: normalizePeriodEnd(
       subscription?.current_period_end || current?.current_period_end || null,
     ),
-    premiumActive:
-      subscription?.status
-        ? premiumActiveForStatus(subscription.status)
-        : paymentIntent?.status === 'succeeded',
+    premiumActive: subscription?.status
+      ? premiumActiveForStatus(subscription.status)
+      : paymentIntent?.status === 'succeeded',
     ...extractBillingMetadata(subscription?.metadata, current || {}),
     billingCurrency: resolveStripeBillingCurrency(
       paymentIntent?.currency,
@@ -738,11 +1295,12 @@ const confirmPaymentIntentStatus = async ({
     }
   }
 
-  const subscriptionStatus = String(
-    confirmation.subscription?.status ||
-      confirmation.syncResult?.subscription_status ||
-      '',
-  ).trim() || null;
+  const subscriptionStatus =
+    String(
+      confirmation.subscription?.status ||
+        confirmation.syncResult?.subscription_status ||
+        '',
+    ).trim() || null;
   const premiumActive = Boolean(
     confirmation.syncResult?.premium_active ||
       premiumActiveForStatus(subscriptionStatus),
@@ -785,8 +1343,12 @@ const confirmPaymentIntentStatus = async ({
 };
 
 const handleSubscriptionSync = async (repo, subscription, sourceEvent) => {
-  const existingBySubscription = await repo.findBySubscriptionId(subscription?.id);
-  const existingByCustomer = await repo.findByCustomerId(subscription?.customer);
+  const existingBySubscription = await repo.findBySubscriptionId(
+    subscription?.id,
+  );
+  const existingByCustomer = await repo.findByCustomerId(
+    subscription?.customer,
+  );
   const existing = existingBySubscription || existingByCustomer;
   const userId =
     subscription?.metadata?.user_id ||
@@ -796,11 +1358,19 @@ const handleSubscriptionSync = async (repo, subscription, sourceEvent) => {
 
   return repo.syncSubscription({
     userId,
-    stripeCustomerId: subscription?.customer || existing?.stripe_customer_id || null,
-    stripeSubscriptionId: subscription?.id || existing?.stripe_subscription_id || null,
-    stripePriceId: extractSubscriptionPriceId(subscription) || existing?.stripe_price_id || null,
-    subscriptionStatus: subscription?.status || existing?.subscription_status || 'inactive',
-    currentPeriodEnd: normalizePeriodEnd(subscription?.current_period_end || existing?.current_period_end),
+    stripeCustomerId:
+      subscription?.customer || existing?.stripe_customer_id || null,
+    stripeSubscriptionId:
+      subscription?.id || existing?.stripe_subscription_id || null,
+    stripePriceId:
+      extractSubscriptionPriceId(subscription) ||
+      existing?.stripe_price_id ||
+      null,
+    subscriptionStatus:
+      subscription?.status || existing?.subscription_status || 'inactive',
+    currentPeriodEnd: normalizePeriodEnd(
+      subscription?.current_period_end || existing?.current_period_end,
+    ),
     premiumActive: premiumActiveForStatus(subscription?.status),
     ...extractBillingMetadata(subscription?.metadata, existing || {}),
     billingCurrency: resolveStripeBillingCurrency(
@@ -825,9 +1395,15 @@ const syncSubscriptionFromInvoice = async (
   const subscription = invoice?.subscription
     ? await stripe.subscriptions.retrieve(invoice.subscription)
     : null;
-  const metadata = extractBillingMetadata(subscription?.metadata, current || {});
+  const metadata = extractBillingMetadata(
+    subscription?.metadata,
+    current || {},
+  );
   const subscriptionStatus =
-    options.subscriptionStatus || subscription?.status || current?.subscription_status || 'inactive';
+    options.subscriptionStatus ||
+    subscription?.status ||
+    current?.subscription_status ||
+    'inactive';
   const premiumActive =
     typeof options.premiumActive === 'boolean'
       ? options.premiumActive
@@ -839,8 +1415,16 @@ const syncSubscriptionFromInvoice = async (
       current?.user_id ||
       invoice?.metadata?.user_id ||
       null,
-    stripeCustomerId: invoice?.customer || subscription?.customer || current?.stripe_customer_id || null,
-    stripeSubscriptionId: invoice?.subscription || subscription?.id || current?.stripe_subscription_id || null,
+    stripeCustomerId:
+      invoice?.customer ||
+      subscription?.customer ||
+      current?.stripe_customer_id ||
+      null,
+    stripeSubscriptionId:
+      invoice?.subscription ||
+      subscription?.id ||
+      current?.stripe_subscription_id ||
+      null,
     stripePriceId:
       extractSubscriptionPriceId(subscription) ||
       invoice?.lines?.data?.[0]?.price?.id ||
@@ -863,7 +1447,12 @@ const syncSubscriptionFromInvoice = async (
   });
 };
 
-const syncSubscriptionFromRefundedCharge = async (stripe, repo, charge, sourceEvent) => {
+const syncSubscriptionFromRefundedCharge = async (
+  stripe,
+  repo,
+  charge,
+  sourceEvent,
+) => {
   if (charge?.invoice) {
     const invoice = await stripe.invoices.retrieve(charge.invoice);
     return syncSubscriptionFromInvoice(stripe, repo, invoice, sourceEvent);
@@ -895,10 +1484,11 @@ const syncSubscriptionFromRefundedCharge = async (stripe, repo, charge, sourceEv
   });
 };
 
-const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
+const buildPortalLookupContext = async ({stripe, repo, auth, sessionId}) => {
   let userId = auth?.userId || null;
   let current = userId ? await repo.getByUserId(userId) : null;
-  let customerId = current?.stripe_customer_id || auth?.stripeCustomerId || null;
+  let customerId =
+    current?.stripe_customer_id || auth?.stripeCustomerId || null;
 
   if (!customerId && sessionId) {
     const checkoutSession = await stripe.checkout.sessions.retrieve(sessionId);
@@ -921,10 +1511,21 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
     }
   }
 
-  return { userId, current, customerId };
+  return {userId, current, customerId};
 };
 
-  const registerStripeBilling = (app, { db }) => {
+const registerStripeBilling = (
+  app,
+  {
+    db,
+    priceBookLoader = loadOperationalPriceBook,
+    getStripeClientFn = getStripeClient,
+    loadBillingOfferFn = loadBillingOffer,
+    readBillingUsageSnapshotFn = readBillingUsageSnapshot,
+    readOperationalUnitCostSnapshotsFn = readOperationalUnitCostSnapshots,
+    readPlatformAllocationSnapshotFn = readPlatformAllocationSnapshot,
+  } = {},
+) => {
   validateStripeBillingRuntime(process.env);
   const repo = new StripeBillingRepository(db);
 
@@ -935,7 +1536,8 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
       const token = buildBillingAuthToken(
         {
           userId: auth.userId,
-          stripeCustomerId: current?.stripe_customer_id || auth.stripeCustomerId,
+          stripeCustomerId:
+            current?.stripe_customer_id || auth.stripeCustomerId,
           locale: auth.locale,
           countryCode: auth.countryCode,
           cityName: auth.cityName,
@@ -946,21 +1548,25 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
       return res.json({
         token,
         userId: auth.userId,
-        stripeCustomerId: current?.stripe_customer_id || auth.stripeCustomerId || null,
+        stripeCustomerId:
+          current?.stripe_customer_id || auth.stripeCustomerId || null,
         authMode: auth.authMode,
       });
     } catch (error) {
       logBilling('error', 'Stripe billing auth token failed', {
         error: error.message,
       });
-      return res.status(error.statusCode || 500).json({ error: error.message });
+      return res.status(error.statusCode || 500).json({error: error.message});
     }
   });
 
   app.get('/billing/config', async (req, res) => {
     try {
       const config = getBillingConfig(req);
-      let offer = buildUnavailableBillingOffer(config, 'stripe_price_lookup_failed');
+      let offer = buildUnavailableBillingOffer(
+        config,
+        'stripe_price_lookup_failed',
+      );
 
       try {
         offer = await loadBillingOffer({
@@ -995,32 +1601,44 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
       logBilling('error', 'Stripe billing config unavailable', {
         error: error.message,
       });
-      return res.status(error.statusCode || 500).json({ error: error.message });
+      return res.status(error.statusCode || 500).json({error: error.message});
     }
   });
 
-    const handleBillingAccountRequest = async (req, res) => {
-      try {
-        const auth = getAuthenticatedBillingIdentity(req, process.env);
-        const config = getBillingConfig(req);
-        const requestId = safeRequestId(extractRequestId(req, auth));
-        const record = await repo.getByUserId(auth.userId);
+  const handleBillingAccountRequest = async (req, res) => {
+    try {
+      const auth = getAuthenticatedBillingIdentity(req, process.env);
+      const config = getBillingConfig(req);
+      const requestId = safeRequestId(extractRequestId(req, auth));
+      const record = await repo.getByUserId(auth.userId);
+      const billingProvider = normalizeBillingCostProvider(
+        record?.billing_provider ||
+          (record?.stripe_subscription_id ? 'stripe' : null),
+      );
       let customer = null;
       let subscription = null;
       let paymentMethod = null;
       let invoices = [];
+      let rawInvoices = [];
+      let stripe = null;
 
       if (record?.stripe_customer_id) {
         try {
-          const stripe = getStripeClient();
-          customer = await stripe.customers.retrieve(record.stripe_customer_id, {
-            expand: ['invoice_settings.default_payment_method'],
-          });
+          stripe = getStripeClientFn();
+          customer = await stripe.customers.retrieve(
+            record.stripe_customer_id,
+            {
+              expand: ['invoice_settings.default_payment_method'],
+            },
+          );
 
           if (record?.stripe_subscription_id) {
-            subscription = await stripe.subscriptions.retrieve(record.stripe_subscription_id, {
-              expand: ['default_payment_method'],
-            });
+            subscription = await stripe.subscriptions.retrieve(
+              record.stripe_subscription_id,
+              {
+                expand: ['default_payment_method'],
+              },
+            );
           }
 
           const invoiceList = await stripe.invoices.list({
@@ -1028,11 +1646,14 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
             limit: 8,
           });
 
+          rawInvoices = Array.isArray(invoiceList?.data)
+            ? invoiceList.data
+            : [];
           invoices = Array.isArray(invoiceList?.data)
             ? invoiceList.data.map(buildInvoiceSummary)
             : [];
           paymentMethod = buildPaymentMethodSummary(
-            resolveDefaultPaymentMethod({ subscription, customer }),
+            resolveDefaultPaymentMethod({subscription, customer}),
           );
         } catch (error) {
           logBilling('error', 'Billing Stripe account enrichment failed', {
@@ -1041,6 +1662,146 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
             error: error.message,
           });
         }
+      }
+
+      let fallbackRevenueSnapshot = null;
+      const hasStripeRevenueOnLiveObjects =
+        Number.isFinite(subscription?.items?.data?.[0]?.price?.unit_amount) ||
+        rawInvoices.some(item => Number.isFinite(item?.amount_paid));
+      if (billingProvider === 'stripe' && !hasStripeRevenueOnLiveObjects) {
+        const catalogPriceId = String(
+          record?.stripe_price_id ||
+            record?.provider_price_id ||
+            config.priceId ||
+            '',
+        ).trim();
+        if (catalogPriceId) {
+          try {
+            stripe = stripe || getStripeClientFn();
+            const offer = await loadBillingOfferFn({
+              stripe,
+              config: {
+                ...config,
+                priceId: catalogPriceId,
+              },
+            });
+            if (
+              offer?.available &&
+              Number.isFinite(offer.unitAmount) &&
+              offer.currency
+            ) {
+              fallbackRevenueSnapshot = buildRevenueSnapshot({
+                amount: offer.unitAmount / 100,
+                currency: offer.currency,
+                classification: 'estimated_reliable',
+                evidence: `stripe_price_catalog_lookup:${catalogPriceId}`,
+              });
+            }
+          } catch (error) {
+            logBilling('warn', 'Stripe billing revenue price lookup failed', {
+              route: '/account/billing.json',
+              requestId,
+              priceId: catalogPriceId,
+              error: error.message,
+            });
+          }
+        }
+      }
+
+      // Calculate cost and margin
+      let revenueAnalysis = null;
+      let commercialTerms = null;
+      let operationalCosts = null;
+      let usageMetrics = null;
+      let costBreakdown = null;
+      let marginAnalysis = null;
+      let fxNormalization = null;
+      let economicPolicy = null;
+      const priceBook = priceBookLoader();
+      try {
+        const usageSnapshot = await readBillingUsageSnapshotFn({
+          db,
+          userId: auth.userId,
+        });
+        const operationalUnitCostSnapshots =
+          await readOperationalUnitCostSnapshotsFn({
+            db,
+            priceBook,
+          });
+        const platformAllocationSnapshot =
+          await readPlatformAllocationSnapshotFn({
+            db,
+            priceBook,
+          });
+        const economics = buildBillingAccountCostSnapshot({
+          record,
+          subscription,
+          invoices: rawInvoices,
+          priceBook,
+          usageMetrics: usageSnapshot,
+          platformAllocationCostUsd: platformAllocationSnapshot,
+          routingUnitCostUsd: operationalUnitCostSnapshots.routingUnitCostUsd,
+          weatherUnitCostUsd: operationalUnitCostSnapshots.weatherUnitCostUsd,
+          fallbackRevenueSnapshot,
+          userId: auth.userId,
+        });
+        revenueAnalysis = economics.revenue;
+        commercialTerms = economics.commercialTerms;
+        operationalCosts = economics.operationalCosts;
+        usageMetrics = economics.usageMetrics;
+        costBreakdown = economics.costBreakdown;
+        marginAnalysis = economics.marginAnalysis;
+        fxNormalization = economics.fxNormalization;
+        economicPolicy = economics.economicPolicy;
+
+        // Alert logging
+        const tier =
+          record?.subscription_status === 'active' ? 'premium' : 'free';
+        const threshold = tier === 'premium' ? 0.3 : 0.2;
+        if (
+          TRUSTED_MARGIN_CLASSIFICATIONS.has(marginAnalysis.classification) &&
+          typeof marginAnalysis.marginPercent === 'number' &&
+          marginAnalysis.marginPercent < 1 - threshold
+        ) {
+          logBilling('warn', 'margin_threshold_exceeded', {
+            tier,
+            marginPercent: marginAnalysis.marginPercent,
+            threshold,
+          });
+        }
+      } catch (error) {
+        logBilling('error', 'Cost calculation failed', {
+          route: '/account/billing.json',
+          requestId,
+          error: error.message,
+        });
+        const fallbackUsageMetrics = buildUsageMetrics({
+          routingCalls: null,
+          weatherCalls: null,
+          classification: 'absent',
+        });
+        const fallbackOperationalCosts = buildOperationalCostsFromPriceBook({
+          priceBook,
+          platformAllocationCostUsd: {
+            amountUsd: null,
+            classification: 'absent',
+            evidence: 'cost_engine_failure',
+          },
+        });
+        const fallbackEconomics = buildEmptyBillingEconomics({
+          blockers: ['cost_engine_failure'],
+          usageMetrics: fallbackUsageMetrics,
+          operationalCosts: fallbackOperationalCosts,
+          revenueEvidence: 'cost_engine_failure',
+        });
+        revenueAnalysis = fallbackEconomics.revenue;
+        commercialTerms = fallbackEconomics.commercialTerms;
+        operationalCosts = fallbackEconomics.operationalCosts;
+        usageMetrics = fallbackEconomics.usageMetrics;
+        costBreakdown = fallbackEconomics.costBreakdown;
+        marginAnalysis = fallbackEconomics.marginAnalysis;
+        fxNormalization = fallbackEconomics.fxNormalization;
+        economicPolicy = fallbackEconomics.economicPolicy;
       }
 
       return res.json({
@@ -1060,18 +1821,26 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
         portalAvailable: Boolean(record?.stripe_customer_id),
         checkoutAvailable: true,
         queryAuthAllowed: allowQueryAuth(process.env),
+        revenueAnalysis,
+        commercialTerms,
+        operationalCosts,
+        usageMetrics,
+        costBreakdown,
+        marginAnalysis,
+        fxNormalization,
+        economicPolicy,
       });
     } catch (error) {
       logBilling('error', 'Billing account fetch failed', {
         route: '/account/billing.json',
         error: error.message,
-        });
-        return res.status(error.statusCode || 500).json({ error: error.message });
-      }
-    };
+      });
+      return res.status(error.statusCode || 500).json({error: error.message});
+    }
+  };
 
-    app.get('/account/billing.json', handleBillingAccountRequest);
-    app.post('/account/billing.json', handleBillingAccountRequest);
+  app.get('/account/billing.json', handleBillingAccountRequest);
+  app.post('/account/billing.json', handleBillingAccountRequest);
 
   app.post('/create-checkout-session', async (req, res) => {
     try {
@@ -1109,8 +1878,8 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
           cancel_url: buildCancelUrl(config.appUrl),
           locale: config.checkoutLocale,
           billing_address_collection: config.billingAddressCollection,
-          automatic_tax: { enabled: config.automaticTaxEnabled },
-          tax_id_collection: { enabled: config.taxIdCollectionEnabled },
+          automatic_tax: {enabled: config.automaticTaxEnabled},
+          tax_id_collection: {enabled: config.taxIdCollectionEnabled},
           payment_method_collection: 'always',
           customer_update: {
             address: 'auto',
@@ -1144,7 +1913,7 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
           requestId: safeRequestId(requestId),
           hasUrl: false,
         });
-        return res.status(502).json({ error: 'stripe_checkout_missing_url' });
+        return res.status(502).json({error: 'stripe_checkout_missing_url'});
       }
       if (wantsRedirectResponse(req)) {
         return res.redirect(303, session.url);
@@ -1168,7 +1937,7 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
         error: error.message,
       });
       const normalized = mapMobileBillingError(error, 'checkout');
-      return res.status(normalized.statusCode).json({ error: normalized.error });
+      return res.status(normalized.statusCode).json({error: normalized.error});
     }
   });
 
@@ -1232,7 +2001,8 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
         userId: auth.userId,
         stripeCustomerId: customerId,
         stripeSubscriptionId: subscription?.id || null,
-        stripePriceId: extractSubscriptionPriceId(subscription) || config.priceId,
+        stripePriceId:
+          extractSubscriptionPriceId(subscription) || config.priceId,
         stripePaymentIntentId:
           getPaymentIntentFromSubscription(subscription)?.id || null,
         subscriptionStatus: subscription?.status || 'incomplete',
@@ -1279,11 +2049,11 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
       });
       const normalized = mapMobileBillingError(
         error?.message === 'stripe_payment_missing_client_secret'
-          ? Object.assign(error, { statusCode: 502 })
+          ? Object.assign(error, {statusCode: 502})
           : error,
         'payment',
       );
-      return res.status(normalized.statusCode).json({ error: normalized.error });
+      return res.status(normalized.statusCode).json({error: normalized.error});
     }
   });
 
@@ -1295,7 +2065,7 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
       const subscriptionId = readSubscriptionInput(req);
 
       if (!paymentIntentId) {
-        return res.status(400).json({ error: 'payment_intent_unavailable' });
+        return res.status(400).json({error: 'payment_intent_unavailable'});
       }
 
       const confirmation = await confirmPaymentIntentStatus({
@@ -1329,7 +2099,7 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
         error: error.message,
       });
       const normalized = mapMobileBillingError(error, 'payment');
-      return res.status(normalized.statusCode).json({ error: normalized.error });
+      return res.status(normalized.statusCode).json({error: normalized.error});
     }
   };
 
@@ -1340,7 +2110,9 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
     try {
       const stripe = getStripeClient();
       const config = getBillingConfig(req);
-      const sessionId = String(req.body?.session_id || req.body?.sessionId || '').trim();
+      const sessionId = String(
+        req.body?.session_id || req.body?.sessionId || '',
+      ).trim();
       let auth = null;
 
       try {
@@ -1351,7 +2123,7 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
         }
       }
 
-      const { userId, customerId } = await buildPortalLookupContext({
+      const {userId, customerId} = await buildPortalLookupContext({
         stripe,
         repo,
         auth,
@@ -1359,10 +2131,13 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
       });
 
       if (!customerId) {
-        return res.status(400).json({ error: 'missing_stripe_customer_id' });
+        return res.status(400).json({error: 'missing_stripe_customer_id'});
       }
 
-      const requestId = extractRequestId(req, auth || { userId, billingTokenId: sessionId });
+      const requestId = extractRequestId(
+        req,
+        auth || {userId, billingTokenId: sessionId},
+      );
       const session = await stripe.billingPortal.sessions.create(
         {
           customer: customerId,
@@ -1389,12 +2164,12 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
           requestId: safeRequestId(requestId),
           hasUrl: false,
         });
-        return res.status(502).json({ error: 'stripe_portal_missing_url' });
+        return res.status(502).json({error: 'stripe_portal_missing_url'});
       }
       if (wantsRedirectResponse(req)) {
         return res.redirect(303, session.url);
       }
-      return res.json({ url: session.url });
+      return res.json({url: session.url});
     } catch (error) {
       const auth = (() => {
         try {
@@ -1410,7 +2185,7 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
         error: error.message,
       });
       const normalized = mapMobileBillingError(error, 'portal');
-      return res.status(normalized.statusCode).json({ error: normalized.error });
+      return res.status(normalized.statusCode).json({error: normalized.error});
     }
   });
 
@@ -1459,7 +2234,7 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
         eventId: event.id,
         type: event.type,
       });
-      return res.json({ received: true, duplicate: true });
+      return res.json({received: true, duplicate: true});
     }
 
     try {
@@ -1481,28 +2256,40 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
             null;
           let subscription = null;
           if (session.subscription) {
-            subscription = await stripe.subscriptions.retrieve(session.subscription);
+            subscription = await stripe.subscriptions.retrieve(
+              session.subscription,
+            );
           }
           if (userId && session.customer) {
             await repo.upsertCustomerProfile({
               userId,
               stripeCustomerId: session.customer,
-              ...extractBillingMetadata(subscription?.metadata, session.metadata || {}),
+              ...extractBillingMetadata(
+                subscription?.metadata,
+                session.metadata || {},
+              ),
               sourceEvent: event.type,
             });
           }
           syncResult = await repo.syncSubscription({
             userId,
-            stripeCustomerId: session.customer || subscription?.customer || null,
-            stripeSubscriptionId: session.subscription || subscription?.id || null,
+            stripeCustomerId:
+              session.customer || subscription?.customer || null,
+            stripeSubscriptionId:
+              session.subscription || subscription?.id || null,
             stripePriceId:
               extractSubscriptionPriceId(subscription) ||
               session.metadata?.billing_price_id ||
               null,
             subscriptionStatus: subscription?.status || 'incomplete',
-            currentPeriodEnd: normalizePeriodEnd(subscription?.current_period_end),
+            currentPeriodEnd: normalizePeriodEnd(
+              subscription?.current_period_end,
+            ),
             premiumActive: premiumActiveForStatus(subscription?.status),
-            ...extractBillingMetadata(subscription?.metadata, session.metadata || {}),
+            ...extractBillingMetadata(
+              subscription?.metadata,
+              session.metadata || {},
+            ),
             billingCurrency: resolveStripeBillingCurrency(
               session?.currency,
               extractSubscriptionCurrency(subscription),
@@ -1515,7 +2302,11 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
         case 'customer.subscription.created':
         case 'customer.subscription.updated':
         case 'customer.subscription.trial_will_end': {
-          syncResult = await handleSubscriptionSync(repo, event.data.object, event.type);
+          syncResult = await handleSubscriptionSync(
+            repo,
+            event.data.object,
+            event.type,
+          );
           break;
         }
         case 'customer.subscription.deleted': {
@@ -1525,12 +2316,18 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
             (await repo.findByCustomerId(subscription?.customer));
           syncResult = await repo.syncSubscription({
             userId: current?.user_id || subscription?.metadata?.user_id || null,
-            stripeCustomerId: subscription?.customer || current?.stripe_customer_id || null,
-            stripeSubscriptionId: subscription?.id || current?.stripe_subscription_id || null,
+            stripeCustomerId:
+              subscription?.customer || current?.stripe_customer_id || null,
+            stripeSubscriptionId:
+              subscription?.id || current?.stripe_subscription_id || null,
             stripePriceId:
-              extractSubscriptionPriceId(subscription) || current?.stripe_price_id || null,
+              extractSubscriptionPriceId(subscription) ||
+              current?.stripe_price_id ||
+              null,
             subscriptionStatus: subscription?.status || 'canceled',
-            currentPeriodEnd: normalizePeriodEnd(subscription?.current_period_end),
+            currentPeriodEnd: normalizePeriodEnd(
+              subscription?.current_period_end,
+            ),
             premiumActive: false,
             ...extractBillingMetadata(subscription?.metadata, current || {}),
             billingCurrency: resolveStripeBillingCurrency(
@@ -1595,15 +2392,18 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
         },
       });
 
-      return res.json({ received: true });
+      return res.json({received: true});
     } catch (error) {
-      await repo.markWebhookEventFailed({ eventId: event?.id, errorMessage: error.message });
+      await repo.markWebhookEventFailed({
+        eventId: event?.id,
+        errorMessage: error.message,
+      });
       logBilling('error', 'Stripe webhook processing failed', {
         eventId: event?.id,
         type: event?.type,
         error: error.message,
       });
-      return res.status(500).json({ error: 'stripe_webhook_processing_failed' });
+      return res.status(500).json({error: 'stripe_webhook_processing_failed'});
     }
   };
 
@@ -1615,6 +2415,7 @@ const buildPortalLookupContext = async ({ stripe, repo, auth, sessionId }) => {
 
 module.exports = {
   registerStripeBilling,
+  buildBillingAccountCostSnapshot,
   wantsRedirectResponse,
   buildBillingOfferFromStripePrice,
   buildUnavailableBillingOffer,

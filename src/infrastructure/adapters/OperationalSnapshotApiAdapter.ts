@@ -1,10 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { APP_CONFIG } from '../../core/config';
+import { getAlertApiBaseUrl } from '../../core/config';
 import {
   OperationalSnapshot,
   normalizeOperationalSnapshot,
   isSnapshotStale,
 } from '../../domain/trust/OperationalSnapshot';
+import { toUrlEncodedString } from '../../utils/urlEncoding';
 
 const SNAPSHOT_CACHE_KEY = '@Alert:OperationalSnapshot:v1';
 const NETWORK_TIMEOUT_MS = 2200;
@@ -28,12 +29,7 @@ type MemoryCacheValue = {
 
 let memoryCache: MemoryCacheValue | null = null;
 
-const getApiBaseUrl = () => {
-  const globalOverride = (globalThis as any)?.ALERT_API_URL || (globalThis as any)?.__ALERT_API_URL__;
-  const envOverride =
-    typeof process !== 'undefined' ? (process as any)?.env?.ALERT_API_URL : undefined;
-  return (globalOverride || envOverride || APP_CONFIG.API_BASE_URL || '').trim();
-};
+const getApiBaseUrl = () => getAlertApiBaseUrl();
 
 const fetchJsonWithTimeout = async (url: string): Promise<any> => {
   const controller = typeof AbortController === 'function' ? new AbortController() : null;
@@ -132,12 +128,13 @@ export class OperationalSnapshotApiAdapter implements IOperationalSnapshotApiAda
       throw new Error('snapshot_base_url_missing');
     }
 
-    const query = new URLSearchParams();
-    query.set('lat', asFiniteNumber(params.latitude).toFixed(5));
-    query.set('lon', asFiniteNumber(params.longitude).toFixed(5));
-    query.set('radiusKm', String(clampRadiusKm(params.radiusKm)));
+    const query = toUrlEncodedString({
+      lat: asFiniteNumber(params.latitude).toFixed(5),
+      lon: asFiniteNumber(params.longitude).toFixed(5),
+      radiusKm: String(clampRadiusKm(params.radiusKm)),
+    });
     const normalizedBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
-    const url = `${normalizedBase}/v1/operational/snapshot?${query.toString()}`;
+    const url = `${normalizedBase}/v1/operational/snapshot?${query}`;
     const payload = await fetchJsonWithTimeout(url);
     const snapshot = normalizeOperationalSnapshot(payload?.snapshot);
     await this.persistSnapshot(snapshot);

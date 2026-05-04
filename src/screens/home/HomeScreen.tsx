@@ -1,4 +1,4 @@
-﻿/**
+/**
  * HOME SCREEN - Main Dashboard
  *
  * Primary user interface showing safety status, alerts, widgets.
@@ -48,12 +48,13 @@ import {
   InteractionManager,
   Animated,
 } from 'react-native';
+import AppText from '../../components/ui/AppText';
 import {SafeAreaView, useSafeAreaInsets} from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import {NativeStackScreenProps} from '@react-navigation/native-stack';
 import {useTheme} from '../../context/ThemeContext';
 import {useTranslation} from 'react-i18next';
 import {getLocales} from 'react-native-localize';
-import {GetAlertBrainBriefingQuery} from '../../application/queries/GetAlertBrainBriefingQuery';
 import {
   AlertBrainBriefingReadModel,
   createInitialAlertBrainBriefingReadModel,
@@ -69,14 +70,11 @@ import {
   shouldAutoRequestLocationPermission,
 } from '../../utils/locationAccess';
 import {AlertNotification} from '../../types/notifications';
+import {GetHomeRiskSnapshotQuery} from '../../application/queries/GetHomeRiskSnapshotQuery';
+import {GetAlertBrainBriefingQuery} from '../../application/queries/GetAlertBrainBriefingQuery';
 import {NotificationService} from '../../services/NotificationService';
-import {RouteDestinationService} from '../../services/RouteDestinationService';
 import {ImportantAlertsService} from '../../services/ImportantAlertsService';
-import {MonitoringService} from '../../services/MonitoringService';
-import {EpidemicService} from '../../services/EpidemicService';
 import {TelemetryService} from '../../services/TelemetryService';
-import {ChatThreadService} from '../../services/ChatThreadService';
-import {GUARDIANS_CONVERSATION_ID} from '../../services/chat/guardiansConversation';
 import {ThemeTokens} from '../../constants/ThemeTokens';
 import {resolveLocale, resolveTimeZone} from '../../utils/dateTimeFormat';
 import {performance} from '../../utils/performance';
@@ -85,33 +83,30 @@ import {
   canUseLocationForRiskMaps,
   isFiniteCoordinatePair,
 } from '../../utils/locationQuality';
+import {NotificationCenterState} from '../../services/importantAlertUtils';
+import type {
+  HomeRankedRisk,
+  HomeRiskNature,
+  HomeSafetyState,
+} from '../../domain/home/HomeRiskSnapshot';
+import {RootStackParamList} from '../../navigation/types';
+// FAANG Fase 2: Home Instantânea com cache
 import {
-  NotificationCenterState,
-  mapAlertToCategory,
-} from '../../services/importantAlertUtils';
-import {
-  buildWeatherImportantAlertCandidateFromSignal,
-  normalizeImportantWeatherCategory,
-} from '../../services/weatherImportantAlertBridge';
-import {
-  inferRiskFromEpidemicSnapshot,
-  inferRiskNatureFromAlert,
-  priorityScore,
-  RiskNature,
-  riskScoreFromAlert,
-} from '../../services/risk/RiskInferenceService';
+  HomeInstantCache,
+  FreshnessState,
+} from '../../infrastructure/cache/HomeInstantCache';
+import {FeatureFlags} from '../../core/featureFlags';
 
 const {width, height} = Dimensions.get('window');
 const FONT_FAMILY =
   Platform.OS === 'ios'
     ? ThemeTokens.typography.families.ios
     : ThemeTokens.typography.families.android;
-const SOS_GLOW_SIZE = width * 0.82;
-const SOS_SHELL_SIZE = width * 0.72;
-const SOS_PULSE_SIZE = width * 0.66;
-const SOS_BUTTON_SIZE = width * 0.58;
-const SOS_INNER_RING_SIZE = width * 0.5;
-const SOS_TARGET_SIZE = width * 0.24;
+const SOS_GLOW_SIZE = width * 0.86;
+const SOS_SHELL_SIZE = width * 0.74;
+const SOS_PULSE_SIZE = width * 0.7;
+const SOS_BUTTON_SIZE = width * 0.6;
+const SOS_INNER_RING_SIZE = width * 0.66;
 const SOS_GLOW_SCALE = 1.02;
 const SOS_PULSE_SCALE = 1.04;
 const SOS_ACTIVE_RESET_MS = 8000;
@@ -144,16 +139,6 @@ const getRiskScore = (riskLevel: 'low' | 'medium' | 'high'): number => {
   return 0.2;
 };
 
-type SafetyCTAState = 'ok' | 'warning' | 'critical';
-type RankedRisk = {
-  categoryId: string;
-  nature: Exclude<RiskNature, 'none'>;
-  score: number;
-  title?: string;
-  summary?: string;
-  timestamp?: string;
-};
-
 const WEATHER_THREAT_CATEGORIES = new Set([
   'storm',
   'lightning',
@@ -170,6 +155,11 @@ const isWeatherThreatCategory = (value?: string) =>
       .trim()
       .toLowerCase(),
   );
+
+const normalizeHomeRiskNature = (value: unknown): HomeRiskNature => {
+  if (value === 'observed' || value === 'forecast') return value;
+  return 'observed'; // fallback seguro
+};
 
 const guessRealtimeCategoryFromAlert = (title: string): string | undefined => {
   const t = String(title || '').toLowerCase();
@@ -224,115 +214,9 @@ const inferWeatherThreatCategory = (
   return undefined;
 };
 
-const normalizeToFeedCategory = (category: string): string => {
-  if (category === 'sos') return 'sos_nearby';
-  return category;
-};
+type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
 
-const getWeatherImportantAlertLabelKey = (category?: string | null) => {
-  switch (normalizeImportantWeatherCategory(category)) {
-    case 'lightning':
-      return 'weather_alert_lightning_nearby';
-    case 'hail':
-      return 'weather_alert_hail_nearby';
-    case 'snowstorm':
-      return 'weather_alert_snowstorm_nearby';
-    case 'flood':
-      return 'weather_alert_flood_nearby';
-    case 'storm':
-    default:
-      return 'weather_alert_storm_nearby';
-  }
-};
-
-const getSafetyStateFromRisks = (risks: RankedRisk[]): SafetyCTAState => {
-  if (risks.some(item => item.nature === 'observed' && item.score >= 0.72)) {
-    return 'critical';
-  }
-  if (risks.some(item => item.nature === 'forecast' && item.score >= 0.52)) {
-    return 'warning';
-  }
-  return 'ok';
-};
-
-const buildRankedRisks = (
-  alerts: AlertNotification[],
-  activeCategoryIds: Set<string>,
-  pandemicSnapshot: any,
-  epidemicSnapshot: any,
-): RankedRisk[] => {
-  const byCategory = new Map<string, RankedRisk>();
-  const upsertRisk = (risk: RankedRisk) => {
-    const existing = byCategory.get(risk.categoryId);
-    if (!existing || risk.score > existing.score) {
-      byCategory.set(risk.categoryId, risk);
-    }
-  };
-
-  alerts.forEach(alert => {
-    const rawCategory = mapAlertToCategory(alert);
-    const categoryId = normalizeToFeedCategory(rawCategory);
-    if (!categoryId) return;
-    if (
-      categoryId !== 'sos_nearby' &&
-      activeCategoryIds.size > 0 &&
-      !activeCategoryIds.has(rawCategory)
-    ) {
-      return;
-    }
-
-    const nature = inferRiskNatureFromAlert(alert);
-    if (nature === 'none') return;
-
-    const computedRiskScore = riskScoreFromAlert(alert);
-    const computedPriority = priorityScore({
-      nature,
-      riskScore: computedRiskScore,
-      timestamp: alert.timestamp,
-      distanceKm: categoryId === 'sos_nearby' ? 0 : undefined,
-    });
-
-    upsertRisk({
-      categoryId,
-      nature,
-      score: computedPriority,
-      title: alert.title,
-      summary: alert.summary,
-      timestamp: alert.timestamp,
-    });
-  });
-
-  const pandemic = inferRiskFromEpidemicSnapshot(pandemicSnapshot, 'municipal');
-  if (pandemic.nature !== 'none') {
-    upsertRisk({
-      categoryId: 'pandemic',
-      nature: pandemic.nature,
-      score: pandemic.priorityScore,
-      title: 'Pandemia',
-      summary: pandemicSnapshot?.message,
-      timestamp: pandemicSnapshot?.asOf || pandemicSnapshot?.fetchedAt,
-    });
-  }
-
-  const epidemic = inferRiskFromEpidemicSnapshot(epidemicSnapshot, 'municipal');
-  if (epidemic.nature !== 'none') {
-    upsertRisk({
-      categoryId: 'epidemic',
-      nature: epidemic.nature,
-      score: epidemic.priorityScore,
-      title: 'Epidemia',
-      summary: epidemicSnapshot?.message,
-      timestamp: epidemicSnapshot?.asOf || epidemicSnapshot?.fetchedAt,
-    });
-  }
-
-  return Array.from(byCategory.values()).sort((a, b) => {
-    if (b.score !== a.score) return b.score - a.score;
-    return Date.parse(b.timestamp || '') - Date.parse(a.timestamp || '');
-  });
-};
-
-const HomeScreen: React.FC = ({navigation}: any) => {
+const HomeScreen: React.FC<Props> = ({navigation}) => {
   const {colors, isDark} = useTheme();
   const {t, i18n} = useTranslation();
   const {securityState, triggerSecureSOS, setPanicHold, requestPreciseFixNow} =
@@ -340,7 +224,9 @@ const HomeScreen: React.FC = ({navigation}: any) => {
   const insets = useSafeAreaInsets();
   const [refreshing, setRefreshing] = useState(false);
   const [alerts, setAlerts] = useState<AlertNotification[]>([]);
-  const [prioritizedRisks, setPrioritizedRisks] = useState<RankedRisk[]>([]);
+  const [prioritizedRisks, setPrioritizedRisks] = useState<HomeRankedRisk[]>(
+    [],
+  );
   const [hasUnavailableMonitoringData, setHasUnavailableMonitoringData] =
     useState(false);
   const [operationalModel, setOperationalModel] =
@@ -369,6 +255,11 @@ const HomeScreen: React.FC = ({navigation}: any) => {
   const [sosSendState, setSosSendState] = useState<
     'idle' | 'sending' | 'active'
   >('idle');
+  // FAANG Fase 2: Estados para Home Instantânea com cache
+  const [cacheFreshness, setCacheFreshness] =
+    useState<FreshnessState>('missing');
+  const [isUsingCache, setIsUsingCache] = useState(false);
+  const [cacheLastUpdatedAt, setCacheLastUpdatedAt] = useState<number>(0);
   const sosHoldTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sosActiveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sosPulseAnim = useRef(new Animated.Value(0)).current;
@@ -381,6 +272,10 @@ const HomeScreen: React.FC = ({navigation}: any) => {
   const refreshRequestTokenRef = useRef(0);
   const initialDataLoadRef = useRef(false);
   const locationPromptRequestedRef = useRef(false);
+  const deferredBriefingTaskRef = useRef<{cancel?: () => void} | null>(null);
+  const deferredBriefingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   const localeTag = useMemo(
     () =>
@@ -435,28 +330,8 @@ const HomeScreen: React.FC = ({navigation}: any) => {
     [securityState.riskLevel],
   );
 
-  const safetyCTAState = useMemo(() => {
-    const operationalRisk = operationalModel.snapshot?.riskLevel;
-    if (operationalRisk === 'high') return 'critical';
-    if (operationalRisk === 'medium') return 'warning';
-    if (operationalRisk === 'low' && operationalModel.state !== 'error')
-      return 'ok';
-    return getSafetyStateFromRisks(prioritizedRisks);
-  }, [
-    operationalModel.snapshot?.riskLevel,
-    operationalModel.state,
-    prioritizedRisks,
-  ]);
-
-  const statusBarState = useMemo<SafetyCTAState>(() => {
-    const operationalRisk = operationalModel.snapshot?.riskLevel;
-    if (operationalRisk === 'high') return 'critical';
-    if (operationalRisk === 'medium') return 'warning';
-    if (operationalRisk === 'low') return 'ok';
-    if (securityState.riskLevel === 'high') return 'critical';
-    if (securityState.riskLevel === 'medium') return 'warning';
-    return 'ok';
-  }, [operationalModel.snapshot?.riskLevel, securityState.riskLevel]);
+  const [safetyCTAState, setSafetyCTAState] = useState<HomeSafetyState>('ok');
+  const [statusBarState, setStatusBarState] = useState<HomeSafetyState>('ok');
 
   const topRisk = useMemo(
     () => prioritizedRisks[0] || null,
@@ -558,28 +433,16 @@ const HomeScreen: React.FC = ({navigation}: any) => {
     return {
       state,
       tone,
-      ring: withAlpha(tone, state === 'active' ? 0.42 : 0.32),
-      glow: withAlpha(tone, state === 'active' ? 0.18 : 0.12),
-      inner: withAlpha('#FFFFFF', state === 'active' ? 0.38 : 0.26),
-      text: '#FFFFFF',
-      shell: tone,
-      shellBorder: 'transparent',
-      shellInset: 'transparent',
-      shellClamp: 'transparent',
-      shellClampBorder: 'transparent',
-      commandBg: withAlpha('#0B0E12', isDark ? 0.74 : 0.6),
-      commandBorder:
-        state === 'idle'
-          ? withAlpha('#FFFFFF', isDark ? 0.09 : 0.14)
-          : withAlpha(tone, 0.44),
-      commandText: withAlpha('#FFFFFF', state === 'active' ? 0.96 : 0.88),
-      target: withAlpha('#FFFFFF', state === 'active' ? 0.94 : 0.78),
-      targetGlow: withAlpha(tone, state === 'active' ? 0.26 : 0.16),
+      ring: withAlpha('#8E1627', state === 'active' ? 0.64 : 0.46),
+      glow: withAlpha('#5B0814', state === 'active' ? 0.32 : 0.2),
+      inner: withAlpha('#FF9AA5', state === 'active' ? 0.34 : 0.2),
+      shell: withAlpha(tone, state === 'active' ? 0.2 : 0.13),
+      shellBorder: withAlpha('#A31E31', state === 'active' ? 0.42 : 0.28),
+      shellInset: withAlpha('#FF6F7E', state === 'active' ? 0.24 : 0.14),
       surfaceBorder:
         state === 'idle'
-          ? withAlpha('#FFFFFF', 0.12)
-          : withAlpha('#FFFFFF', 0.2),
-      footer: withAlpha('#FFFFFF', state === 'active' ? 0.8 : 0.62),
+          ? withAlpha('#FFC2C8', 0.18)
+          : withAlpha('#FFE3E6', 0.26),
     } as const;
   }, [
     colors.alert,
@@ -589,53 +452,6 @@ const HomeScreen: React.FC = ({navigation}: any) => {
     sosPressing,
     sosSendState,
   ]);
-
-  const sendGuardiansSosMessage = useCallback(async () => {
-    const loc = securityState.location;
-    const hasLoc = isFiniteCoordinatePair(loc?.latitude, loc?.longitude);
-    try {
-      await ChatThreadService.ensureGuardiansConversation();
-      await ChatThreadService.sendMessage({
-        conversationId: GUARDIANS_CONVERSATION_ID,
-        type: 'text',
-        text: t('sos'),
-        meta: hasLoc
-          ? {
-              location: {
-                latitude: Number(loc?.latitude),
-                longitude: Number(loc?.longitude),
-                source: 'sos_button',
-                sharedAt: new Date().toISOString(),
-                label: t('home_sos_nearby_title'),
-              },
-            }
-          : undefined,
-        conversation: {
-          title: t('guardians_conversation_title'),
-          type: 'group',
-          members: [],
-        },
-      });
-      TelemetryService.trackEvent('sos_guardians_send_success', {
-        withLocation: hasLoc,
-      });
-    } catch (err) {
-      TelemetryService.trackEvent('sos_guardians_send_error');
-    }
-  }, [securityState.location, t]);
-
-  const sosCommandLabel = useMemo(() => {
-    if (sosSendState === 'sending') {
-      return t('sos_recording_label');
-    }
-    if (sosSendState === 'active') {
-      return t('sos_action_hint_active');
-    }
-    if (securityState.panicHold || sosPressing) {
-      return t('sos_hold_to_send');
-    }
-    return t('sos_instruction_default');
-  }, [securityState.panicHold, sosPressing, sosSendState, t]);
 
   const barTitle = useMemo(
     () => t('home_alert_map_title', {defaultValue: 'Mapa de Alertas'}),
@@ -772,8 +588,8 @@ const HomeScreen: React.FC = ({navigation}: any) => {
     triggerHeavyHaptic();
     TelemetryService.trackEvent('sos_button_tap', {screen: 'home'});
     try {
-      const sent = await triggerSecureSOS();
-      if (!sent) {
+      const result = await triggerSecureSOS();
+      if (!result.accepted) {
         TelemetryService.trackEvent('sos_send_error', {
           screen: 'home',
           reason: 'dispatch_failed',
@@ -781,14 +597,22 @@ const HomeScreen: React.FC = ({navigation}: any) => {
         setSosSendState('idle');
         return;
       }
-      TelemetryService.trackEvent('sos_send_success', {screen: 'home'});
-      await sendGuardiansSosMessage();
+      TelemetryService.trackEvent('sos_send_success', {
+        screen: 'home',
+        delivered: result.delivered,
+        queued: result.queued,
+        integrityProtected: result.integrityProtected,
+      });
       setSosSendState('active');
       if (sosActiveTimer.current) clearTimeout(sosActiveTimer.current);
       sosActiveTimer.current = setTimeout(() => {
         setSosSendState('idle');
       }, SOS_ACTIVE_RESET_MS);
-      Alert.alert(t('sos_sent_title'), t('sos_sent_body'));
+      if (result.queued && !result.delivered) {
+        Alert.alert(t('sos_queued_title'), t('sos_queued_body'));
+      } else {
+        Alert.alert(t('sos_sent_title'), t('sos_sent_body'));
+      }
     } catch {
       TelemetryService.trackEvent('sos_send_error', {
         screen: 'home',
@@ -800,20 +624,20 @@ const HomeScreen: React.FC = ({navigation}: any) => {
 
   const handleOpenMessages = useCallback(() => {
     TelemetryService.trackEvent('messages_entry_tap', {screen: 'home'});
-    navigation.navigate('Conversations', {openGuardiansFirst: true});
+    navigation.navigate('Conversations');
     void (async () => {
       try {
         const activeSos = await NotificationService.getActiveSos();
         TelemetryService.trackEvent('messages_entry_route', {
-          route: 'Conversations',
+          route: 'ChatMonitor',
           withActiveSos: Boolean(activeSos?.location),
-          openGuardiansFirst: true,
+          mode: 'GUARDIANS_GROUP',
         });
       } catch {
         TelemetryService.trackEvent('messages_entry_route', {
-          route: 'Conversations',
+          route: 'ChatMonitor',
           withActiveSos: false,
-          openGuardiansFirst: true,
+          mode: 'GUARDIANS_GROUP',
         });
       }
     })();
@@ -850,15 +674,72 @@ const HomeScreen: React.FC = ({navigation}: any) => {
     }).start();
   };
 
+  const cancelDeferredBriefing = useCallback(() => {
+    if (deferredBriefingTimerRef.current) {
+      clearTimeout(deferredBriefingTimerRef.current);
+      deferredBriefingTimerRef.current = null;
+    }
+    if (typeof deferredBriefingTaskRef.current?.cancel === 'function') {
+      deferredBriefingTaskRef.current.cancel();
+    }
+    deferredBriefingTaskRef.current = null;
+  }, []);
+
+  const scheduleDeferredBriefing = useCallback(
+    (params: {
+      latitude: number | null;
+      longitude: number | null;
+      force: boolean;
+      requestToken: number;
+      operational: OperationalSnapshotReadModel;
+    }) => {
+      cancelDeferredBriefing();
+
+      const canApply = () =>
+        isMountedRef.current &&
+        params.requestToken === refreshRequestTokenRef.current;
+
+      deferredBriefingTaskRef.current = InteractionManager.runAfterInteractions(
+        () => {
+          deferredBriefingTimerRef.current = setTimeout(() => {
+            void (async () => {
+              const briefing = await GetAlertBrainBriefingQuery.execute({
+                latitude: params.latitude,
+                longitude: params.longitude,
+                locale: localeTag,
+                timeZone,
+                force: params.force,
+                operational: params.operational,
+              });
+              if (!canApply()) return;
+              setBrainBriefing(briefing);
+              setOperationalModel(briefing.operational);
+            })().catch(() => {
+              // The critical home shell already loaded; keep enrichment fail-soft.
+            });
+          }, 180);
+        },
+      );
+    },
+    [cancelDeferredBriefing, localeTag, timeZone],
+  );
+
   const fetchAlerts = useCallback(
-    async (force = false, requestToken?: number) => {
+    async (
+      force = false,
+      requestToken?: number,
+      options?: {deferBriefing?: boolean},
+    ) => {
       const token =
         typeof requestToken === 'number'
           ? requestToken
           : refreshRequestTokenRef.current + 1;
       refreshRequestTokenRef.current = token;
+      cancelDeferredBriefing();
+
       const canApply = () =>
         isMountedRef.current && token === refreshRequestTokenRef.current;
+      const deferBriefing = options?.deferBriefing === true;
 
       const lat = securityState.location?.latitude;
       const lon = securityState.location?.longitude;
@@ -866,133 +747,67 @@ const HomeScreen: React.FC = ({navigation}: any) => {
         !canUseLocationForRiskMaps(securityState) ||
         !isFiniteCoordinatePair(lat, lon)
       ) {
-        const brainWithoutLocation = await GetAlertBrainBriefingQuery.execute({
+        const homeSnapshot = await GetHomeRiskSnapshotQuery.execute({
           latitude: null,
           longitude: null,
+          riskScore,
+          clientRiskLevel: securityState.riskLevel,
           locale: localeTag,
           timeZone,
           force,
+          includeBriefing: !deferBriefing,
+          t,
         });
         if (!canApply()) return;
-        setBrainBriefing(brainWithoutLocation);
-        setOperationalModel(brainWithoutLocation.operational);
-        setAlerts([]);
-        setPrioritizedRisks([]);
-        setHasUnavailableMonitoringData(true);
+        setBrainBriefing(homeSnapshot.briefing);
+        setOperationalModel(homeSnapshot.operational);
+        setAlerts(homeSnapshot.alerts);
+        setPrioritizedRisks(homeSnapshot.prioritizedRisks);
+        setSafetyCTAState(homeSnapshot.safetyCTAState);
+        setStatusBarState(homeSnapshot.statusBarState);
+        setHasUnavailableMonitoringData(
+          homeSnapshot.hasUnavailableMonitoringData,
+        );
         return;
       }
-      const safeLat = Number(lat);
-      const safeLon = Number(lon);
-      const [
-        activeMonitoring,
-        activeSos,
-        targetLocation,
-        pandemicSnapshot,
-        epidemicSnapshot,
-        brainReadModel,
-      ] = await Promise.all([
-        MonitoringService.getActiveEvents(safeLat, safeLon, riskScore).catch(
-          () => null,
-        ),
-        NotificationService.getActiveSos(),
-        RouteDestinationService.getDefaultDestination(),
-        EpidemicService.getSnapshot(safeLat, safeLon, 'pandemic', '7d').catch(
-          () => null,
-        ),
-        EpidemicService.getSnapshot(safeLat, safeLon, 'epidemic', '7d').catch(
-          () => null,
-        ),
-        GetAlertBrainBriefingQuery.execute({
-          latitude: safeLat,
-          longitude: safeLon,
-          locale: localeTag,
-          timeZone,
-          force,
-        }),
-      ]);
-      const external = activeMonitoring?.alerts || [];
-      if (!canApply()) return;
-      const merged: AlertNotification[] = activeSos
-        ? [
-            {
-              id: 'sos-active',
-              type: 'sos',
-              title: t('home_sos_nearby_title'),
-              summary: t('home_sos_nearby_summary', {
-                name: activeSos.senderName,
-              }),
-              timestamp: new Date().toISOString(),
-              data: activeSos,
-            },
-            ...external,
-          ]
-        : external;
-      const ranked = buildRankedRisks(
-        merged,
-        activeMonitoring?.activeIds || new Set<string>(),
-        pandemicSnapshot,
-        epidemicSnapshot,
-      );
-      const topWeatherRisk =
-        ranked.find(risk => isWeatherThreatCategory(risk.categoryId)) || null;
-      const inferredWeatherCategory = normalizeImportantWeatherCategory(
-        [
-          brainReadModel.recommendedCategory,
-          topWeatherRisk?.categoryId,
-          inferWeatherThreatCategory(
-            brainReadModel.headline,
-            brainReadModel.summary,
-            topWeatherRisk?.title,
-            topWeatherRisk?.summary,
-          ),
-        ].find(category => isWeatherThreatCategory(category)) || null,
-      );
-      const hasWeatherEvidence =
-        Boolean(inferredWeatherCategory) &&
-        (Boolean(topWeatherRisk) ||
-          (brainReadModel.state === 'fresh' &&
-            !brainReadModel.stale &&
-            brainReadModel.signalCount > 0));
-      const weatherImportantAlertCandidate =
-        hasWeatherEvidence && inferredWeatherCategory
-          ? buildWeatherImportantAlertCandidateFromSignal({
-              alerts: merged,
-              category: inferredWeatherCategory,
-              label: t(
-                getWeatherImportantAlertLabelKey(inferredWeatherCategory),
-              ),
-              latitude: safeLat,
-              longitude: safeLon,
-              localeTag,
-              timestamp: topWeatherRisk?.timestamp || brainReadModel.updatedAt,
-            })
-          : null;
-      const importantAlertCandidates = weatherImportantAlertCandidate
-        ? [...merged, weatherImportantAlertCandidate]
-        : merged;
-      if (!canApply()) return;
-      setAlerts(merged);
-      if (!canApply()) return;
-      await ImportantAlertsService.ingestAlerts(importantAlertCandidates, {
-        currentLocation: {latitude: safeLat, longitude: safeLon},
-        targetLocation: targetLocation
-          ? {
-              latitude: targetLocation.latitude,
-              longitude: targetLocation.longitude,
-            }
-          : null,
+      const homeSnapshot = await GetHomeRiskSnapshotQuery.execute({
+        latitude: Number(lat),
+        longitude: Number(lon),
+        riskScore,
+        clientRiskLevel: securityState.riskLevel,
+        locale: localeTag,
+        timeZone,
+        force,
+        includeBriefing: !deferBriefing,
+        t,
       });
       if (!canApply()) return;
-      const unavailableCount = activeMonitoring?.unavailableIds?.size || 0;
-      const hasUnavailable = unavailableCount > 0;
-      setHasUnavailableMonitoringData(hasUnavailable);
-      setBrainBriefing(brainReadModel);
-      setOperationalModel(brainReadModel.operational);
-      setPrioritizedRisks(ranked);
+      setAlerts(homeSnapshot.alerts);
+      setHasUnavailableMonitoringData(
+        homeSnapshot.hasUnavailableMonitoringData,
+      );
+      setBrainBriefing(homeSnapshot.briefing);
+      setOperationalModel(homeSnapshot.operational);
+      setPrioritizedRisks(homeSnapshot.prioritizedRisks);
+      setSafetyCTAState(homeSnapshot.safetyCTAState);
+      setStatusBarState(homeSnapshot.statusBarState);
+
+      if (deferBriefing) {
+        scheduleDeferredBriefing({
+          latitude: Number(lat),
+          longitude: Number(lon),
+          force,
+          requestToken: token,
+          operational: homeSnapshot.operational,
+        });
+      }
     },
     [
+      cancelDeferredBriefing,
       localeTag,
       riskScore,
+      scheduleDeferredBriefing,
+      securityState.riskLevel,
       securityState.location?.latitude,
       securityState.location?.longitude,
       t,
@@ -1025,6 +840,56 @@ const HomeScreen: React.FC = ({navigation}: any) => {
       }
     })();
   }, [fetchAlerts, refreshLocationPermissionStatus, requestPreciseFixNow]);
+
+  // FAANG Fase 2: Salvar dados no cache após fetch
+  const saveToCache = useCallback(async () => {
+    try {
+      if (!FeatureFlags.isEnabled('home_instant_cache_enabled')) {
+        return;
+      }
+
+      await HomeInstantCache.initialize();
+
+      const lat = securityState.location?.latitude;
+      const lon = securityState.location?.longitude;
+
+      // Salvar dados relevantes no cache
+      await HomeInstantCache.save({
+        risk: {
+          level: securityState.riskLevel,
+          alerts: alerts.slice(0, 5).map(a => ({
+            id: a.id,
+            type: a.type,
+            title: a.title || '',
+            summary: a.summary || '',
+            timestamp: a.timestamp || new Date().toISOString(),
+          })),
+          prioritizedRisks: prioritizedRisks.slice(0, 3).map(r => ({
+            categoryId: r.categoryId,
+            nature: r.nature,
+            score: r.score,
+            title: r.title || '',
+            summary: r.summary,
+            timestamp: r.timestamp || new Date().toISOString(),
+          })),
+          fetchedAt: new Date().toISOString(),
+        },
+        cityApproximation:
+          lat && lon ? 'Localização atual' : securityState.locationName || '',
+        locationCountryCode: securityState.locationCountryCode || undefined,
+      });
+    } catch {
+      // Fail-soft: não quebrar se cache falhar
+    }
+  }, [
+    alerts,
+    prioritizedRisks,
+    securityState.locationCountryCode,
+    securityState.locationName,
+    securityState.location?.latitude,
+    securityState.location?.longitude,
+    securityState.riskLevel,
+  ]);
 
   useEffect(() => {
     let mounted = true;
@@ -1183,11 +1048,68 @@ const HomeScreen: React.FC = ({navigation}: any) => {
     void refreshLocationPermissionStatus();
   }, [refreshLocationPermissionStatus]);
 
+  // FAANG Fase 2: Carregar cache ao iniciar (antes do fetch)
+  useEffect(() => {
+    if (!fastStartReady) return;
+
+    const loadCacheOnStart = async () => {
+      try {
+        if (!FeatureFlags.isEnabled('home_instant_cache_enabled')) {
+          return;
+        }
+
+        await HomeInstantCache.initialize();
+
+        if (HomeInstantCache.hasUsableCache()) {
+          const riskData = HomeInstantCache.getRisk();
+          const freshness = HomeInstantCache.getFreshness('risk');
+
+          if (riskData.data && freshness !== 'missing') {
+            // Usar cache imediatamente para UI rápida
+            setAlerts(
+              riskData.data.alerts.map(a => ({
+                id: a.id,
+                type: a.type,
+                title: a.title,
+                summary: a.summary,
+                timestamp: a.timestamp,
+              })),
+            );
+            setPrioritizedRisks(
+              riskData.data.prioritizedRisks.map(r => ({
+                categoryId: r.categoryId,
+                nature: normalizeHomeRiskNature(r.nature),
+                score: r.score,
+                title: r.title,
+                summary: r.summary,
+                timestamp: r.timestamp,
+              })),
+            );
+
+            // Atualizar estado do cache
+            setCacheFreshness(freshness);
+            setIsUsingCache(true);
+            setCacheLastUpdatedAt(HomeInstantCache.getCachedAt());
+
+            // Registrar hit no cache
+            HomeInstantCache.recordHit();
+          }
+        } else {
+          HomeInstantCache.recordMiss();
+        }
+      } catch {
+        // Fail-soft: não quebrar se cache falhar
+      }
+    };
+
+    void loadCacheOnStart();
+  }, [fastStartReady]);
+
   useEffect(() => {
     if (!fastStartReady) return;
     const task = setTimeout(() => {
       initialDataLoadRef.current = true;
-      void fetchAlerts();
+      void fetchAlerts(false, undefined, {deferBriefing: true});
     }, 40);
     return () => {
       clearTimeout(task);
@@ -1272,8 +1194,9 @@ const HomeScreen: React.FC = ({navigation}: any) => {
       if (sosHoldTimer.current) {
         clearTimeout(sosHoldTimer.current);
       }
+      cancelDeferredBriefing();
     };
-  }, []);
+  }, [cancelDeferredBriefing]);
 
   useEffect(() => {
     performance.mark('home_map_ready');
@@ -1551,14 +1474,14 @@ const HomeScreen: React.FC = ({navigation}: any) => {
                 style={[
                   styles.sosGlow,
                   {
-                    backgroundColor: sosVisual.tone,
+                    backgroundColor: sosVisual.glow,
                     opacity: reducedMotion
                       ? styles.sosGlowStatic.opacity
                       : sosGlowAnim.interpolate({
                           inputRange: [0, 1],
                           outputRange: [
-                            sosVisual.state === 'active' ? 0.22 : 0.12,
-                            sosVisual.state === 'active' ? 0.08 : 0.02,
+                            sosVisual.state === 'active' ? 0.28 : 0.18,
+                            sosVisual.state === 'active' ? 0.12 : 0.05,
                           ],
                         }),
                     transform: [
@@ -1577,14 +1500,36 @@ const HomeScreen: React.FC = ({navigation}: any) => {
                   },
                 ]}
               />
-              <View
+              <Animated.View
                 pointerEvents="none"
                 style={[
                   styles.sosShell,
                   {
                     backgroundColor: sosVisual.shell,
                     borderColor: sosVisual.shellBorder,
-                    shadowColor: sosVisual.tone,
+                    shadowColor: sosVisual.glow,
+                    opacity: reducedMotion
+                      ? 0.9
+                      : sosGlowAnim.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [
+                            sosVisual.state === 'active' ? 0.94 : 0.86,
+                            sosVisual.state === 'active' ? 0.78 : 0.72,
+                          ],
+                        }),
+                    transform: [
+                      {
+                        scale: reducedMotion
+                          ? 1.01
+                          : sosGlowAnim.interpolate({
+                              inputRange: [0, 1],
+                              outputRange: [
+                                1,
+                                sosVisual.state === 'active' ? 1.035 : 1.02,
+                              ],
+                            }),
+                      },
+                    ],
                   },
                 ]}
               />
@@ -1594,50 +1539,6 @@ const HomeScreen: React.FC = ({navigation}: any) => {
                   styles.sosShellInset,
                   {
                     borderColor: sosVisual.shellInset,
-                  },
-                ]}
-              />
-              <View
-                pointerEvents="none"
-                style={[
-                  styles.sosClamp,
-                  styles.sosClampTop,
-                  {
-                    backgroundColor: sosVisual.shellClamp,
-                    borderColor: sosVisual.shellClampBorder,
-                  },
-                ]}
-              />
-              <View
-                pointerEvents="none"
-                style={[
-                  styles.sosClamp,
-                  styles.sosClampBottom,
-                  {
-                    backgroundColor: sosVisual.shellClamp,
-                    borderColor: sosVisual.shellClampBorder,
-                  },
-                ]}
-              />
-              <View
-                pointerEvents="none"
-                style={[
-                  styles.sosClamp,
-                  styles.sosClampLeft,
-                  {
-                    backgroundColor: sosVisual.shellClamp,
-                    borderColor: sosVisual.shellClampBorder,
-                  },
-                ]}
-              />
-              <View
-                pointerEvents="none"
-                style={[
-                  styles.sosClamp,
-                  styles.sosClampRight,
-                  {
-                    backgroundColor: sosVisual.shellClamp,
-                    borderColor: sosVisual.shellClampBorder,
                   },
                 ]}
               />
@@ -1662,8 +1563,8 @@ const HomeScreen: React.FC = ({navigation}: any) => {
                           : sosPulseAnim.interpolate({
                               inputRange: [0, 1],
                               outputRange: [
-                                1.02,
-                                sosVisual.state === 'active' ? 1.22 : 1.18,
+                                1.01,
+                                sosVisual.state === 'active' ? 1.18 : 1.12,
                               ],
                             }),
                       },
@@ -1715,98 +1616,20 @@ const HomeScreen: React.FC = ({navigation}: any) => {
                     ],
                   }}>
                   <View style={styles.sosButtonFace}>
-                    <View
-                      style={[
-                        styles.sosCommandPill,
-                        {
-                          backgroundColor: sosVisual.commandBg,
-                          borderColor: sosVisual.commandBorder,
-                        },
-                      ]}>
-                      <View
-                        style={[
-                          styles.sosCommandDot,
-                          {backgroundColor: sosVisual.targetGlow},
-                        ]}
-                      />
-                      <Text
-                        style={[
-                          styles.sosCommandText,
-                          {
-                            color: sosVisual.commandText,
-                            fontFamily: FONT_FAMILY,
-                          },
-                        ]}
-                        allowFontScaling
-                        maxFontSizeMultiplier={1.2}
-                        numberOfLines={2}>
-                        {sosCommandLabel}
-                      </Text>
-                    </View>
-                    <View
-                      style={[
-                        styles.sosTargetWrap,
-                        {
-                          borderColor: sosVisual.target,
-                          backgroundColor: withAlpha(
-                            '#FFFFFF',
-                            isDark ? 0.04 : 0.08,
-                          ),
-                        },
-                      ]}>
-                      <View
-                        pointerEvents="none"
-                        style={[
-                          styles.sosTargetCrossHorizontal,
-                          {backgroundColor: sosVisual.target},
-                        ]}
-                      />
-                      <View
-                        pointerEvents="none"
-                        style={[
-                          styles.sosTargetCrossVertical,
-                          {backgroundColor: sosVisual.target},
-                        ]}
-                      />
-                      <Icon
-                        name="crosshairs-gps"
-                        size={28}
-                        color={sosVisual.target}
-                        accessibilityElementsHidden
-                        importantForAccessibility="no-hide-descendants"
-                      />
-                    </View>
                     <Text
                       style={[styles.sosText, {fontFamily: FONT_FAMILY}]}
                       allowFontScaling
                       maxFontSizeMultiplier={1.4}>
                       {t('sos')}
                     </Text>
-                    <View style={styles.sosFooter}>
-                      <View
-                        style={[
-                          styles.sosFooterLine,
-                          {backgroundColor: sosVisual.footer},
-                        ]}
-                      />
-                      <Icon
-                        name="shield-alert-outline"
-                        size={16}
-                        color={sosVisual.footer}
-                        accessibilityElementsHidden
-                        importantForAccessibility="no-hide-descendants"
-                      />
-                      <View
-                        style={[
-                          styles.sosFooterLine,
-                          {backgroundColor: sosVisual.footer},
-                        ]}
-                      />
-                    </View>
                   </View>
                 </Animated.View>
               </TouchableOpacity>
             </View>
+            <AppText
+              style={[styles.sosDisclaimer, {color: colors.textSecondary}]}>
+              {t('legal_sos_disclaimer')}
+            </AppText>
           </View>
 
           {showHomeMapBar ? (
@@ -1955,6 +1778,8 @@ const styles = StyleSheet.create({
   alertAiIcon: {
     width: 30,
     height: 30,
+    backgroundColor: 'transparent',
+    overflow: 'hidden',
   },
   badge: {
     position: 'absolute',
@@ -1989,8 +1814,8 @@ const styles = StyleSheet.create({
   sosWrap: {
     alignItems: 'center',
     justifyContent: 'center',
-    width: SOS_SHELL_SIZE,
-    height: SOS_SHELL_SIZE,
+    width: SOS_GLOW_SIZE,
+    height: SOS_GLOW_SIZE,
   },
   sosGlow: {
     position: 'absolute',
@@ -1999,7 +1824,7 @@ const styles = StyleSheet.create({
     borderRadius: SOS_GLOW_SIZE / 2,
   },
   sosGlowStatic: {
-    opacity: 0.08,
+    opacity: 0.16,
     transform: [{scale: 1.02}],
   },
   sosShell: {
@@ -2007,7 +1832,7 @@ const styles = StyleSheet.create({
     width: SOS_SHELL_SIZE,
     height: SOS_SHELL_SIZE,
     borderRadius: SOS_SHELL_SIZE / 2,
-    borderWidth: 1.5,
+    borderWidth: 1,
     ...Platform.select({
       ios: ThemeTokens.shadows.medium.ios,
       android: ThemeTokens.shadows.medium.android,
@@ -2015,35 +1840,10 @@ const styles = StyleSheet.create({
   },
   sosShellInset: {
     position: 'absolute',
-    width: SOS_SHELL_SIZE - 18,
-    height: SOS_SHELL_SIZE - 18,
-    borderRadius: (SOS_SHELL_SIZE - 18) / 2,
+    width: SOS_SHELL_SIZE - 12,
+    height: SOS_SHELL_SIZE - 12,
+    borderRadius: (SOS_SHELL_SIZE - 12) / 2,
     borderWidth: 1,
-  },
-  sosClamp: {
-    position: 'absolute',
-    borderRadius: ThemeTokens.radius.pill,
-    borderWidth: 1,
-  },
-  sosClampTop: {
-    width: 82,
-    height: 16,
-    top: 22,
-  },
-  sosClampBottom: {
-    width: 82,
-    height: 16,
-    bottom: 22,
-  },
-  sosClampLeft: {
-    width: 16,
-    height: 82,
-    left: 22,
-  },
-  sosClampRight: {
-    width: 16,
-    height: 82,
-    right: 22,
   },
   sosPulse: {
     position: 'absolute',
@@ -2053,7 +1853,7 @@ const styles = StyleSheet.create({
     borderWidth: 2,
   },
   sosPulseStatic: {
-    opacity: 0.12,
+    opacity: 0.18,
     transform: [{scale: 1.04}],
   },
   sosButton: {
@@ -2066,9 +1866,7 @@ const styles = StyleSheet.create({
       ios: ThemeTokens.shadows.strong.ios,
       android: ThemeTokens.shadows.strong.android,
     }),
-    borderWidth: 2,
-    paddingHorizontal: ThemeTokens.spacing.lg,
-    paddingVertical: ThemeTokens.spacing.xl,
+    borderWidth: 1.5,
   },
   sosInnerRing: {
     position: 'absolute',
@@ -2078,73 +1876,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   sosButtonFace: {
+    width: SOS_BUTTON_SIZE,
+    height: SOS_BUTTON_SIZE,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: ThemeTokens.spacing.sm,
-  },
-  sosCommandPill: {
-    minHeight: 34,
-    maxWidth: SOS_BUTTON_SIZE * 0.84,
-    paddingHorizontal: ThemeTokens.spacing.md,
-    paddingVertical: ThemeTokens.spacing.xs + 2,
-    borderRadius: ThemeTokens.radius.pill,
-    borderWidth: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: ThemeTokens.spacing.sm,
-  },
-  sosCommandDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 999,
-  },
-  sosCommandText: {
-    fontSize: 11,
-    lineHeight: 14,
-    letterSpacing: 0.8,
-    fontWeight: ThemeTokens.typography.weights.semibold,
-    textAlign: 'center',
-    flexShrink: 1,
-  },
-  sosTargetWrap: {
-    width: SOS_TARGET_SIZE,
-    height: SOS_TARGET_SIZE,
-    borderRadius: SOS_TARGET_SIZE / 2,
-    borderWidth: 1.5,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: ThemeTokens.spacing.xs,
-  },
-  sosTargetCrossHorizontal: {
-    position: 'absolute',
-    width: SOS_TARGET_SIZE * 0.54,
-    height: 1.5,
-    borderRadius: 999,
-  },
-  sosTargetCrossVertical: {
-    position: 'absolute',
-    width: 1.5,
-    height: SOS_TARGET_SIZE * 0.54,
-    borderRadius: 999,
   },
   sosText: {
     color: '#FFF',
-    fontSize: 54,
-    lineHeight: 56,
-    fontWeight: ThemeTokens.typography.weights.bold,
-    letterSpacing: 3.4,
-  },
-  sosFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: ThemeTokens.spacing.sm,
-    marginTop: ThemeTokens.spacing.xs,
-  },
-  sosFooterLine: {
-    width: 34,
-    height: 1.5,
-    borderRadius: 999,
+    fontSize: 58,
+    lineHeight: 60,
+    fontWeight: ThemeTokens.typography.weights.semibold,
+    letterSpacing: 0.8,
+    textAlign: 'center',
   },
   alertBarWrapper: {
     marginTop: ThemeTokens.spacing.xl,
@@ -2342,6 +2085,14 @@ const styles = StyleSheet.create({
     width: 1,
     height: 1,
     opacity: 0,
+  },
+  sosDisclaimer: {
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 24,
+    paddingHorizontal: 32,
+    lineHeight: 18,
+    opacity: 0.8,
   },
 });
 

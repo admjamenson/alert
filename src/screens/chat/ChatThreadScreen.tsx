@@ -9,7 +9,6 @@ import {
   Alert,
   FlatList,
   Image,
-  Modal,
   NativeModules,
   Pressable,
   Share,
@@ -20,7 +19,8 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import ReactNativeHapticFeedback from 'react-native-haptic-feedback';
 // Audio recorder import disabled - causes build issues with Nitro modules
@@ -38,6 +38,7 @@ import { useTranslation } from 'react-i18next';
 
 import { useTheme } from '../../context/ThemeContext';
 import { ThemeTokens } from '../../constants/ThemeTokens';
+import BasePopup from '../../components/ui/BasePopup';
 import { PermissionManager } from '../../utils/permissions';
 import {
   ChatMessageItem,
@@ -58,21 +59,22 @@ const CHAT_REACTION_EMOJIS = [
   '\u{1F64F}',
   '\u{1F622}',
 ];
-const audioRecorderPlayer = new AudioRecorderPlayer();
-const VOICE_AUDIO_SET = {
-  AudioSourceAndroid: AudioSourceAndroidType.VOICE_RECOGNITION,
-  OutputFormatAndroid: OutputFormatAndroidType.MPEG_4,
-  AudioEncoderAndroid: AudioEncoderAndroidType.AAC,
-  AVModeIOS: AVModeIOSOption.spokenaudio,
-  AVFormatIDKeyIOS: AVEncodingOption.aac,
-  AVEncoderAudioQualityKeyIOS: AVEncoderAudioQualityIOSType.high,
-  AVNumberOfChannelsKeyIOS: 1,
-  AVSampleRateKeyIOS: 44100,
-  AVEncoderBitRateKeyIOS: 128000,
-  AudioSamplingRateAndroid: 44100,
-  AudioEncodingBitRateAndroid: 128000,
-  AudioChannelsAndroid: 1,
+type AudioPlaybackEvent = {
+  currentPosition?: number;
+  duration?: number;
 };
+
+const audioRecorderPlayer = {
+  addPlayBackListener: (_listener: (event: AudioPlaybackEvent) => void) => {},
+  removePlayBackListener: () => {},
+  setVolume: async (_volume: number) => {},
+  startPlayer: async (_uri?: string) => {},
+  startRecorder: async (..._args: unknown[]) => '',
+  stopPlayer: async () => {},
+  stopRecorder: async () => '',
+};
+
+const VOICE_AUDIO_SET = {};
 
 type ChatThreadRouteParams = RootStackParamList['ChatThread'];
 
@@ -131,10 +133,11 @@ const setClipboardText = (value: string): boolean => {
 };
 
 const ChatThreadScreen: React.FC = () => {
-  const navigation = useNavigation<any>();
-  const route = useRoute();
-  const params = (route.params || {}) as ChatThreadRouteParams;
-  const conversationId = params?.conversationId;
+  const navigation =
+    useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const route = useRoute<RouteProp<RootStackParamList, 'ChatThread'>>();
+  const params: ChatThreadRouteParams = route.params || {};
+  const conversationId = params?.conversationId || params?.threadId;
   const { colors } = useTheme();
   const { t } = useTranslation();
 
@@ -510,17 +513,19 @@ const ChatThreadScreen: React.FC = () => {
     await audioRecorderPlayer.startPlayer(uri).catch(() => {});
     await audioRecorderPlayer.setVolume(1.0).catch(() => {});
     setPlayingId(item.id);
-    audioRecorderPlayer.addPlayBackListener(e => {
-      if (
-        (e.duration || 0) > 0 &&
-        (e.currentPosition || 0) >= (e.duration || 0)
-      ) {
-        void audioRecorderPlayer.stopPlayer().catch(() => {});
-        audioRecorderPlayer.removePlayBackListener();
-        setPlayingId(null);
-      }
-      return;
-    });
+    audioRecorderPlayer.addPlayBackListener(
+      (e: { duration?: number; currentPosition?: number }) => {
+        if (
+          (e.duration || 0) > 0 &&
+          (e.currentPosition || 0) >= (e.duration || 0)
+        ) {
+          void audioRecorderPlayer.stopPlayer().catch(() => {});
+          audioRecorderPlayer.removePlayBackListener();
+          setPlayingId(null);
+        }
+        return;
+      },
+    );
   };
 
   const renderItem = ({ item }: { item: ChatMessageItem }) => {
@@ -878,19 +883,17 @@ const ChatThreadScreen: React.FC = () => {
         </Text>
       ) : null}
 
-      <Modal
-        transparent
+      <BasePopup
+        accessibilityLabel={t('chat_action_title')}
+        contentStyle={[
+          styles.sheet,
+          { backgroundColor: colors.surface, borderColor: colors.border },
+        ]}
+        onClose={() => setMenuVisible(false)}
+        placement="bottom"
+        showHandle
         visible={menuVisible}
-        animationType="slide"
-        onRequestClose={() => setMenuVisible(false)}
       >
-        <Pressable style={styles.overlay} onPress={() => setMenuVisible(false)}>
-          <Pressable
-            style={[
-              styles.sheet,
-              { backgroundColor: colors.surface, borderColor: colors.border },
-            ]}
-          >
             <Text style={[styles.sheetTitle, { color: colors.text }]}>
               {t('chat_action_title')}
             </Text>
@@ -1006,26 +1009,19 @@ const ChatThreadScreen: React.FC = () => {
                 {t('chat_private_reply')}
               </Text>
             </TouchableOpacity>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      </BasePopup>
 
-      <Modal
-        transparent
+      <BasePopup
+        accessibilityLabel={t('chat_attach')}
+        contentStyle={[
+          styles.sheet,
+          { backgroundColor: colors.surface, borderColor: colors.border },
+        ]}
+        onClose={() => setAttachVisible(false)}
+        placement="bottom"
+        showHandle
         visible={attachVisible}
-        animationType="slide"
-        onRequestClose={() => setAttachVisible(false)}
       >
-        <Pressable
-          style={styles.overlay}
-          onPress={() => setAttachVisible(false)}
-        >
-          <Pressable
-            style={[
-              styles.sheet,
-              { backgroundColor: colors.surface, borderColor: colors.border },
-            ]}
-          >
             <Text style={[styles.sheetTitle, { color: colors.text }]}>
               {t('chat_attach')}
             </Text>
@@ -1081,26 +1077,20 @@ const ChatThreadScreen: React.FC = () => {
                 {t('chat_attach_audio')}
               </Text>
             </TouchableOpacity>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      </BasePopup>
 
-      <Modal
-        transparent
+      <BasePopup
+        accessibilityLabel={t('chat_add_text_share')}
+        avoidKeyboard
+        contentStyle={[
+          styles.card,
+          { backgroundColor: colors.card, borderColor: colors.border },
+        ]}
+        maxWidth={520}
+        onClose={() => setShareTextVisible(false)}
+        placement="center"
         visible={shareTextVisible}
-        animationType="fade"
-        onRequestClose={() => setShareTextVisible(false)}
       >
-        <Pressable
-          style={styles.overlay}
-          onPress={() => setShareTextVisible(false)}
-        >
-          <Pressable
-            style={[
-              styles.card,
-              { backgroundColor: colors.card, borderColor: colors.border },
-            ]}
-          >
             <Text style={[styles.sheetTitle, { color: colors.text }]}>
               {t('chat_add_text_share')}
             </Text>
@@ -1137,9 +1127,7 @@ const ChatThreadScreen: React.FC = () => {
                 <Text style={styles.cardBtnSolid}>{t('chat_share')}</Text>
               </TouchableOpacity>
             </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      </BasePopup>
     </SafeAreaView>
   );
 };
@@ -1253,17 +1241,15 @@ const styles = StyleSheet.create({
   loading: { paddingBottom: 8, textAlign: 'center', fontSize: 12 },
   emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   emptyText: { fontSize: 16 },
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'flex-end',
-  },
   sheet: {
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    borderBottomLeftRadius: 22,
+    borderBottomRightRadius: 22,
     borderWidth: 1,
-    borderBottomWidth: 0,
-    padding: 14,
+    paddingHorizontal: ThemeTokens.spacing.xl,
+    paddingTop: ThemeTokens.spacing.sm,
+    paddingBottom: ThemeTokens.spacing.xl,
   },
   sheetTitle: { fontSize: 17, fontWeight: '800', marginBottom: 8 },
   sheetAction: {
@@ -1284,16 +1270,14 @@ const styles = StyleSheet.create({
   },
   emoji: { fontSize: 21 },
   card: {
-    marginHorizontal: 20,
-    marginBottom: '36%',
     borderWidth: 1,
-    borderRadius: 14,
-    padding: 12,
+    borderRadius: 28,
+    padding: ThemeTokens.spacing.xl,
   },
   shareInput: {
     minHeight: 90,
     borderWidth: 1,
-    borderRadius: 10,
+    borderRadius: 15,
     paddingHorizontal: 10,
     paddingVertical: 10,
     textAlignVertical: 'top',
@@ -1301,9 +1285,9 @@ const styles = StyleSheet.create({
   cardActions: { marginTop: 10, flexDirection: 'row', gap: 8 },
   cardBtn: {
     flex: 1,
-    minHeight: 42,
+    minHeight: 50,
     borderWidth: 1,
-    borderRadius: 10,
+    borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
   },

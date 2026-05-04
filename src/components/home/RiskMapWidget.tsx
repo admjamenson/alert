@@ -1,6 +1,7 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   Image,
+  Pressable,
   View,
   Text,
   StyleSheet,
@@ -10,6 +11,7 @@ import {
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import {useTranslation} from 'react-i18next';
+import {NativeStackNavigationProp} from '@react-navigation/native-stack';
 
 import {useTheme} from '../../context/ThemeContext';
 import {useSecurity} from '../../context/SecurityContext';
@@ -25,6 +27,7 @@ import {
   HAS_CONFIGURED_SATELLITE_STYLE,
   MapStyleMode,
 } from '../../constants/MapStyles';
+import {RootStackParamList} from '../../navigation/types';
 
 const FONT_FAMILY =
   Platform.OS === 'ios'
@@ -35,17 +38,31 @@ const ALERT_LOGO = require('../../assets/logo.png');
 
 const FALLBACK_CENTER: [number, number] = [-40.26, -7.76];
 
-const getCenterFromPayload = (payload: any): [number, number] | null => {
-  const coords = payload?.geometry?.coordinates;
+type MapRegionPayload = {
+  geometry?: {
+    coordinates?: unknown;
+  };
+  properties?: {
+    center?: unknown;
+    zoomLevel?: unknown;
+    zoom?: unknown;
+  };
+  centerCoordinate?: unknown;
+  zoomLevel?: unknown;
+  zoom?: unknown;
+};
+
+const getCenterFromPayload = (payload: MapRegionPayload): [number, number] | null => {
+  const coords = payload.geometry?.coordinates;
   if (Array.isArray(coords) && coords.length >= 2) {
     return [coords[0], coords[1]];
   }
-  const center = payload?.properties?.center;
+  const center = payload.properties?.center;
   if (Array.isArray(center) && center.length >= 2) {
     return [center[0], center[1]];
   }
   if (
-    Array.isArray(payload?.centerCoordinate) &&
+    Array.isArray(payload.centerCoordinate) &&
     payload.centerCoordinate.length >= 2
   ) {
     return [payload.centerCoordinate[0], payload.centerCoordinate[1]];
@@ -53,12 +70,12 @@ const getCenterFromPayload = (payload: any): [number, number] | null => {
   return null;
 };
 
-const getZoomFromPayload = (payload: any): number | null => {
+const getZoomFromPayload = (payload: MapRegionPayload): number | null => {
   const candidates = [
-    payload?.properties?.zoomLevel,
-    payload?.properties?.zoom,
-    payload?.zoomLevel,
-    payload?.zoom,
+    payload.properties?.zoomLevel,
+    payload.properties?.zoom,
+    payload.zoomLevel,
+    payload.zoom,
   ];
   for (const value of candidates) {
     if (typeof value === 'number' && Number.isFinite(value)) {
@@ -87,7 +104,11 @@ const distanceMeters = (
 const isValidCoordinate = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value);
 
-export const RiskMapWidget = React.memo(({navigation}: any) => {
+type Props = {
+  navigation: NativeStackNavigationProp<RootStackParamList>;
+};
+
+export const RiskMapWidget = React.memo(({navigation}: Props) => {
   const {colors, isDark} = useTheme();
   const {t} = useTranslation();
   const {securityState} = useSecurity();
@@ -121,7 +142,7 @@ export const RiskMapWidget = React.memo(({navigation}: any) => {
     [mapStyleMode, satelliteStyle],
   );
   const [resolvedMapStyle, setResolvedMapStyle] =
-    useState<any>(preferredMapStyle);
+    useState<string | object>(preferredMapStyle);
   const [usingFallbackStyle, setUsingFallbackStyle] = useState(false);
   const [mapReady, setMapReady] = useState(false);
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
@@ -226,7 +247,7 @@ export const RiskMapWidget = React.memo(({navigation}: any) => {
   }, [mapStyleMode, usingFallbackStyle]);
 
   const handleRegionDidChange = useCallback(
-    (payload: any) => {
+    (payload: MapRegionPayload) => {
       if (!hasUserLocation || !activeUser) return;
       const center = getCenterFromPayload(payload);
       if (center) {
@@ -314,7 +335,14 @@ export const RiskMapWidget = React.memo(({navigation}: any) => {
               id="me"
               coordinate={[activeUser.longitude, activeUser.latitude]}
               anchor={{x: 0.5, y: 0.5}}>
-              <View style={[styles.markerSelf, {borderColor: colors.primary}]}>
+              <View
+                style={[
+                  styles.markerSelf,
+                  {
+                    borderColor: colors.primary,
+                    backgroundColor: isDark ? 'rgba(7,14,24,0.92)' : '#FFFFFF',
+                  },
+                ]}>
                 {avatarUri ? (
                   <Image
                     source={{uri: avatarUri}}
@@ -329,8 +357,17 @@ export const RiskMapWidget = React.memo(({navigation}: any) => {
                 )}
               </View>
             </MapLibreGL.MarkerView>
-          )}
-        </MapLibreGL.MapView>
+            )}
+          </MapLibreGL.MapView>
+
+        <Pressable
+          style={styles.mapTapTarget}
+          onPress={openSafetyMap}
+          accessibilityRole="button"
+          accessibilityLabel={t('map_open_label')}
+          accessibilityHint={t('map_open_hint')}
+          testID="home-risk-map-open"
+        />
 
         {showMapControls && !hasUserLocation && (
           <View
@@ -426,6 +463,9 @@ const styles = StyleSheet.create({
     }),
   },
   map: {...StyleSheet.absoluteFillObject},
+  mapTapTarget: {
+    ...StyleSheet.absoluteFillObject,
+  },
   markerSelf: {
     backgroundColor: '#FFFFFF',
     borderRadius: 18,
@@ -445,6 +485,8 @@ const styles = StyleSheet.create({
   markerLogo: {
     width: 20,
     height: 20,
+    backgroundColor: 'transparent',
+    overflow: 'hidden',
   },
   mapStyleButton: {
     position: 'absolute',

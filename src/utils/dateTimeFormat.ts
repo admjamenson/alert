@@ -2,6 +2,9 @@ import { getLocales, getTimeZone as getLocalizeTimeZone } from 'react-native-loc
 import { resolveSupportedLocale } from '../constants/locales';
 
 export type DateLike = string | number | Date;
+type ExtendedDateTimeFormatOptions = Intl.DateTimeFormatOptions & {
+  fractionalSecondDigits?: number;
+};
 
 const DEFAULT_LOCALE = 'en-US';
 const NATIVE_DATE_STRING_PATTERN =
@@ -22,8 +25,8 @@ const DATE_TIME_OPTION_KEYS = [
   'timeZoneName',
   'hourCycle',
   'hour12',
-] as const;
-const UPDATED_AT_BASE_OPTIONS: Intl.DateTimeFormatOptions = {
+] as const satisfies readonly string[];
+const UPDATED_AT_BASE_OPTIONS: ExtendedDateTimeFormatOptions = {
   year: '2-digit',
   month: '2-digit',
   day: '2-digit',
@@ -132,7 +135,7 @@ export const resolveTimeZone = (preferredTimeZone?: string | null): string | und
 const tryFormatIntl = (
   date: Date,
   locale: string,
-  options: Intl.DateTimeFormatOptions,
+  options: ExtendedDateTimeFormatOptions,
 ): string => {
   try {
     return new Intl.DateTimeFormat(locale, options).format(date);
@@ -144,7 +147,7 @@ const tryFormatIntl = (
 const tryFormatLocaleString = (
   date: Date,
   locale: string,
-  options: Intl.DateTimeFormatOptions,
+  options: ExtendedDateTimeFormatOptions,
 ): string => {
   try {
     return sanitizeFormattedDateOutput(date.toLocaleString(locale, options));
@@ -345,7 +348,7 @@ const formatWithFallbacks = ({
   date: Date;
   locale: string;
   timeZone?: string | null;
-  options: Intl.DateTimeFormatOptions;
+  options: ExtendedDateTimeFormatOptions;
 }): string => {
   const normalizedOptions = { ...(options || {}) };
   const safeTimeZone = String(timeZone || '').trim();
@@ -381,7 +384,7 @@ export const formatDate = (
   value: DateLike,
   locale?: string | null,
   timeZone?: string | null,
-  options?: Intl.DateTimeFormatOptions,
+  options?: ExtendedDateTimeFormatOptions,
 ): string => {
   const date = normalizeDateTimeInput(value);
   if (!date) return '';
@@ -394,7 +397,7 @@ export const formatDate = (
     typeof options?.day !== 'undefined' ||
     typeof options?.weekday !== 'undefined' ||
     typeof options?.era !== 'undefined';
-  const normalizedOptions: Intl.DateTimeFormatOptions = {
+  const normalizedOptions: ExtendedDateTimeFormatOptions = {
     ...(!hasDateStyle && !hasDateParts
       ? { year: '2-digit', month: '2-digit', day: '2-digit' }
       : {}),
@@ -415,7 +418,7 @@ export const formatTime = (
   value: DateLike,
   locale?: string | null,
   timeZone?: string | null,
-  options?: Intl.DateTimeFormatOptions,
+  options?: ExtendedDateTimeFormatOptions,
 ): string => {
   const date = normalizeDateTimeInput(value);
   if (!date) return '';
@@ -431,7 +434,7 @@ export const formatTime = (
     typeof options?.timeZoneName !== 'undefined' ||
     typeof options?.hourCycle !== 'undefined' ||
     typeof options?.hour12 !== 'undefined';
-  const normalizedOptions: Intl.DateTimeFormatOptions = {
+  const normalizedOptions: ExtendedDateTimeFormatOptions = {
     ...(!hasTimeStyle && !hasTimeParts ? { hour: '2-digit', minute: '2-digit' } : {}),
     ...(options || {}),
   };
@@ -450,18 +453,19 @@ export const formatDateTime = (
   value: DateLike,
   locale?: string | null,
   timeZone?: string | null,
-  options?: Intl.DateTimeFormatOptions,
+  options?: ExtendedDateTimeFormatOptions,
 ): string => {
   const date = normalizeDateTimeInput(value);
   if (!date) return '';
   const resolvedLocale = resolveLocale(locale);
   const resolvedTimeZone = resolveTimeZone(timeZone);
+  const optionsRecord = options as Record<string, unknown> | undefined;
   const hasStyle =
     typeof options?.dateStyle !== 'undefined' || typeof options?.timeStyle !== 'undefined';
   const hasExplicitParts = DATE_TIME_OPTION_KEYS.some(
-    key => typeof options?.[key] !== 'undefined',
+    key => typeof optionsRecord?.[key] !== 'undefined',
   );
-  const normalizedOptions: Intl.DateTimeFormatOptions = {
+  const normalizedOptions: ExtendedDateTimeFormatOptions = {
     ...(!hasStyle && !hasExplicitParts
       ? {
           year: '2-digit',

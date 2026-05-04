@@ -3,17 +3,17 @@
 <plist version="1.0">
 <dict>
 	<key>API_KEY</key>
-	<string>AIzaSyAK0FlL1t8ssxTuD1IswAAe8Cz4LrMZ0Mc</string>
+	<string>AIzaSyBxdCI3UG0wA9dQi20Iix9z2cQzvYmIV54</string>
 	<key>GCM_SENDER_ID</key>
-	<string>413468744610</string>
+	<string>801346968665</string>
 	<key>PLIST_VERSION</key>
 	<string>1</string>
 	<key>BUNDLE_ID</key>
-	<string>com.companyalert</string>
+	<string>com.company.alert</string>
 	<key>PROJECT_ID</key>
-	<string>alerta-1444b</string>
+	<string>alert-2733a</string>
 	<key>STORAGE_BUCKET</key>
-	<string>alerta-1444b.firebasestorage.app</string>
+	<string>alert-2733a.firebasestorage.app</string>
 	<key>IS_ADS_ENABLED</key>
 	<false></false>
 	<key>IS_ANALYTICS_ENABLED</key>
@@ -25,8 +25,6 @@
 	<key>IS_SIGNIN_ENABLED</key>
 	<true></true>
 	<key>GOOGLE_APP_ID</key>
-	<string>1:413468744610:ios:0cf69bfef121be96e3b0fb</string>
-	<key>DATABASE_URL</key>
-	<string>https://alerta-1444b-default-rtdb.firebaseio.com</string>
+	<string>1:801346968665:ios:70258fbe7464a1b4e72548</string>
 </dict>
 </plist>

@@ -45,6 +45,7 @@ export const KNOWN_ROUTE_NAMES: ReadonlySet<keyof RootStackParamList> = new Set<
   'LanguageSelector',
   'WebView',
   'ThemeSettings',
+  'PopupValidation',
   'AlertDetails',
 ]);
 
@@ -95,7 +96,17 @@ type MutableRoute = Route<string> & { state?: MutableState };
 type MutableState = {
   index?: number;
   routes: MutableRoute[];
-  [key: string]: any;
+  [key: string]: unknown;
+};
+
+type NavigationStateLike = {
+  index?: number;
+  routes: ReadonlyArray<Route<string> & { state?: NavigationStateLike }>;
+};
+
+type PersistedNavigationPayloadLike = {
+  version?: unknown;
+  state?: unknown;
 };
 
 export type SanitizedNavStateResult = {
@@ -108,30 +119,35 @@ export type SanitizedNavStateResult = {
 const isRouteNameKnown = (name: string): name is keyof RootStackParamList =>
   KNOWN_ROUTE_NAMES.has(name as keyof RootStackParamList);
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object';
+
 const isLikelyNavigationState = (
   value: unknown,
 ): value is PartialState<NavigationState> => {
-  const candidate = value as any;
-  if (!candidate || typeof candidate !== 'object') return false;
+  if (!isRecord(value)) return false;
+  const candidate = value as { routes?: unknown };
   if (!Array.isArray(candidate.routes)) return false;
   return candidate.routes.every(
-    (route: any) => route && typeof route === 'object' && typeof route.name === 'string',
+    route => isRecord(route) && typeof route.name === 'string',
   );
 };
 
 export const getActiveRouteName = (
   state?: NavigationState | PartialState<NavigationState>,
 ): keyof RootStackParamList | undefined => {
-  if (!state || !Array.isArray((state as any).routes) || (state as any).routes.length === 0) {
+  if (!isLikelyNavigationState(state)) {
     return undefined;
   }
 
+  const navState = state as NavigationStateLike;
+  const { routes } = navState;
   const index =
-    typeof (state as any).index === 'number'
-      ? Math.min(Math.max((state as any).index, 0), (state as any).routes.length - 1)
-      : (state as any).routes.length - 1;
+    typeof navState.index === 'number'
+      ? Math.min(Math.max(navState.index, 0), routes.length - 1)
+      : routes.length - 1;
 
-  const route = (state as any).routes[index] as any;
+  const route = routes[index];
   if (!route || typeof route.name !== 'string') return undefined;
 
   if (route.state) {
@@ -150,8 +166,8 @@ export const buildFallbackNavigationState = (
 export const migratePersistedNavigationState = (
   rawPayload: unknown,
 ): PartialState<NavigationState> | null => {
-  if (!rawPayload || typeof rawPayload !== 'object') return null;
-  const payload = rawPayload as any;
+  if (!isRecord(rawPayload)) return null;
+  const payload = rawPayload as PersistedNavigationPayloadLike;
 
   if (
     typeof payload.version === 'number' &&

@@ -1,0 +1,25 @@
+<resources>
+    <string name="app_name">Alert</string>
+    <string name="widget_alert_label">Alert</string>
+    <string name="widget_alert_title">Status local</string>
+    <string name="widget_alert_subtitle">Monitorando área agora</string>
+    <string name="widget_alert_metric">Seguro</string>
+    <string name="widget_status">Status</string>
+    <string name="widget_attention_area">Atenção na área</string>
+    <string name="widget_attention_local">Atenção local</string>
+    <string name="widget_status_local">Status local</string>
+    <string name="widget_metric_value">18</string>
+    <string name="widget_route_title">Rota</string>
+    <string name="widget_route_eta">10m</string>
+    <string name="widget_route_destination">Teste</string>
+    <string name="widget_route_status">Sem alertas</string>
+    <string name="widget_route_no_active">Sem rota ativa</string>
+    <string name="widget_name_status">Status</string>
+    <string name="widget_name_route">Rota</string>
+    <string name="widget_name_attention_local">Atenção local</string>
+    <string name="widget_name_status_local">Status local</string>
+    <string name="widget_desc_status">Score de segurança local em tempo real.</string>
+    <string name="widget_desc_route">Resumo de risco da rota.</string>
+    <string name="widget_desc_attention_local">Principal alerta local agora.</string>
+    <string name="widget_desc_status_local">Resumo de status local com tendência.</string>
+</resources>

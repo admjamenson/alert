@@ -1,9 +1,16 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { encode as encodeMsgpack } from '@msgpack/msgpack';
 import pako from 'pako';
-import { APP_CONFIG } from '../core/config';
+import { getAlertApiBaseUrl } from '../core/config';
 import { StarlinkConnectService } from './StarlinkConnectService';
 import { UserIdentityService } from './UserIdentityService';
+import {
+  logSosDiagnostic,
+  summarizeError,
+  summarizeResponseBody,
+  summarizeUrl,
+} from '../observability/SosDiagnostics';
+import { toUrlEncodedString } from '../utils/urlEncoding';
 
 const RELAY_TOKEN_KEY = '@Alert:RelayAuthTokenV1';
 const RELAY_TOKEN_EXP_KEY = '@Alert:RelayAuthTokenExpV1';
@@ -22,11 +29,7 @@ type RelayResult<T = unknown> = {
   latencyMs: number;
 };
 
-const getApiBaseUrl = () => {
-  const envOverride =
-    typeof process !== 'undefined' ? (process as any)?.env?.ALERT_API_URL : undefined;
-  return String(envOverride || APP_CONFIG.API_BASE_URL || '').trim();
-};
+const getApiBaseUrl = () => getAlertApiBaseUrl();
 
 const toBase64 = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64');
 
@@ -85,6 +88,9 @@ const ensureRelayToken = async (forceRefresh = false): Promise<string> => {
 
   const baseUrl = getApiBaseUrl();
   if (!baseUrl) {
+    logSosDiagnostic('relay:token_blocked', {
+      reason: 'missing_base_url',
+    });
     throw new Error('relay_base_url_missing');
   }
 
@@ -94,7 +100,12 @@ const ensureRelayToken = async (forceRefresh = false): Promise<string> => {
   ]);
   const userId = userPhone || deviceId;
 
-  const response = await fetch(`${baseUrl}/api/relay/token`, {
+  const requestUrl = `${baseUrl}/api/relay/token`;
+  logSosDiagnostic('relay:token_request_start', {
+    method: 'POST',
+    url: summarizeUrl(requestUrl),
+  });
+  const response = await fetch(requestUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -106,14 +117,21 @@ const ensureRelayToken = async (forceRefresh = false): Promise<string> => {
       deviceId,
     }),
   });
+  const responseJson = (await response.json().catch(() => null)) as any;
+  logSosDiagnostic('relay:token_response', {
+    method: 'POST',
+    url: summarizeUrl(requestUrl),
+    status: response.status,
+    ok: response.ok,
+    body: summarizeResponseBody(responseJson),
+  });
 
   if (!response.ok) {
     throw new Error(`relay_token_http_${response.status}`);
   }
 
-  const json = (await response.json()) as any;
-  const token = String(json?.token || '');
-  const expiresAt = String(json?.expiresAt || '');
+  const token = String(responseJson?.token || '');
+  const expiresAt = String(responseJson?.expiresAt || '');
   const expiresAtMs = new Date(expiresAt).getTime();
 
   if (!token || !Number.isFinite(expiresAtMs)) {
@@ -130,6 +148,10 @@ const callRelay = async <T>(
 ): Promise<RelayResult<T>> => {
   const baseUrl = getApiBaseUrl();
   if (!baseUrl) {
+    logSosDiagnostic('relay:request_blocked', {
+      path,
+      reason: 'missing_base_url',
+    });
     return {
       ok: false,
       status: 0,
@@ -166,7 +188,14 @@ const callRelay = async <T>(
 
     try {
       const nonce = `${nowMs()}-${Math.random().toString(36).slice(2, 10)}`;
-      const response = await fetch(`${baseUrl}${path}`, {
+      const requestUrl = `${baseUrl}${path}`;
+      logSosDiagnostic('relay:request_start', {
+        method: 'POST',
+        url: summarizeUrl(requestUrl),
+        attempt,
+        timeoutMs,
+      });
+      const response = await fetch(requestUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -195,6 +224,14 @@ const callRelay = async <T>(
       lastStatus = response.status;
       const parsed = (await response.json().catch(() => null)) as T | null;
       lastData = parsed;
+      logSosDiagnostic('relay:response', {
+        method: 'POST',
+        url: summarizeUrl(requestUrl),
+        attempt,
+        status: response.status,
+        ok: response.ok,
+        body: summarizeResponseBody(parsed),
+      });
 
       if (response.ok) {
         const latencyMs = nowMs() - startedAt;
@@ -216,9 +253,15 @@ const callRelay = async <T>(
         await clearAuth();
         await ensureRelayToken(true);
       }
-    } catch {
+    } catch (error) {
       clearTimeout(timeoutId);
-      // Retry policy handled by loop.
+      logSosDiagnostic('relay:request_error', {
+        method: 'POST',
+        url: summarizeUrl(`${baseUrl}${path}`),
+        attempt,
+        timeoutMs,
+        error: summarizeError(error),
+      });
     }
 
     if (attempt < transport.maxRetries) {
@@ -249,6 +292,10 @@ const callRelayGet = async <T>(
 ): Promise<RelayResult<T>> => {
   const baseUrl = getApiBaseUrl();
   if (!baseUrl) {
+    logSosDiagnostic('relay:get_blocked', {
+      path,
+      reason: 'missing_base_url',
+    });
     return {
       ok: false,
       status: 0,
@@ -269,11 +316,7 @@ const callRelayGet = async <T>(
   let retriesUsed = 0;
   const startedAt = nowMs();
 
-  const searchParams = new URLSearchParams();
-  Object.entries(query).forEach(([key, value]) => {
-    if (value == null) return;
-    searchParams.append(key, String(value));
-  });
+  const searchParams = toUrlEncodedString(query);
 
   for (let attempt = 0; attempt <= transport.maxRetries; attempt += 1) {
     if (attempt > 0) {
@@ -286,9 +329,15 @@ const callRelayGet = async <T>(
 
     try {
       const nonce = `${nowMs()}-${Math.random().toString(36).slice(2, 10)}`;
-      const url = searchParams.toString()
-        ? `${baseUrl}${path}?${searchParams.toString()}`
+      const url = searchParams
+        ? `${baseUrl}${path}?${searchParams}`
         : `${baseUrl}${path}`;
+      logSosDiagnostic('relay:get_start', {
+        method: 'GET',
+        url: summarizeUrl(url),
+        attempt,
+        timeoutMs,
+      });
       const response = await fetch(url, {
         method: 'GET',
         headers: {
@@ -305,6 +354,14 @@ const callRelayGet = async <T>(
       lastStatus = response.status;
       const parsed = (await response.json().catch(() => null)) as T | null;
       lastData = parsed;
+      logSosDiagnostic('relay:get_response', {
+        method: 'GET',
+        url: summarizeUrl(url),
+        attempt,
+        status: response.status,
+        ok: response.ok,
+        body: summarizeResponseBody(parsed),
+      });
 
       if (response.ok) {
         const latencyMs = nowMs() - startedAt;
@@ -326,8 +383,17 @@ const callRelayGet = async <T>(
         await clearAuth();
         await ensureRelayToken(true);
       }
-    } catch {
+    } catch (error) {
       clearTimeout(timeoutId);
+      logSosDiagnostic('relay:get_error', {
+        method: 'GET',
+        url: summarizeUrl(
+          searchParams.toString() ? `${baseUrl}${path}?${searchParams.toString()}` : `${baseUrl}${path}`,
+        ),
+        attempt,
+        timeoutMs,
+        error: summarizeError(error),
+      });
     }
 
     if (attempt < transport.maxRetries) {
@@ -356,10 +422,20 @@ export const AlertRelayService = {
   async sendSos(payload: {
     id: string;
     location: { latitude: number; longitude: number };
-    contacts: Array<{ id?: string; phone?: string; name?: string }>;
+    contacts: Array<{
+      id?: string;
+      phone?: string;
+      name?: string;
+      channel?: 'guardian' | 'contact';
+    }>;
     userName?: string;
     createdAt: string;
     priority: 'high';
+    integrity?: {
+      version: 1;
+      alg: 'sha256';
+      digest: string;
+    };
   }): Promise<RelayResult<{ relayId?: string }>> {
     return callRelay('/api/relay/sos', payload);
   },

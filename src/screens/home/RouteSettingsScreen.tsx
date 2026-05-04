@@ -19,6 +19,13 @@ import * as RNLocalize from 'react-native-localize';
 import { useTranslation } from 'react-i18next';
 
 import SearchResultsList from '../../components/map/SearchResultsList';
+import { ClearDefaultRouteDestinationCommand } from '../../application/commands/ClearDefaultRouteDestinationCommand';
+import { SaveDefaultRouteDestinationCommand } from '../../application/commands/SaveDefaultRouteDestinationCommand';
+import { SelectRouteDestinationSuggestionCommand } from '../../application/commands/SelectRouteDestinationSuggestionCommand';
+import { GetRoutePreviewQuery } from '../../application/queries/GetRoutePreviewQuery';
+import { GetRouteSettingsSnapshotQuery } from '../../application/queries/GetRouteSettingsSnapshotQuery';
+import { ResolveRouteMapSelectionQuery } from '../../application/queries/ResolveRouteMapSelectionQuery';
+import { SearchRouteDestinationQuery } from '../../application/queries/SearchRouteDestinationQuery';
 import { ThemeTokens } from '../../constants/ThemeTokens';
 import {
   MAP_MAX_ZOOM,
@@ -27,20 +34,16 @@ import {
 } from '../../constants/MapStyles';
 import { useSecurity } from '../../context/SecurityContext';
 import { useTheme } from '../../context/ThemeContext';
-import { GeocodingService, PlaceSuggestion } from '../../services/maps';
-import { ProfileService } from '../../services/ProfileService';
-import OfflineCacheService from '../../services/maps/OfflineCacheService';
-import {
+import type {
   DefaultRouteDestination,
-  RouteDestinationService,
+  RouteDetails,
   RouteTransportMode,
-} from '../../services/RouteDestinationService';
-import { RouteDetails, RouteService } from '../../services/RouteService';
+} from '../../domain/route/RouteModels';
+import type { PlaceSuggestion } from '../../domain/maps/MapModels';
 import {
   canUseLocationForRiskMaps,
   isFiniteCoordinatePair,
 } from '../../utils/locationQuality';
-import { RefreshWidgetSnapshotsCommand } from '../../widgets/application/commands/RefreshWidgetSnapshotsCommand';
 
 const FONT_FAMILY =
   Platform.OS === 'ios'
@@ -48,6 +51,7 @@ const FONT_FAMILY =
     : ThemeTokens.typography.families.android;
 
 const ALERT_LOGO = require('../../assets/logo.png');
+const ROUTE_ESTIMATED_COLOR = ThemeTokens.colors.light.riskMedium;
 
 const TRANSPORT_OPTIONS: Array<{
   mode: RouteTransportMode;
@@ -167,11 +171,14 @@ export const RouteSettingsScreen = ({ navigation }: any) => {
 
   useEffect(() => {
     let active = true;
-    ProfileService.getProfile()
-      .then(profile => {
+    GetRouteSettingsSnapshotQuery.execute()
+      .then(snapshot => {
         if (!active) return;
-        const uri = typeof profile?.avatarUri === 'string' ? profile.avatarUri.trim() : '';
-        setAvatarUri(uri ? uri : null);
+        setAvatarUri(snapshot.avatarUri);
+        setDestination(snapshot.destination);
+        setLabel(snapshot.label);
+        setDestinationQuery(snapshot.destinationQuery);
+        setTransportMode(snapshot.transportMode);
       })
       .catch(() => {});
     return () => {
@@ -256,6 +263,26 @@ export const RouteSettingsScreen = ({ navigation }: any) => {
       },
     } as const;
   }, [routeDetails?.line]);
+  const routeLineStyle = useMemo(
+    () =>
+      routeDetails?.routeMode === 'estimated_straight_line'
+        ? {
+            lineColor: ROUTE_ESTIMATED_COLOR,
+            lineWidth: 3,
+            lineOpacity: 0.76,
+            lineCap: 'round' as const,
+            lineJoin: 'round' as const,
+            lineDasharray: [2, 2],
+          }
+        : {
+            lineColor: colors.primary,
+            lineWidth: 4,
+            lineOpacity: 0.9,
+            lineCap: 'round' as const,
+            lineJoin: 'round' as const,
+          },
+    [colors.primary, routeDetails?.routeMode],
+  );
 
   const cameraCoordinates = useMemo(() => {
     if (Array.isArray(routeDetails?.line) && routeDetails.line.length > 1) {
@@ -275,16 +302,6 @@ export const RouteSettingsScreen = ({ navigation }: any) => {
     }
     return [center];
   }, [center, destination, hasDestination, hasUser, routeDetails?.line, userLat, userLon]);
-
-  useEffect(() => {
-    const load = async () => {
-      const existing = await RouteDestinationService.getDefaultDestination();
-      setDestination(existing);
-      setLabel(existing?.label || '');
-      setTransportMode(existing?.transportMode || 'car');
-    };
-    void load();
-  }, []);
 
   const closeRouteSettings = useCallback(() => {
     if (typeof navigation?.canGoBack === 'function' && navigation.canGoBack()) {
@@ -325,11 +342,11 @@ export const RouteSettingsScreen = ({ navigation }: any) => {
       }
 
       setRouteLoading(true);
-      const details = await RouteService.getRouteDetails(
-        { latitude: userLat as number, longitude: userLon as number },
-        { latitude: destination.latitude, longitude: destination.longitude },
+      const details = await GetRoutePreviewQuery.execute({
+        from: { latitude: userLat as number, longitude: userLon as number },
+        to: { latitude: destination.latitude, longitude: destination.longitude },
         transportMode,
-      ).catch(() => null);
+      }).catch(() => null);
 
       if (!cancelled) {
         setRouteDetails(details);
@@ -357,7 +374,7 @@ export const RouteSettingsScreen = ({ navigation }: any) => {
     const trimmedQuery = destinationQuery.trim();
 
     const timeoutId = setTimeout(() => {
-      void GeocodingService.search({
+      void SearchRouteDestinationQuery.execute({
         query: trimmedQuery,
         locale: i18n.language,
         near: hasUser ? [userLon as number, userLat as number] : undefined,
@@ -437,34 +454,38 @@ export const RouteSettingsScreen = ({ navigation }: any) => {
       setSearchFocused(false);
       setSearchResults([]);
 
-      void GeocodingService.reverse({
-        coordinate: [coord.longitude, coord.latitude],
+      void ResolveRouteMapSelectionQuery.execute({
+        latitude: coord.latitude,
+        longitude: coord.longitude,
         locale: i18n.language,
-        })
-        .then(place => {
-          if (!place) return;
-          setDestinationQuery(place.address || place.name);
-          setLabel(currentLabel => currentLabel.trim() || place.name);
-          void OfflineCacheService.pushRecentPlace(place);
+        currentLabel: label,
+        transportMode,
+      })
+        .then(result => {
+          setDestination(result.destination);
+          setDestinationQuery(result.destinationQuery);
+          setLabel(result.resolvedLabel);
         })
         .catch(() => undefined);
     },
-    [i18n.language, transportMode],
+    [i18n.language, label, transportMode],
   );
 
   const handleSelectSearchResult = useCallback(
     (item: PlaceSuggestion) => {
-      setDestination({
-        latitude: item.coordinate[1],
-        longitude: item.coordinate[0],
-        label: label.trim() || item.name,
+      void SelectRouteDestinationSuggestionCommand.execute({
+        suggestion: item,
+        currentLabel: label,
         transportMode,
-      });
-      setDestinationQuery(item.address || item.name);
-      setSearchResults([]);
-      setSearchFocused(false);
-      setLabel(currentLabel => currentLabel.trim() || item.name);
-      void OfflineCacheService.pushRecentPlace(item);
+      })
+        .then(result => {
+          setDestination(result.destination);
+          setDestinationQuery(result.destinationQuery);
+          setSearchResults([]);
+          setSearchFocused(false);
+          setLabel(result.resolvedLabel);
+        })
+        .catch(() => undefined);
     },
     [label, transportMode],
   );
@@ -486,16 +507,12 @@ export const RouteSettingsScreen = ({ navigation }: any) => {
       return;
     }
 
-    const next: DefaultRouteDestination = {
-      latitude: destination.latitude,
-      longitude: destination.longitude,
-      label: label.trim() || undefined,
-      transportMode,
-    };
-
     try {
-      await RouteDestinationService.setDefaultDestination(next);
-      await RefreshWidgetSnapshotsCommand.execute({ force: true });
+      await SaveDefaultRouteDestinationCommand.execute({
+        destination,
+        label,
+        transportMode,
+      });
       closeRouteSettings();
     } catch {
       RNAlert.alert(t('common_error'), t('common_try_again'));
@@ -504,7 +521,7 @@ export const RouteSettingsScreen = ({ navigation }: any) => {
 
   const handleClear = useCallback(async () => {
     try {
-      await RouteDestinationService.setDefaultDestination(null);
+      await ClearDefaultRouteDestinationCommand.execute();
       setDestination(null);
       setLabel('');
       setDestinationQuery('');
@@ -512,7 +529,6 @@ export const RouteSettingsScreen = ({ navigation }: any) => {
       setSearchFocused(false);
       setTransportMode('car');
       setRouteDetails(null);
-      await RefreshWidgetSnapshotsCommand.execute({ force: true });
       closeRouteSettings();
     } catch {
       RNAlert.alert(t('common_error'), t('common_try_again'));
@@ -520,7 +536,12 @@ export const RouteSettingsScreen = ({ navigation }: any) => {
   }, [closeRouteSettings, t]);
 
   const etaMetric = routeDetails?.durationMin
-    ? formatEtaMinutes(routeDetails.durationMin, t)
+    ? routeDetails.routeMode === 'estimated_straight_line'
+      ? t('settings_route_eta_metric_approximate', {
+          value: formatEtaMinutes(routeDetails.durationMin, t),
+          defaultValue: '~{{value}}',
+        })
+      : formatEtaMinutes(routeDetails.durationMin, t)
     : null;
 
   const distanceLabel = routeDetails?.distanceKm
@@ -533,10 +554,37 @@ export const RouteSettingsScreen = ({ navigation }: any) => {
   const selectedModeLabel = t(`settings_route_transport_${transportMode}`, {
     defaultValue: transportMode,
   });
+  const isEstimatedRoute = routeDetails?.routeMode === 'estimated_straight_line';
+  const isUnavailableRoute = routeDetails?.routeMode === 'unavailable';
+  const routeStatus = isEstimatedRoute
+    ? {
+        title: t('settings_route_status_estimated_title'),
+        body: t('settings_route_status_estimated_body'),
+        accessibilityLabel: t('settings_route_status_estimated_a11y'),
+        icon: 'alert-outline',
+        accentColor: ROUTE_ESTIMATED_COLOR,
+      }
+    : isUnavailableRoute
+      ? {
+          title: t('settings_route_status_unavailable_title'),
+          body: t('settings_route_status_unavailable_body'),
+          accessibilityLabel: t('settings_route_status_unavailable_a11y'),
+          icon: 'map-marker-off-outline',
+          accentColor: colors.textSecondary,
+        }
+      : null;
 
-  const etaSupportingText = distanceLabel
-    ? `${distanceLabel} / ${selectedModeLabel}`
-    : selectedModeLabel;
+  const etaSupportingText = isEstimatedRoute
+    ? distanceLabel
+      ? t('settings_route_eta_supporting_estimated', {
+          distance: distanceLabel,
+          mode: selectedModeLabel,
+          defaultValue: `${distanceLabel} / ${selectedModeLabel} / estimated line only`,
+        })
+      : `${selectedModeLabel} / ${t('settings_route_status_estimated_title')}`
+    : distanceLabel
+      ? `${distanceLabel} / ${selectedModeLabel}`
+      : selectedModeLabel;
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
@@ -639,19 +687,20 @@ export const RouteSettingsScreen = ({ navigation }: any) => {
                 <MapLibreGL.ShapeSource id="route-settings-line" shape={routeShape as any}>
                   <MapLibreGL.LineLayer
                     id="route-settings-line-layer"
-                    style={{
-                      lineColor: colors.primary,
-                      lineWidth: 4,
-                      lineOpacity: 0.9,
-                      lineCap: 'round',
-                      lineJoin: 'round',
-                    }}
+                    style={routeLineStyle}
                   />
                 </MapLibreGL.ShapeSource>
               ) : null}
 
               <MapLibreGL.PointAnnotation id="me" coordinate={[userLon as number, userLat as number]}>
-                <View style={[styles.markerSelf, { borderColor: colors.primary }]}>
+                <View
+                  style={[
+                    styles.markerSelf,
+                    {
+                      borderColor: colors.primary,
+                      backgroundColor: colors.background,
+                    },
+                  ]}>
                   {avatarUri ? (
                     <Image source={{ uri: avatarUri }} style={styles.markerAvatar} />
                   ) : (
@@ -690,6 +739,33 @@ export const RouteSettingsScreen = ({ navigation }: any) => {
           ) : null}
         </View>
 
+        {routeStatus ? (
+          <View
+            style={[
+              styles.routeStatusCard,
+              {
+                backgroundColor: colors.card,
+                borderColor: routeStatus.accentColor,
+              },
+            ]}
+            accessible
+            accessibilityRole="alert"
+            accessibilityLabel={routeStatus.accessibilityLabel}
+            accessibilityLiveRegion="polite"
+            importantForAccessibility="yes"
+          >
+            <View style={styles.routeStatusHeader}>
+              <Icon name={routeStatus.icon} size={18} color={routeStatus.accentColor} />
+              <Text style={[styles.routeStatusTitle, { color: colors.text }]}>
+                {routeStatus.title}
+              </Text>
+            </View>
+            <Text style={[styles.routeStatusBody, { color: colors.textSecondary }]}>
+              {routeStatus.body}
+            </Text>
+          </View>
+        ) : null}
+
         <View style={styles.form}>
           <Text style={[styles.label, { color: colors.text }]}>{t('settings_route_label')}</Text>
           <TextInput
@@ -719,12 +795,21 @@ export const RouteSettingsScreen = ({ navigation }: any) => {
               </View>
             ) : etaMetric ? (
               <>
-                <Text style={[styles.etaMetric, { color: colors.text }]}>{etaMetric}</Text>
+                <Text
+                  style={[
+                    styles.etaMetric,
+                    { color: isEstimatedRoute ? ROUTE_ESTIMATED_COLOR : colors.text },
+                  ]}
+                >
+                  {etaMetric}
+                </Text>
                 <Text style={[styles.etaMeta, { color: colors.textSecondary }]}>{etaSupportingText}</Text>
               </>
             ) : (
               <Text style={[styles.etaMeta, { color: colors.textSecondary }]}>
-                {hasUser
+                {hasUser && hasDestination
+                  ? t('settings_route_status_unavailable_body')
+                  : hasUser
                   ? t('settings_route_eta_unavailable')
                   : t('settings_route_eta_no_location')}
               </Text>
@@ -873,6 +958,33 @@ const styles = StyleSheet.create({
     fontFamily: FONT_FAMILY,
     flex: 1,
   },
+  routeStatusCard: {
+    marginTop: ThemeTokens.spacing.md,
+    borderWidth: 1,
+    borderRadius: ThemeTokens.radius.xl,
+    paddingHorizontal: ThemeTokens.spacing.md,
+    paddingVertical: ThemeTokens.spacing.md,
+    gap: 6,
+  },
+  routeStatusHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  routeStatusTitle: {
+    fontSize: ThemeTokens.typography.sizes.body,
+    lineHeight: ThemeTokens.typography.lineHeights.body,
+    letterSpacing: ThemeTokens.typography.letterSpacing.body,
+    fontWeight: ThemeTokens.typography.weights.bold,
+    fontFamily: FONT_FAMILY,
+    flex: 1,
+  },
+  routeStatusBody: {
+    fontSize: ThemeTokens.typography.sizes.body,
+    lineHeight: ThemeTokens.typography.lineHeights.body,
+    letterSpacing: ThemeTokens.typography.letterSpacing.body,
+    fontFamily: FONT_FAMILY,
+  },
   markerSelf: {
     backgroundColor: '#FFFFFF',
     borderRadius: 18,
@@ -887,6 +999,8 @@ const styles = StyleSheet.create({
   markerLogo: {
     width: 18,
     height: 18,
+    backgroundColor: 'transparent',
+    overflow: 'hidden',
   },
   markerDest: {
     backgroundColor: '#FFFFFF',

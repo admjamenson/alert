@@ -6,15 +6,14 @@ import {
   TouchableOpacity,
   FlatList,
   Alert,
-  Linking,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../../context/ThemeContext';
 import { useSecurity } from '../../context/SecurityContext';
-import { MonitoringService } from '../../services/MonitoringService';
+import { GetMonitoringScreenSnapshotQuery } from '../../application/queries/GetMonitoringScreenSnapshotQuery';
 import { MonitoringSourcesBR } from '../../services/MonitoringSourcesBR';
-import { EpidemicService, EpidemicSnapshot } from '../../services/EpidemicService';
+import { EpidemicSnapshot } from '../../services/EpidemicService';
 import { TelemetryService } from '../../services/TelemetryService';
 import HazardSymbolIcon from '../../components/map/HazardSymbolIcon';
 import {
@@ -76,6 +75,16 @@ export const MonitoringScreen = ({ navigation }: any) => {
     pandemic?: string;
     epidemic?: string;
   }>({});
+  const [sourceMetaByEventId, setSourceMetaByEventId] = useState<
+    Record<
+      string,
+      {
+        sourceName?: string;
+        officiality: 'OFFICIAL' | 'VERIFIED' | 'REFERENCE';
+        confidence: number;
+      }
+    >
+  >({});
   const invalidUpdatedAtTelemetryRef = React.useRef<Record<string, string>>({});
 
   useEffect(() => {
@@ -107,10 +116,10 @@ export const MonitoringScreen = ({ navigation }: any) => {
     const lat = securityState.location?.latitude;
     const lon = securityState.location?.longitude;
     if (!canUseLocationForRiskMaps(securityState) || !isFiniteCoordinatePair(lat, lon)) {
-      setActiveIds(new Set());
-      setUnavailableIds(new Set());
-      setSummaries({});
-      setLoadingAlerts(false);
+      setPandemicSnapshot(null);
+      setEpidemicSnapshot(null);
+      setSnapshotSyncCompletedAt({});
+      setSourceMetaByEventId({});
       return;
     }
     const safeLat = Number(lat);
@@ -121,47 +130,23 @@ export const MonitoringScreen = ({ navigation }: any) => {
         : securityState.riskLevel === 'medium'
           ? 0.55
           : 0.2;
-    setLoadingAlerts(true);
-    MonitoringService.getActiveEvents(safeLat, safeLon, riskScore)
-      .then(result => {
-        setActiveIds(new Set(result.activeIds));
-        setUnavailableIds(new Set(result.unavailableIds));
-        setSummaries(result.summaries);
-      })
-      .catch(() => {
-        setActiveIds(new Set());
-        setUnavailableIds(new Set());
-        setSummaries({});
-      })
-      .finally(() => setLoadingAlerts(false));
-  }, [
-    securityState.location?.latitude,
-    securityState.location?.longitude,
-    securityState.riskLevel,
-  ]);
-
-  useEffect(() => {
-    const lat = securityState.location?.latitude;
-    const lon = securityState.location?.longitude;
-    if (!canUseLocationForRiskMaps(securityState) || !isFiniteCoordinatePair(lat, lon)) {
-      setPandemicSnapshot(null);
-      setEpidemicSnapshot(null);
-      setSnapshotSyncCompletedAt({});
-      return;
-    }
-    const safeLat = Number(lat);
-    const safeLon = Number(lon);
     let cancelled = false;
     const load = async () => {
       try {
-        const [pandemicSnap, epidemicSnap] = await Promise.all([
-          EpidemicService.getSnapshot(safeLat, safeLon, 'pandemic', '7d'),
-          EpidemicService.getSnapshot(safeLat, safeLon, 'epidemic', '7d'),
-        ]);
+        setLoadingAlerts(true);
+        const snapshot = await GetMonitoringScreenSnapshotQuery.execute({
+          latitude: safeLat,
+          longitude: safeLon,
+          riskScore,
+        });
         if (!cancelled) {
           const completedAt = normalizeToIsoDateTime(new Date()) || new Date().toISOString();
-          setPandemicSnapshot(pandemicSnap);
-          setEpidemicSnapshot(epidemicSnap);
+          setActiveIds(new Set(snapshot.activeIds));
+          setUnavailableIds(new Set(snapshot.unavailableIds));
+          setSummaries(snapshot.summaries);
+          setSourceMetaByEventId(snapshot.sourceMetaByEventId);
+          setPandemicSnapshot(snapshot.pandemicSnapshot);
+          setEpidemicSnapshot(snapshot.epidemicSnapshot);
           setSnapshotSyncCompletedAt({
             pandemic: completedAt,
             epidemic: completedAt,
@@ -169,16 +154,26 @@ export const MonitoringScreen = ({ navigation }: any) => {
         }
       } catch {
         if (!cancelled) {
+          setActiveIds(new Set());
+          setUnavailableIds(new Set());
+          setSummaries({});
           setPandemicSnapshot(null);
           setEpidemicSnapshot(null);
+          setSourceMetaByEventId({});
         }
+      } finally {
+        if (!cancelled) setLoadingAlerts(false);
       }
     };
     void load();
     return () => {
       cancelled = true;
     };
-  }, [securityState.location?.latitude, securityState.location?.longitude]);
+  }, [
+    securityState.location?.latitude,
+    securityState.location?.longitude,
+    securityState.riskLevel,
+  ]);
 
   const persistFeatured = async (next: string[]) => {
     try {
@@ -384,9 +379,10 @@ export const MonitoringScreen = ({ navigation }: any) => {
              const snapshot = isPandemic ? pandemicSnapshot : isEpidemic ? epidemicSnapshot : null;
              const sourceHint =
                !isPandemic && !isEpidemic ? MonitoringSourcesBR[item.id] : undefined;
+             const sourceMeta = sourceMetaByEventId[item.id];
              const sourceLabel = sourceHint?.requiresAccess
                ? t('monitoring_requires_credential', { source: sourceHint.label })
-               : sourceHint?.label;
+               : sourceMeta?.sourceName || sourceHint?.label;
              const statusMain =
                isPandemic || isEpidemic
                  ? formatSnapshotStatus(snapshot)
@@ -407,7 +403,8 @@ export const MonitoringScreen = ({ navigation }: any) => {
                  ? formatSnapshotMeta(snapshot, isPandemic ? 'pandemic' : 'epidemic')
                  : sourceLabel,
              );
-             const sourceUrl = snapshot?.sources?.[0]?.url || sourceHint?.url;
+             const sourceUrl = snapshot?.sources?.[0]?.url;
+             const canOpenOfficialSources = Boolean(sourceHint) || Boolean(sourceUrl);
              return (
                <TouchableOpacity
                  style={[
@@ -432,20 +429,29 @@ export const MonitoringScreen = ({ navigation }: any) => {
                   <Text style={[styles.eventStatus, { color: colors.textSecondary }]}>
                     {statusText}
                   </Text>
-                  {sourceUrl ? (
+                  {canOpenOfficialSources ? (
                     <TouchableOpacity
                       style={[
                         styles.sourceLink,
                         { borderColor: colors.border, backgroundColor: colors.background },
                       ]}
                       onPress={() => {
-                        void Linking.openURL(sourceUrl as string);
+                        if (sourceUrl) {
+                          navigation.navigate('WebView', {
+                            url: sourceUrl,
+                            title: t('official_sources_title'),
+                          });
+                          return;
+                        }
+                        openOfficialSources();
                       }}
                       activeOpacity={0.8}
                     >
                       <Icon name="open-in-new" size={14} color={colors.textSecondary} />
                       <Text style={[styles.sourceLinkText, { color: colors.textSecondary }]}>
-                        {t('alert_details_view_source')}
+                        {sourceUrl
+                          ? t('alert_details_view_source')
+                          : t('official_sources_open_screen')}
                       </Text>
                     </TouchableOpacity>
                   ) : null}

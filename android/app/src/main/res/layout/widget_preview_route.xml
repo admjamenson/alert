@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_preview_route_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_alert_bg"
+    android:clipToOutline="true"
+    android:outlineProvider="background"
+    android:padding="12dp">
+
+    <ImageView
+        android:id="@+id/widget_preview_route_logo"
+        android:layout_width="20dp"
+        android:layout_height="20dp"
+        android:layout_alignParentStart="true"
+        android:layout_alignParentTop="true"
+        android:contentDescription="@string/widget_alert_label"
+        android:src="@mipmap/ic_launcher" />
+
+    <TextView
+        android:id="@+id/widget_preview_route_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/widget_preview_route_logo"
+        android:layout_marginTop="10dp"
+        android:text="@string/widget_route_title"
+        android:textColor="@color/widget_text_primary"
+        android:textSize="20sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/widget_preview_route_eta"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/widget_preview_route_title"
+        android:layout_marginTop="6dp"
+        android:text="@string/widget_route_eta"
+        android:textColor="@color/widget_text_primary"
+        android:textSize="32sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/widget_preview_route_destination"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/widget_preview_route_eta"
+        android:layout_marginTop="4dp"
+        android:text="@string/widget_route_destination"
+        android:textColor="@color/widget_text_secondary"
+        android:textSize="13sp" />
+
+    <ImageView
+        android:id="@+id/widget_preview_route_icon"
+        android:layout_width="20dp"
+        android:layout_height="20dp"
+        android:layout_below="@id/widget_preview_route_destination"
+        android:layout_marginTop="10dp"
+        android:contentDescription="@string/widget_alert_label"
+        android:src="@drawable/ic_widget_target"
+        android:tint="@color/widget_icon_tint" />
+
+    <TextView
+        android:id="@+id/widget_preview_route_pill"
+        android:layout_width="wrap_content"
+        android:layout_height="26dp"
+        android:layout_alignParentBottom="true"
+        android:layout_centerHorizontal="true"
+        android:background="@drawable/widget_pill_green"
+        android:gravity="center"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:text="@string/widget_route_status"
+        android:textColor="@color/widget_text_inverse"
+        android:textSize="11sp"
+        android:textStyle="bold" />
+</RelativeLayout>

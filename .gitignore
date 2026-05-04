@@ -1,4 +1,4 @@
- # macOS
+# macOS
 .DS_Store
 
 # iOS / Xcode
@@ -30,28 +30,24 @@ xcuserdata/
 .gradle-cache/
 .gradle-session/
 local.properties
+/android/keystore.properties
 *.iml
 *.hprof
 .cxx/
 captures/
 .externalNativeBuild/
+*.jks
 *.keystore
 !debug.keystore
-
-# Android build artifacts
 android/build/
 android/app/build/
-*.apk
-*.aab
 
-# Node.js
+# Node.js / Metro
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
-
-# Metro / React Native
 .metro-health-check*
 *.jsbundle
 android/app/src/main/assets/index.android.bundle
@@ -61,6 +57,7 @@ android/app/src/main/res/drawable-*/src_assets_*
 # Testing / coverage
 coverage/
 .nyc_output/
+.jest-cache/
 
 # Yarn modern
 .yarn/*
@@ -76,30 +73,46 @@ coverage/
 !.env.example
 backend/firebase-admin.json
 
-# Logs
+# Logs / build outputs
 *.log
+*.apk
+*.aab
+artifacts/
+gradlehome/
+tmp_apk/
 
-# Temporary / misc
+# Temporary / cache
 tmp/
 temp/
 .tmp/
 .cache/
-# Gradle local criado indevidamente na raiz do repo
 /.gradle*/
+/_tmp*
+/_cmake_test/
+/_ninja_test/
+/_tmp_ndk_test
+/_tmp_ndk_test.c
+/_tmp_ndk_test.o
+/tmp_bundle.txt
+/tsc_errors.txt
+/tsc_log.txt
+/logcat*.txt
+/_logcat*.txt
+/_git_status.txt
+/System.Drawing.Drawing2D.GraphicsPath
 
-# Ambiente local
-.env
-.env.*
-!.env.example
+# Local helper / scratch scripts that should never ship
+/_append_gradle_props*.cmd
+/_dirx.cmd
+/_fix_sdk_acl.cmd
+/_get_shortpath.cmd
+/_nmake_test.cmd
+/_run_gradle_*.cmd
 
-# Artefatos
-*.apk
-*.aab
-*.log
-
-# Test/cache/temp/artifacts locais
-.jest-cache/
-_tmp/
-artifacts/
-gradlehome/
-tmp_apk/
+# Local SDK / toolchain drops
+/android-sdk/
+/android/ndk/
+/tools/ninja/
+/tools/ninja.exe
+/tools/ninja-win.zip
+/tools/vs_BuildTools.exe

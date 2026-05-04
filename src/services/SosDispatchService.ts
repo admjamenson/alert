@@ -1,11 +1,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { KyberNetworkService } from './KyberNetworkService';
+import { KyberNetworkService, type KyberBroadcastResult } from './KyberNetworkService';
 import { ProfileService } from './ProfileService';
 import { GuardianNetworkService } from './GuardianNetworkService';
 import { RiskReportService } from './RiskReportService';
 import { ChatThreadService } from './ChatThreadService';
+import { UserIdentityService } from './UserIdentityService';
 import { GUARDIANS_CONVERSATION_ID } from './chat/guardiansConversation';
 import i18n from '../i18n';
+import { logSosDiagnostic } from '../observability/SosDiagnostics';
 
 const LAST_LOCATION_KEY = '@Alert:LastLocation';
 const GOOGLE_MAPS_QUERY_URL = 'https://www.google.com/maps/search/?api=1&query=';
@@ -16,22 +18,58 @@ type SosLocation = {
 };
 
 type GuardianTarget = {
+  id?: string;
   remoteId?: string;
+  phone?: string;
   name: string;
 };
 
-const normalizeGuardians = (guardians: GuardianTarget[]): Array<{ remoteId: string; name: string }> =>
+export type SosDispatchResult = {
+  accepted: boolean;
+  delivered: boolean;
+  queued: boolean;
+  viaKyber: boolean;
+  viaGuardians: boolean;
+  viaConversation: boolean;
+  integrityProtected: boolean;
+};
+
+const normalizeGuardians = (
+  guardians: GuardianTarget[],
+): Array<{ id?: string; remoteId?: string; phone?: string; name: string }> =>
   (Array.isArray(guardians) ? guardians : [])
-    .map(item => {
+    .reduce<Array<{ id?: string; remoteId?: string; phone?: string; name: string }>>((acc, item) => {
+      const id = typeof item?.id === 'string' ? item.id.trim() : '';
       const remoteId = typeof item?.remoteId === 'string' ? item.remoteId.trim() : '';
+      const phone = UserIdentityService.normalizePhone(item?.phone || '');
       const name = typeof item?.name === 'string' ? item.name.trim() : '';
-      if (!remoteId) return null;
-      return {
-        remoteId,
+      if (!name && !id && !remoteId && !phone) {
+        return acc;
+      }
+      acc.push({
+        id: id || undefined,
+        remoteId: remoteId || undefined,
+        phone: phone || undefined,
         name: name || i18n.t('guardian_label', { defaultValue: 'Guardian' }),
-      };
-    })
-    .filter((item): item is { remoteId: string; name: string } => item !== null);
+      });
+      return acc;
+    }, []);
+
+const mergeSosResults = (params: {
+  kyber: KyberBroadcastResult;
+  guardiansDelivered: boolean;
+  conversationDelivered: boolean;
+}): SosDispatchResult => ({
+  accepted:
+    params.kyber.accepted || params.guardiansDelivered || params.conversationDelivered,
+  delivered:
+    params.kyber.delivered || params.guardiansDelivered || params.conversationDelivered,
+  queued: params.kyber.queued,
+  viaKyber: params.kyber.accepted,
+  viaGuardians: params.guardiansDelivered,
+  viaConversation: params.conversationDelivered,
+  integrityProtected: params.kyber.integrityProtected,
+});
 
 const formatCoordinate = (value: number) => Number(value).toFixed(5);
 
@@ -54,12 +92,14 @@ const buildSosMessage = (location: SosLocation, locationName?: string) => {
 };
 
 const sendGuardiansConversationMessage = async (
-  guardians: Array<{ remoteId: string; name: string }>,
+  guardians: Array<{ remoteId?: string; name: string }>,
   message: string,
   location: SosLocation,
   locationName?: string,
 ) => {
-  const guardianIds = guardians.map(item => item.remoteId).filter(Boolean);
+  const guardianIds = guardians
+    .map(item => item.remoteId)
+    .filter((item): item is string => Boolean(item));
   if (guardianIds.length === 0) return false;
 
   const me = await ChatThreadService.getCurrentChatUser();
@@ -110,9 +150,22 @@ const loadLastLocation = async (): Promise<{
 };
 
 export const SosDispatchService = {
-  async dispatchFromQuickAction(): Promise<boolean> {
+  async dispatchFromQuickAction(): Promise<SosDispatchResult> {
     const location = await loadLastLocation();
-    if (!location) return false;
+    logSosDiagnostic('dispatchFromQuickAction:start', {
+      hasLocation: Boolean(location),
+    });
+    if (!location) {
+      return {
+        accepted: false,
+        delivered: false,
+        queued: false,
+        viaKyber: false,
+        viaGuardians: false,
+        viaConversation: false,
+        integrityProtected: false,
+      };
+    }
 
     // Record a local "violence index" report so the risk map can highlight this area.
     void RiskReportService.addSosActivation(location, 'quick_action');
@@ -121,7 +174,7 @@ export const SosDispatchService = {
     const storedContacts = await AsyncStorage.getItem('@emergency_contacts');
     const contacts = storedContacts ? JSON.parse(storedContacts) : [];
 
-    const ok = await KyberNetworkService.broadcastEmergency(
+    const kyberResult = await KyberNetworkService.broadcastEmergency(
       location,
       contacts,
       profile.name,
@@ -134,8 +187,19 @@ export const SosDispatchService = {
       senderName: profile.name,
       guardians,
     });
+    logSosDiagnostic('dispatchFromQuickAction:result', {
+      accepted: kyberResult.accepted || guardianResult.ok,
+      kyberAccepted: kyberResult.accepted,
+      kyberDelivered: kyberResult.delivered,
+      kyberQueued: kyberResult.queued,
+      guardianOk: guardianResult.ok,
+    });
 
-    return ok || guardianResult.ok;
+    return mergeSosResults({
+      kyber: kyberResult,
+      guardiansDelivered: guardianResult.ok,
+      conversationDelivered: false,
+    });
   },
 
   async dispatchFromApp(payload: {
@@ -143,9 +207,17 @@ export const SosDispatchService = {
     locationName?: string;
     senderName?: string;
     guardians: GuardianTarget[];
-  }): Promise<boolean> {
+  }): Promise<SosDispatchResult> {
     const guardians = normalizeGuardians(payload.guardians);
-    if (guardians.length === 0) return false;
+    const deliverableGuardianCount = guardians.filter(
+      item => Boolean(item.remoteId) || Boolean(item.phone) || Boolean(item.id),
+    ).length;
+    logSosDiagnostic('dispatchFromApp:start', {
+      guardianCount: guardians.length,
+      deliverableGuardianCount,
+      hasLocationName: Boolean(payload.locationName),
+      senderNamePresent: Boolean(String(payload.senderName || '').trim()),
+    });
 
     // Record a local "violence index" report so the risk map can highlight this area.
     void RiskReportService.addSosActivation(payload.location, 'self');
@@ -157,6 +229,39 @@ export const SosDispatchService = {
       message,
       guardians,
     });
+
+    let kyberResult: KyberBroadcastResult = {
+      accepted: false,
+      delivered: false,
+      queued: false,
+      integrityProtected: false,
+    };
+    if (!guardianResult.ok) {
+      logSosDiagnostic('dispatchFromApp:fallback_to_relay', {
+        reason: guardianResult.reason || 'guardian_direct_unavailable',
+        guardianCount: guardians.length,
+        deliverableGuardianCount,
+        guardianAccepted: Boolean(guardianResult.accepted),
+        guardianRequestId: guardianResult.requestId || null,
+        guardianJobId: guardianResult.jobId || null,
+      });
+      kyberResult = await KyberNetworkService.broadcastEmergency(
+        payload.location,
+        guardians.map(item => ({
+          id: item.remoteId,
+          name: item.name,
+          channel: 'guardian' as const,
+        })),
+        payload.senderName,
+      );
+    } else {
+      logSosDiagnostic('dispatchFromApp:guardian_direct_succeeded', {
+        guardianCount: guardians.length,
+        deliverableGuardianCount,
+        guardianRequestId: guardianResult.requestId || null,
+        guardianJobId: guardianResult.jobId || null,
+      });
+    }
 
     let conversationResult = false;
     try {
@@ -170,6 +275,21 @@ export const SosDispatchService = {
       conversationResult = false;
     }
 
-    return guardianResult.ok || conversationResult;
+    logSosDiagnostic('dispatchFromApp:result', {
+      kyberAccepted: kyberResult.accepted,
+      kyberDelivered: kyberResult.delivered,
+      kyberQueued: kyberResult.queued,
+      guardianOk: guardianResult.ok,
+      guardianAccepted: Boolean(guardianResult.accepted),
+      guardianRequestId: guardianResult.requestId || null,
+      guardianJobId: guardianResult.jobId || null,
+      conversationDelivered: conversationResult,
+    });
+
+    return mergeSosResults({
+      kyber: kyberResult,
+      guardiansDelivered: guardianResult.ok,
+      conversationDelivered: conversationResult,
+    });
   },
 };

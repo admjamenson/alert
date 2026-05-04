@@ -1,4 +1,4 @@
-﻿import { APP_CONFIG } from '../../core/config';
+import { getAlertApiBaseUrl } from '../../core/config';
 
 export type TrafficSegment = {
   id: string;
@@ -13,14 +13,13 @@ export type TrafficSnapshot = {
   segments: TrafficSegment[];
 };
 
-const getApiBaseUrl = () => {
-  const globalOverride = (globalThis as any)?.ALERT_API_URL || (globalThis as any)?.__ALERT_API_URL__;
-  const envOverride = typeof process !== 'undefined' ? (process as any)?.env?.ALERT_API_URL : undefined;
-  return (globalOverride || envOverride || APP_CONFIG.API_BASE_URL || '').trim();
-};
+const getApiBaseUrl = () => getAlertApiBaseUrl();
 
 export const TrafficService = {
-  async getSnapshot(bounds?: [number, number, number, number], locale?: string): Promise<TrafficSnapshot | null> {
+  async getSnapshot(
+    bounds?: [number, number, number, number],
+    locale?: string,
+  ): Promise<TrafficSnapshot | null> {
     const base = getApiBaseUrl();
     if (!base) return null;
 
@@ -45,8 +44,15 @@ export const TrafficService = {
     }
   },
 
-  estimateRouteTrafficLevel(distanceKm: number, etaMin: number): 'low' | 'medium' | 'high' | 'unknown' {
-    if (!Number.isFinite(distanceKm) || !Number.isFinite(etaMin) || distanceKm <= 0) {
+  estimateRouteTrafficLevel(
+    distanceKm: number,
+    etaMin: number,
+  ): 'low' | 'medium' | 'high' | 'unknown' {
+    if (
+      !Number.isFinite(distanceKm) ||
+      !Number.isFinite(etaMin) ||
+      distanceKm <= 0
+    ) {
       return 'unknown';
     }
 

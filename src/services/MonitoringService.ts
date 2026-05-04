@@ -27,7 +27,7 @@ const mapAlertToEventIdWithData = (alert: AlertNotification) => {
   const data = alert?.data as Record<string, any> | undefined;
   const fromHub = typeof data?.eventType === 'string' ? data.eventType.trim().toLowerCase() : '';
   if (fromHub.length > 0) return fromHub;
-  return mapAlertToEventId(alert.title, alert.summary);
+  return mapAlertToEventId(String(alert.title || ''), alert.summary);
 };
 
 const expandUnavailableTypeAliases = (eventType: string): string[] => {
@@ -152,7 +152,7 @@ export const MonitoringService = {
       if (!id) return;
       activeIds.add(id);
       if (!summaries[id]) {
-        summaries[id] = alert.title;
+        summaries[id] = String(alert.title || id);
       }
 
       const trustTier = String((alert?.data as any)?.trustTier || '').toUpperCase();

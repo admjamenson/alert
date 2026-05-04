@@ -1,0 +1,362 @@
+{
+  "schemaVersion": 2,
+  "baseCurrency": "USD",
+  "displayCurrency": "BRL",
+  "classificationPolicy": {
+    "allowedClassifications": [
+      "real",
+      "estimated_reliable",
+      "modeled",
+      "absent"
+    ],
+    "strictGateAccepted": [
+      "real",
+      "estimated_reliable"
+    ],
+    "notes": [
+      "Do not upgrade public pricing or storefront defaults to real without invoice, settlement export, contract, or enrolled-program proof for the active account.",
+      "Keep absent when the current backend expects a unit cost in USD but the available operational evidence is only a monthly fee or a fee denominated in another currency.",
+      "Public FX references can support estimated_reliable normalization when they are explicit, dated, and not mislabeled as account-settled FX."
+    ]
+  },
+  "economicPolicy": {
+    "sampleWindow": "calendar_month_utc",
+    "tiers": {
+      "free": {
+        "targetCostCapPercent": 0.2
+      },
+      "premium": {
+        "targetCostCapPercent": 0.3
+      }
+    },
+    "lowSampleProtection": {
+      "minObservedActiveUsers": 100,
+      "minTotalSuccessfulCalls": 1000
+    },
+    "sharedPlatformAllocation": {
+      "rateioFormula": "sharedMonthlyInfrastructureUsd / max(observedActiveUsers, minObservedActiveUsers)",
+      "classificationBelowThreshold": "estimated_reliable"
+    },
+    "requestMarginalCostFallback": {
+      "rateioFormula": "fixed_platform_cost_stays_in_platformAllocationCost; use_marginal_request_proxy_when_external_provider_unit_cost_is_absent",
+      "routingCostUsdPerCall": {
+        "value": 0.000004,
+        "classification": "modeled",
+        "source": "alert_unit_economics_marginal_proxy",
+        "evidence": "Modeled marginal backend serving proxy for routing requests. Keep modeled until measured or invoice-backed per-request cost exists for the active routing path."
+      },
+      "weatherCostUsdPerCall": {
+        "value": 0.000004,
+        "classification": "modeled",
+        "source": "alert_unit_economics_marginal_proxy",
+        "evidence": "Modeled marginal backend serving proxy for weather requests. Keep modeled until measured or invoice-backed per-request cost exists for the active weather path."
+      }
+    }
+  },
+  "commercialTerms": {
+    "stripe": {
+      "provider": "stripe",
+      "percentFee": {
+        "value": 0.0399,
+        "classification": "estimated_reliable",
+        "evidence": "Current BRL product assumption for Stripe billing. Keep estimated_reliable until the active Stripe account exposes invoice-backed settlement exports or contract terms."
+      },
+      "fixedFee": {
+        "value": 0.5,
+        "currency": "BRL",
+        "classification": "estimated_reliable",
+        "evidence": "Current BRL product assumption for Stripe billing. Keep estimated_reliable until the active Stripe account exposes invoice-backed settlement exports or contract terms."
+      },
+      "compatibilityNote": "Legacy economics scripts still expect paymentProcessorFixedFeeUsd. This template derives that compatibility value from an explicit PTAX reference and keeps it estimated_reliable, not real."
+    },
+    "app_store": {
+      "provider": "app_store",
+      "chosenPercentFee": {
+        "value": 0.3,
+        "classification": "estimated_reliable",
+        "evidence": "Conservative default until Small Business Program enrollment or year-two subscription evidence is attached for the active Apple account."
+      },
+      "reducedPercentFee": {
+        "value": 0.15,
+        "classification": "absent",
+        "evidence": "Only promote this rate when the active Apple account proves Small Business Program enrollment or eligible year-two subscription treatment."
+      }
+    },
+    "play_store": {
+      "provider": "play_store",
+      "percentFee": {
+        "value": 0.15,
+        "classification": "estimated_reliable",
+        "evidence": "Public Play subscription default for the current billing assumption. Keep estimated_reliable until payout exports or console-backed proof is attached."
+      }
+    }
+  },
+  "monthlyInfrastructure": {
+    "queueRedisMonthlyUsd": {
+      "value": 10,
+      "classification": "estimated_reliable",
+      "evidence": "Render public pricing baseline chosen for operational planning. Keep estimated_reliable until the operator attaches the active queue Redis plan or invoice."
+    },
+    "cacheRedisMonthlyUsd": {
+      "value": 10,
+      "classification": "estimated_reliable",
+      "evidence": "Render public pricing baseline chosen for operational planning. Keep estimated_reliable until the operator attaches the active cache Redis plan or invoice."
+    },
+    "workerComputeMonthlyUsd": {
+      "value": 7,
+      "classification": "estimated_reliable",
+      "evidence": "Render public pricing baseline chosen for operational planning. Keep estimated_reliable until the operator attaches the active background worker plan or invoice."
+    },
+    "webServingMonthlyUsd": {
+      "value": 7,
+      "classification": "estimated_reliable",
+      "evidence": "Render public pricing baseline chosen for operational planning. Keep estimated_reliable until the operator attaches the active web service plan or invoice."
+    },
+    "storageCostUsd": {
+      "value": null,
+      "classification": "absent",
+      "evidence": "Missing operator-selected storage provider price per GB-month or equivalent contract for the active deployment."
+    }
+  },
+  "variableUnitCosts": {
+    "feedServingCostUsdPerRequest": {
+      "value": null,
+      "classification": "absent",
+      "evidence": "Missing measured or quoted per-request feed serving cost for the active backend path."
+    },
+    "providerMissCostUsdPerMiss": {
+      "value": null,
+      "classification": "absent",
+      "evidence": "Missing measured or quoted provider miss cost for the active hot-path provider stack."
+    },
+    "weatherCostUsdPerCall": {
+      "value": null,
+      "classification": "absent",
+      "evidence": "Missing direct weather-call unit cost for the active provider stack."
+    },
+    "weatherMissCostUsdPerMiss": {
+      "value": null,
+      "classification": "absent",
+      "evidence": "Missing measured or quoted weather provider miss cost for the active provider stack."
+    },
+    "mapSessionCostUsdPerSession": {
+      "value": null,
+      "classification": "absent",
+      "evidence": "Missing confirmed map-session billing policy or contract for the active map provider path."
+    },
+    "routingCostUsdPerCall": {
+      "value": null,
+      "classification": "absent",
+      "evidence": "Missing confirmed per-route cost for the active routing provider contract or measured invoice path."
+    },
+    "sosRelayCostUsdPerEvent": {
+      "value": null,
+      "classification": "absent",
+      "evidence": "Missing measured or quoted SOS relay unit cost."
+    },
+    "pushFanoutCostUsdPerRecipient": {
+      "value": null,
+      "classification": "absent",
+      "evidence": "Missing measured or quoted push fan-out unit cost."
+    },
+    "queueJobCostUsdPerJob": {
+      "value": null,
+      "classification": "absent",
+      "evidence": "Missing measured queue-job unit cost."
+    },
+    "cacheOperationCostUsdPerOp": {
+      "value": null,
+      "classification": "absent",
+      "evidence": "Missing measured cache-operation unit cost."
+    },
+    "telemetryCostUsdPerEvent": {
+      "value": null,
+      "classification": "absent",
+      "evidence": "Keep absent until it is clear that no paid external telemetry vendor applies to the active stack."
+    },
+    "backgroundWorkerExecutionCostUsdPerExecution": {
+      "value": null,
+      "classification": "absent",
+      "evidence": "Missing measured per-execution worker cost for the active background worker path."
+    }
+  },
+  "userLevelDefaults": {
+    "infraCostPerUserUsd": {
+      "value": null,
+      "classification": "absent",
+      "evidence": "Missing operator-approved per-user allocation formula for monthly infrastructure."
+    },
+    "routingCallsPerPremiumUserMonthly": {
+      "value": null,
+      "classification": "absent",
+      "evidence": "Missing measured per-user routing usage export."
+    },
+    "weatherCallsPerPremiumUserMonthly": {
+      "value": null,
+      "classification": "absent",
+      "evidence": "Missing measured per-user weather usage export."
+    }
+  },
+  "fxRates": {
+    "USD": {
+      "BRL": {
+        "value": 4.9886,
+        "classification": "estimated_reliable",
+        "asOf": "2026-04-30",
+        "source": "bcb_ptax_public_reference",
+        "evidence": "Banco Central do Brasil PTAX venda de 30/04/2026 usado como referencia publica para normalizacao BRL/USD. Keep estimated_reliable because this is not the account's settled FX."
+      }
+    }
+  },
+  "currencyNormalization": {
+    "usdToBrl": {
+      "value": 4.9886,
+      "classification": "estimated_reliable",
+      "asOf": "2026-04-30",
+      "effectiveDate": "2026-04-30",
+      "source": "bcb_ptax_public_reference",
+      "evidence": "Banco Central do Brasil PTAX venda de 30/04/2026 usado como referencia publica para normalizacao BRL/USD. Keep estimated_reliable because this is not the account's settled FX."
+    }
+  },
+  "storeFeeResolutionPolicy": {
+    "stripe": {
+      "activeMarket": "BRL",
+      "useStructuredFixedFeeCurrency": true,
+      "legacyFixedFeeUsdCompatibility": "derived_from_fxRates.USD.BRL_and_currencyNormalization.usdToBrl_using_bcb_ptax_reference"
+    },
+    "app_store": {
+      "defaultPercentPath": "commercialTerms.app_store.chosenPercentFee",
+      "reducedPercentRequires": [
+        "apple_small_business_program_enrollment",
+        "or_trusted_year_two_subscription_mix_evidence"
+      ]
+    },
+    "play_store": {
+      "defaultPercentPath": "commercialTerms.play_store.percentFee"
+    }
+  },
+  "safetyCaps": {
+    "freemiumVariableCostRatioCap": 0.2,
+    "premiumVariableCostRatioCap": 0.3
+  },
+  "knownBillingArtifacts": {
+    "operationalPriceBookPath": "C:\\secure\\alert-pricebook.json",
+    "templatePath": "C:\\Alert\\backend\\ops\\alert-pricebook.template.json",
+    "releaseMetricsPath": "C:\\secure\\alert-release-metrics.json",
+    "priceBookPathEnv": "ALERT_ECONOMICS_PRICE_BOOK_PATH",
+    "strictGateEnv": "ALERT_ECONOMICS_STRICT_PRICEBOOK",
+    "releaseMetricsEnv": "ALERT_RELEASE_METRICS_JSON"
+  },
+  "blockers": [
+    "Legacy strict gates still require webServingCostUsd as a per-request unit cost; the corrected v2 file only has a monthly Render web service estimate so far.",
+    "Variable unit costs for feed, provider miss, weather miss, routing, map sessions, SOS relay, queue jobs, cache ops, storage, telemetry, and worker execution remain absent until invoice-backed or measured evidence is attached."
+  ],
+  "operatorChecklist": [
+    "Refresh the PTAX reference whenever you intentionally update BRL/USD normalization in the operational pricebook.",
+    "Attach Render invoices or chosen service-tier screenshots for queue Redis, cache Redis, web service, and background worker when available.",
+    "Measure or contract variable unit costs before promoting any currently absent unit-cost field.",
+    "Keep absent when the only known evidence is public pricing without proof that it matches the active account, tier, contract, or routed traffic."
+  ],
+  "costs": {
+    "queueRedisMonthlyUsd": {
+      "value": 10,
+      "origin": "estimated_reliable",
+      "evidence": "Compatibility projection of monthlyInfrastructure.queueRedisMonthlyUsd."
+    },
+    "cacheRedisMonthlyUsd": {
+      "value": 10,
+      "origin": "estimated_reliable",
+      "evidence": "Compatibility projection of monthlyInfrastructure.cacheRedisMonthlyUsd."
+    },
+    "workerComputeMonthlyUsd": {
+      "value": 7,
+      "origin": "estimated_reliable",
+      "evidence": "Compatibility projection of monthlyInfrastructure.workerComputeMonthlyUsd."
+    },
+    "feedServingCostUsd": {
+      "value": null,
+      "origin": "absent",
+      "evidence": "Compatibility projection stays absent until variableUnitCosts.feedServingCostUsdPerRequest is backed by measurement or contract evidence."
+    },
+    "providerMissCostUsd": {
+      "value": null,
+      "origin": "absent",
+      "evidence": "Compatibility projection stays absent until variableUnitCosts.providerMissCostUsdPerMiss is backed by measurement or contract evidence."
+    },
+    "weatherMissCostUsd": {
+      "value": null,
+      "origin": "absent",
+      "evidence": "Compatibility projection stays absent until variableUnitCosts.weatherMissCostUsdPerMiss is backed by measurement or contract evidence."
+    },
+    "mapSessionCostUsd": {
+      "value": null,
+      "origin": "absent",
+      "evidence": "Compatibility projection stays absent until variableUnitCosts.mapSessionCostUsdPerSession is backed by measurement or contract evidence."
+    },
+    "routingCostUsd": {
+      "value": null,
+      "origin": "absent",
+      "evidence": "Compatibility projection stays absent until variableUnitCosts.routingCostUsdPerCall is backed by measurement or contract evidence."
+    },
+    "sosRelayCostUsd": {
+      "value": null,
+      "origin": "absent",
+      "evidence": "Compatibility projection stays absent until variableUnitCosts.sosRelayCostUsdPerEvent is backed by measurement or contract evidence."
+    },
+    "pushFanoutCostUsd": {
+      "value": null,
+      "origin": "absent",
+      "evidence": "Compatibility projection stays absent until variableUnitCosts.pushFanoutCostUsdPerRecipient is backed by measurement or contract evidence."
+    },
+    "queueJobCostUsd": {
+      "value": null,
+      "origin": "absent",
+      "evidence": "Compatibility projection stays absent until variableUnitCosts.queueJobCostUsdPerJob is backed by measurement or contract evidence."
+    },
+    "cacheOperationCostUsd": {
+      "value": null,
+      "origin": "absent",
+      "evidence": "Compatibility projection stays absent until variableUnitCosts.cacheOperationCostUsdPerOp is backed by measurement or contract evidence."
+    },
+    "telemetryCostUsd": {
+      "value": null,
+      "origin": "absent",
+      "evidence": "Compatibility projection stays absent because there is no trusted proof yet that the active telemetry stack has zero external vendor cost."
+    },
+    "storageCostUsd": {
+      "value": null,
+      "origin": "absent",
+      "evidence": "Compatibility projection of monthlyInfrastructure.storageCostUsd remains absent until a storage price source is attached."
+    },
+    "webServingCostUsd": {
+      "value": null,
+      "origin": "absent",
+      "evidence": "Legacy economics scripts interpret webServingCostUsd as a per-request unit cost. The corrected v2 file only has monthlyInfrastructure.webServingMonthlyUsd, so this compatibility key stays absent until an operator-approved request-level normalization exists."
+    },
+    "backgroundWorkerExecutionCostUsd": {
+      "value": null,
+      "origin": "absent",
+      "evidence": "Legacy economics scripts interpret backgroundWorkerExecutionCostUsd as a per-execution unit cost. The corrected v2 file only has monthlyInfrastructure.workerComputeMonthlyUsd, so this compatibility key stays absent until an operator-approved execution-level normalization exists."
+    },
+    "paymentProcessorPercent": {
+      "value": 0.0399,
+      "origin": "estimated_reliable",
+      "evidence": "Compatibility projection of commercialTerms.stripe.percentFee for the current BRL billing route."
+    },
+    "paymentProcessorFixedFeeUsd": {
+      "value": 0.100228521,
+      "origin": "estimated_reliable",
+      "evidence": "Compatibility projection derived from commercialTerms.stripe.fixedFee BRL 0.50 using fxRates.USD.BRL = 4.9886 and currencyNormalization.usdToBrl = 4.9886 from the dated PTAX public reference."
+    },
+    "appStoreFeePercent": {
+      "value": 0.3,
+      "origin": "estimated_reliable",
+      "evidence": "Compatibility projection of commercialTerms.app_store.chosenPercentFee using the conservative default until a reduced Apple commission tier is proven."
+    },
+    "playStoreFeePercent": {
+      "value": 0.15,
+      "origin": "estimated_reliable",
+      "evidence": "Compatibility projection of commercialTerms.play_store.percentFee."
+    }
+  }
+}

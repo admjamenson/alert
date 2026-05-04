@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createInMemoryCacheStore } = require('./InMemoryCacheStore');
-const { createCacheStore } = require('./createCacheStore');
+const { createCacheStore, resolveCacheRedisUrl } = require('./createCacheStore');
 const { createRedisCacheStore } = require('./RedisCacheStore');
 
 test('in-memory cache store expires and exposes bounded metrics', async () => {
@@ -83,5 +83,58 @@ test('cache factory selects RedisCacheStore when ALERT_CACHE_DRIVER=redis', asyn
 
   assert.equal(cache.snapshot().driver, 'redis');
   assert.equal(cache.snapshot().external, true);
+  assert.equal(cache.snapshot().urlSource, null);
   assert.deepEqual(await cache.getJson('ready'), { ok: true });
+});
+
+test('cache factory allows dedicated ALERT_CACHE_REDIS_URL for separated cache Redis', async t => {
+  const originalDriver = process.env.ALERT_CACHE_DRIVER;
+  const originalCacheUrl = process.env.ALERT_CACHE_REDIS_URL;
+  const originalSharedUrl = process.env.ALERT_REDIS_URL;
+  process.env.ALERT_CACHE_DRIVER = 'redis';
+  process.env.ALERT_CACHE_REDIS_URL = 'redis://cache:6379';
+  process.env.ALERT_REDIS_URL = 'redis://queue:6379';
+  t.after(() => {
+    if (originalDriver === undefined) delete process.env.ALERT_CACHE_DRIVER;
+    else process.env.ALERT_CACHE_DRIVER = originalDriver;
+    if (originalCacheUrl === undefined) delete process.env.ALERT_CACHE_REDIS_URL;
+    else process.env.ALERT_CACHE_REDIS_URL = originalCacheUrl;
+    if (originalSharedUrl === undefined) delete process.env.ALERT_REDIS_URL;
+    else process.env.ALERT_REDIS_URL = originalSharedUrl;
+  });
+
+  let receivedUrl = null;
+  const cache = createCacheStore({
+    createClient: options => {
+      receivedUrl = options.url;
+      return {
+        isOpen: true,
+        async get() {
+          return null;
+        },
+        async set() {},
+        async del() {},
+        async quit() {},
+      };
+    },
+  });
+
+  assert.equal(cache.snapshot().driver, 'redis');
+  assert.equal(cache.snapshot().urlSource, 'ALERT_CACHE_REDIS_URL');
+  assert.equal(receivedUrl, 'redis://cache:6379');
+});
+
+test('cache factory falls back to ALERT_REDIS_URL when dedicated cache URL is absent', () => {
+  assert.deepEqual(
+    resolveCacheRedisUrl(
+      {},
+      {
+        ALERT_REDIS_URL: 'redis://shared:6379',
+      },
+    ),
+    {
+      url: 'redis://shared:6379',
+      source: 'ALERT_REDIS_URL',
+    },
+  );
 });

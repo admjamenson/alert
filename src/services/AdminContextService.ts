@@ -70,10 +70,7 @@ const resolveWithReverseGeocode = async (
     admin1Name: geo.stateName,
     admin2Name: geo.cityName || geo.countyName,
     admin3Name: geo.countyName,
-    providerUsed:
-      geo.providerUsed === 'nominatim' || geo.providerUsed === 'open-meteo'
-        ? geo.providerUsed
-        : 'nominatim',
+    providerUsed: geo.providerUsed === 'alert_backend' ? 'alert_backend' : 'alert_backend',
     locale,
   });
 };
@@ -95,7 +92,7 @@ const resolveWithFallbackReverse = async (
     admin1Name: null,
     admin2Name: place.name,
     admin3Name: null,
-    providerUsed: 'open-meteo',
+    providerUsed: 'alert_backend',
     locale,
   });
 };

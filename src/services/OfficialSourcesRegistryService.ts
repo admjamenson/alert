@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { APP_CONFIG } from '../core/config';
+import { getAlertApiBaseUrl } from '../core/config';
 import registryLocal from '../data/officialSourcesRegistry.json';
 import { OfficialSourcesRegistry } from '../types/officialSources';
 
@@ -11,13 +11,7 @@ type RegistryCachePayload = {
   data: OfficialSourcesRegistry;
 };
 
-const getApiBaseUrl = () => {
-  const envOverride =
-    typeof process !== 'undefined' ? (process as any)?.env?.ALERT_API_URL : undefined;
-  const runtimeOverride =
-    (globalThis as any)?.ALERT_API_URL || (globalThis as any)?.__ALERT_API_URL__;
-  return String(runtimeOverride || envOverride || APP_CONFIG.API_BASE_URL || '').trim();
-};
+const getApiBaseUrl = () => getAlertApiBaseUrl();
 
 const normalizeSource = (source: any) => {
   if (!source || typeof source !== 'object') return null;

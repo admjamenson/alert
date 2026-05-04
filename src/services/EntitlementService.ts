@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
-import { APP_CONFIG } from '../core/config';
+import { getAlertApiBaseUrl } from '../core/config';
 import { UserIdentityService } from './UserIdentityService';
 import { TelemetryService } from './TelemetryService';
 
@@ -24,20 +24,54 @@ export type EntitlementSnapshot = {
   userId: string;
   plan: 'free' | 'premium';
   isPremium: boolean;
+  premium: boolean;
   featureFlags: {
     starlinkConnectEnabled: boolean;
     starlinkTunnelBetaEnabled: boolean;
     starlinkExclusiveEnabled: boolean;
+    sosEnhancementsEnabled: boolean;
+    mapsEnabled: boolean;
+    weatherEnabled: boolean;
+    alertsEnabled: boolean;
+    aiChatEnabled: boolean;
+    externalIntegrationsEnabled: boolean;
   };
+  release: {
+    releaseVersion: string;
+    canaryPercent: number;
+    inCanary: boolean;
+    killSwitchActive: boolean;
+    rollbackRecommended: boolean;
+    degradedMode: boolean;
+    reasonCodes: string[];
+    expiresAt: string;
+  } | null;
+  limits: {
+    monitoring: {
+      maxRadiusKm: number;
+      maxItems: number;
+      refreshFloorSec: number;
+    };
+    epidemic: {
+      maxWindow: '7d' | 'all';
+    };
+    weather: {
+      minRefreshSec: number;
+    };
+  };
+  costGates: {
+    realtimeRiskFeed: boolean;
+    extendedMonitoring: boolean;
+    epidemicAllWindow: boolean;
+    highFrequencyPolling: boolean;
+  };
+  degradedMode: boolean;
+  reasonCodes: string[];
   expiresAt: string;
   source: 'network' | 'cache' | 'fallback';
 };
 
-const getApiBaseUrl = () => {
-  const envOverride =
-    typeof process !== 'undefined' ? (process as any)?.env?.ALERT_API_URL : undefined;
-  return String(envOverride || APP_CONFIG.API_BASE_URL || '').trim();
-};
+const getApiBaseUrl = () => getAlertApiBaseUrl();
 
 const inFlightByUserKey = new Map<string, Promise<EntitlementSnapshot>>();
 const failureStateByUserKey = new Map<string, EntitlementFailureState>();
@@ -49,11 +83,40 @@ const defaultSnapshot = (userId: string): EntitlementSnapshot => ({
   userId,
   plan: 'free',
   isPremium: false,
+  premium: false,
   featureFlags: {
     starlinkConnectEnabled: false,
     starlinkTunnelBetaEnabled: false,
     starlinkExclusiveEnabled: false,
+    sosEnhancementsEnabled: false,
+    mapsEnabled: false,
+    weatherEnabled: false,
+    alertsEnabled: false,
+    aiChatEnabled: false,
+    externalIntegrationsEnabled: false,
   },
+  release: null,
+  limits: {
+    monitoring: {
+      maxRadiusKm: 35,
+      maxItems: 90,
+      refreshFloorSec: 60,
+    },
+    epidemic: {
+      maxWindow: '7d',
+    },
+    weather: {
+      minRefreshSec: 120,
+    },
+  },
+  costGates: {
+    realtimeRiskFeed: true,
+    extendedMonitoring: false,
+    epidemicAllWindow: false,
+    highFrequencyPolling: false,
+  },
+  degradedMode: true,
+  reasonCodes: ['plan_free_standard_limits'],
   expiresAt: nowIsoPlus(ENTITLEMENT_CACHE_TTL_MS),
   source: 'fallback',
 });
@@ -80,10 +143,43 @@ const readCachedPayload = async (onlyFresh: boolean): Promise<EntitlementCachePa
   return null;
 };
 
-const cacheToSnapshot = (cached: EntitlementCachePayload): EntitlementSnapshot => ({
-  ...cached.data,
-  source: 'cache',
-});
+const cacheToSnapshot = (cached: EntitlementCachePayload): EntitlementSnapshot => {
+  const fallback = defaultSnapshot(String(cached?.data?.userId || 'unknown'));
+  return {
+    ...fallback,
+    ...cached.data,
+    premium:
+      typeof cached?.data?.premium === 'boolean'
+        ? cached.data.premium
+        : Boolean(cached?.data?.isPremium),
+    featureFlags: {
+      ...fallback.featureFlags,
+      ...(cached?.data?.featureFlags || {}),
+    },
+    limits: {
+      monitoring: {
+        ...fallback.limits.monitoring,
+        ...(cached?.data?.limits?.monitoring || {}),
+      },
+      epidemic: {
+        ...fallback.limits.epidemic,
+        ...(cached?.data?.limits?.epidemic || {}),
+      },
+      weather: {
+        ...fallback.limits.weather,
+        ...(cached?.data?.limits?.weather || {}),
+      },
+    },
+    costGates: {
+      ...fallback.costGates,
+      ...(cached?.data?.costGates || {}),
+    },
+    reasonCodes: Array.isArray(cached?.data?.reasonCodes)
+      ? cached.data.reasonCodes
+      : fallback.reasonCodes,
+    source: 'cache',
+  };
+};
 
 const getFailureState = (userKey: string): EntitlementFailureState =>
   failureStateByUserKey.get(userKey) || { streak: 0, blockedUntilMs: 0, lastForcedAttemptMs: 0 };
@@ -270,21 +366,83 @@ export const EntitlementService = {
         }
 
         const json = (await response.json()) as any;
-        const isPremium = Boolean(json?.entitlements?.premium);
+        const isPremium = Boolean(json?.premium ?? json?.entitlements?.premium);
         const starlinkConnectEnabled = Boolean(json?.featureFlags?.starlinkConnect);
         const starlinkTunnelBetaEnabled = Boolean(json?.featureFlags?.starlinkTunnelBeta);
         const starlinkExclusiveEnabled = Boolean(json?.featureFlags?.starlinkExclusive);
-        const plan = isPremium ? 'premium' : 'free';
+        const releaseReasonCodes = Array.isArray(json?.release?.reasonCodes)
+          ? json.release.reasonCodes.filter((item: unknown) => typeof item === 'string')
+          : [];
+        const plan =
+          json?.plan === 'premium' || json?.plan === 'free'
+            ? json.plan
+            : isPremium
+              ? 'premium'
+              : 'free';
 
         const snapshot: EntitlementSnapshot = {
           userId: String(json?.userId || userKey),
           plan,
           isPremium,
+          premium: isPremium,
           featureFlags: {
             starlinkConnectEnabled,
             starlinkTunnelBetaEnabled,
             starlinkExclusiveEnabled,
+            sosEnhancementsEnabled: Boolean(json?.featureFlags?.sosEnhancements),
+            mapsEnabled: Boolean(json?.featureFlags?.maps),
+            weatherEnabled: Boolean(json?.featureFlags?.weather),
+            alertsEnabled: Boolean(json?.featureFlags?.alerts),
+            aiChatEnabled: Boolean(json?.featureFlags?.aiChat),
+            externalIntegrationsEnabled: Boolean(
+              json?.featureFlags?.externalIntegrations,
+            ),
           },
+          release: json?.release
+            ? {
+                releaseVersion: String(json.release.releaseVersion || ''),
+                canaryPercent: Number(json.release.canaryPercent || 0),
+                inCanary: Boolean(json.release.inCanary),
+                killSwitchActive: Boolean(json.release.killSwitchActive),
+                rollbackRecommended: Boolean(json.release.rollbackRecommended),
+                degradedMode: Boolean(json.release.degradedMode),
+                reasonCodes: releaseReasonCodes,
+                expiresAt: String(
+                  json.release.expiresAt || nowIsoPlus(ENTITLEMENT_CACHE_TTL_MS),
+                ),
+              }
+            : null,
+          limits: {
+            monitoring: {
+              maxRadiusKm: Number(json?.limits?.monitoring?.maxRadiusKm || 35),
+              maxItems: Number(json?.limits?.monitoring?.maxItems || 90),
+              refreshFloorSec: Number(
+                json?.limits?.monitoring?.refreshFloorSec || 60,
+              ),
+            },
+            epidemic: {
+              maxWindow:
+                json?.limits?.epidemic?.maxWindow === 'all' ? 'all' : '7d',
+            },
+            weather: {
+              minRefreshSec: Number(
+                json?.limits?.weather?.minRefreshSec || 120,
+              ),
+            },
+          },
+          costGates: {
+            realtimeRiskFeed:
+              json?.costGates?.realtimeRiskFeed !== false,
+            extendedMonitoring: Boolean(json?.costGates?.extendedMonitoring),
+            epidemicAllWindow: Boolean(json?.costGates?.epidemicAllWindow),
+            highFrequencyPolling: Boolean(
+              json?.costGates?.highFrequencyPolling,
+            ),
+          },
+          degradedMode: Boolean(json?.degradedMode),
+          reasonCodes: Array.isArray(json?.reasonCodes)
+            ? json.reasonCodes.filter((item: unknown) => typeof item === 'string')
+            : [],
           expiresAt: String(json?.expiresAt || nowIsoPlus(ENTITLEMENT_CACHE_TTL_MS)),
           source: 'network',
         };

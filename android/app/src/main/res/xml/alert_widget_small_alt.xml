@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="150dp"
+    android:minHeight="200dp"
+    android:minResizeWidth="140dp"
+    android:minResizeHeight="180dp"
+    android:initialLayout="@layout/widget_alert_small_alt"
+    android:previewLayout="@layout/widget_alert_small_alt"
+    android:previewImage="@drawable/widget_preview_small_alt"
+    android:description="@string/widget_desc_route"
+    android:resizeMode="horizontal|vertical"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen" />

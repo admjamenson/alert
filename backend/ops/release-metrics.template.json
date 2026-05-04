@@ -1,0 +1,22 @@
+{
+  "appCrashFreeRate": null,
+  "sosSuccessRate": null,
+  "sosP95Ms": null,
+  "criticalApiErrorRate": null,
+  "criticalApiP95Ms": null,
+  "providerErrorRate": null,
+  "entitlementErrorRate": null,
+  "freeCostPerUserUsd": null,
+  "premiumCostPerUserUsd": null,
+  "_notes": {
+    "appCrashFreeRate": "Populate from crash analytics or mobile observability for the active release window.",
+    "sosSuccessRate": "Populate from live SOS delivery/ack metrics for the active release window.",
+    "sosP95Ms": "Populate from live SOS latency percentiles for the active release window.",
+    "criticalApiErrorRate": "Populate from hot-path API operational metrics for the active release window.",
+    "criticalApiP95Ms": "Populate from hot-path API p95 latency for the active release window.",
+    "providerErrorRate": "Populate from upstream provider error rate across routing/weather/risk paths.",
+    "entitlementErrorRate": "Populate from entitlement snapshot or billing access error rate.",
+    "freeCostPerUserUsd": "Optional when strict pricebook is already complete, but recommended for direct unit-cost proof.",
+    "premiumCostPerUserUsd": "Optional when strict pricebook is already complete, but recommended for direct unit-cost proof."
+  }
+}

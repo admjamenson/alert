@@ -6,8 +6,10 @@ import React from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 import { useRoute, RouteProp, useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTranslation } from 'react-i18next';
 import { ThemeTokens } from '../constants/ThemeTokens';
+import { RootStackParamList } from '../navigation/types';
 
 interface AlertDetails {
   title: string;
@@ -17,17 +19,12 @@ interface AlertDetails {
   sourceUrl?: string;
 }
 
-type RouteParams = {
-  AlertDetails: {
-    alert: AlertDetails;
-  };
-};
-
 const AlertDetailsScreen: React.FC = () => {
   const { t, i18n } = useTranslation();
   const { colors } = useTheme();
-  const route = useRoute<RouteProp<RouteParams, 'AlertDetails'>>();
-  const navigation = useNavigation();
+  const route = useRoute<RouteProp<RootStackParamList, 'AlertDetails'>>();
+  const navigation =
+    useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   const alert = route.params?.alert;
 

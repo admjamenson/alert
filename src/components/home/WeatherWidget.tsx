@@ -1,35 +1,38 @@
-﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ActivityIndicator,
-  Modal,
   TouchableOpacity,
-  Pressable,
   Platform,
   useWindowDimensions,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import ReactNativeHapticFeedback from 'react-native-haptic-feedback';
-import { useTranslation } from 'react-i18next';
+import {useTranslation} from 'react-i18next';
+import BasePopup from '../ui/BasePopup';
 
-import { WeatherIcon } from '../weather/WeatherIcon';
-import { WeatherAnimatedIcon } from '../weather/WeatherAnimatedIcon';
+import {WeatherIcon} from '../weather/WeatherIcon';
+import {WeatherAnimatedIcon} from '../weather/WeatherAnimatedIcon';
 import {
   mapWeatherVisualStateToIcon,
   resolveWeatherVisualState,
 } from '../weather/weatherVisualState';
-import { useTheme } from '../../context/ThemeContext';
-import { useSecurity } from '../../context/SecurityContext';
-import { WeatherResult, WeatherService } from '../../services/WeatherService';
-import { ThemeTokens } from '../../constants/ThemeTokens';
-import { isUsableWeatherCityName, toCityOnlyLabel } from './weatherCityUtils';
-import { getTimeOfDayPhase } from '../../utils/weatherTimeOfDay';
+import {GetWeatherFeedQuery} from '../../application/queries/GetWeatherFeedQuery';
+import {useTheme} from '../../context/ThemeContext';
+import {useSecurity} from '../../context/SecurityContext';
+import {useFocusEffect} from '@react-navigation/native';
+import {WeatherResult} from '../../services/WeatherService';
+import {ThemeTokens} from '../../constants/ThemeTokens';
+import {isUsableWeatherCityName, toCityOnlyLabel} from './weatherCityUtils';
+import {getTimeOfDayPhase} from '../../utils/weatherTimeOfDay';
+import {isFiniteCoordinatePair} from '../../utils/locationQuality';
 import {
-  canUseLocationForRiskMaps,
-  isFiniteCoordinatePair,
-} from '../../utils/locationQuality';
+  formatTemperatureCelsius,
+  getUserTemperaturePreference,
+  TemperatureUnit,
+} from '../../utils/measurementUnits';
 
 type WeatherWidgetProps = {
   refreshToken?: number;
@@ -62,7 +65,8 @@ const KNOWN_WEATHER_ICONS = new Set([
 ]);
 
 const LIGHTNING_PATTERN = /(raio|raios|lightning|lightnings|relamp|rel[aâ]mp)/i;
-const THUNDER_WORD_PATTERN = /(trov|trovo|trovao|trov[aã]o|thunder|storm|tempest)/i;
+const THUNDER_WORD_PATTERN =
+  /(trov|trovo|trovao|trov[aã]o|thunder|storm|tempest)/i;
 const SNOW_PATTERN = /(neve|snow|sleet|blizzard)/i;
 const HAIL_PATTERN = /(granizo|hail|ice-pellet|ice pellet|graupel)/i;
 const RAIN_PATTERN = /(chuv|rain|drizzle|showers?|pouring)/i;
@@ -72,7 +76,9 @@ const FONT_FAMILY =
     ? ThemeTokens.typography.families.ios
     : ThemeTokens.typography.families.android;
 
-const sanitizeTemperatureLabel = (raw: string | number | null | undefined): string => {
+const sanitizeTemperatureLabel = (
+  raw: string | number | null | undefined,
+): string => {
   if (raw === null || raw === undefined) return '';
   const normalized = String(raw)
     .normalize('NFKD')
@@ -108,7 +114,9 @@ const sanitizeTemperatureLabel = (raw: string | number | null | undefined): stri
   return `${Math.round(value)}${DEGREE_SYMBOL}`;
 };
 
-const extractTemperatureNumbers = (raw: string | number | null | undefined): number[] => {
+const extractTemperatureNumbers = (
+  raw: string | number | null | undefined,
+): number[] => {
   if (typeof raw === 'number' && Number.isFinite(raw)) {
     return [raw];
   }
@@ -134,15 +142,36 @@ const formatTemperatureRangeDisplay = (
   maxTemp: string | number | null | undefined,
   minTemp: string | number | null | undefined,
   fallbackRange?: string | null,
+  locale?: string | null,
+  countryCode?: string | null,
+  userPreference?: TemperatureUnit | null,
 ): string => {
-  const safeMax = sanitizeTemperatureLabel(maxTemp);
-  const safeMin = sanitizeTemperatureLabel(minTemp);
+  const maxValue = getRoundedTemperatureValue(maxTemp);
+  const minValue = getRoundedTemperatureValue(minTemp);
+  const safeMax =
+    maxValue !== null
+      ? formatTemperatureCelsius(maxValue, locale, countryCode, userPreference)
+      : sanitizeTemperatureLabel(maxTemp);
+  const safeMin =
+    minValue !== null
+      ? formatTemperatureCelsius(minValue, locale, countryCode, userPreference)
+      : sanitizeTemperatureLabel(minTemp);
   if (safeMax && safeMin) {
     return `${safeMax}/${safeMin}`;
   }
   const fallbackValues = extractTemperatureNumbers(fallbackRange);
   if (fallbackValues.length >= 2) {
-    return `${Math.round(fallbackValues[0])}\u00B0/${Math.round(fallbackValues[1])}\u00B0`;
+    return `${formatTemperatureCelsius(
+      Math.round(fallbackValues[0]),
+      locale,
+      countryCode,
+      userPreference,
+    )}/${formatTemperatureCelsius(
+      Math.round(fallbackValues[1]),
+      locale,
+      countryCode,
+      userPreference,
+    )}`;
   }
   return '';
 };
@@ -178,7 +207,7 @@ type CanonicalWeatherSignalKey =
   | 'thunder';
 
 const resolveCanonicalWeatherSignal = (
-  values: Array<{ icon?: string | null; label?: string | null }>,
+  values: Array<{icon?: string | null; label?: string | null}>,
 ): CanonicalWeatherSignalKey | null => {
   for (const value of values) {
     const icon = sanitizeWeatherIconName(value.icon);
@@ -188,11 +217,23 @@ const resolveCanonicalWeatherSignal = (
     if (!combined.trim()) continue;
 
     if (HAIL_PATTERN.test(combined) || icon === 'weather-hail') return 'hail';
-    if (SNOW_PATTERN.test(combined) || icon === 'weather-snowy' || icon === 'weather-snowy-heavy') {
+    if (
+      SNOW_PATTERN.test(combined) ||
+      icon === 'weather-snowy' ||
+      icon === 'weather-snowy-heavy'
+    ) {
       return 'snow';
     }
-    if (LIGHTNING_PATTERN.test(combined) && !THUNDER_WORD_PATTERN.test(combined)) return 'lightning';
-    if (THUNDER_WORD_PATTERN.test(combined) || icon === 'weather-lightning-rainy') return 'thunder';
+    if (
+      LIGHTNING_PATTERN.test(combined) &&
+      !THUNDER_WORD_PATTERN.test(combined)
+    )
+      return 'lightning';
+    if (
+      THUNDER_WORD_PATTERN.test(combined) ||
+      icon === 'weather-lightning-rainy'
+    )
+      return 'thunder';
     if (
       RAIN_PATTERN.test(combined) ||
       icon === 'weather-rainy' ||
@@ -210,27 +251,40 @@ const mapCanonicalSignalToWeatherPresentation = (
 ) => {
   switch (signal) {
     case 'snow':
-      return { icon: 'weather-snowy', label: t('weather_signal_snow') };
+      return {icon: 'weather-snowy', label: t('weather_signal_snow')};
     case 'hail':
-      return { icon: 'weather-hail', label: t('weather_signal_hail') };
+      return {icon: 'weather-hail', label: t('weather_signal_hail')};
     case 'lightning':
-      return { icon: 'weather-lightning-rainy', label: t('weather_signal_lightning') };
+      return {
+        icon: 'weather-lightning-rainy',
+        label: t('weather_signal_lightning'),
+      };
     case 'thunder':
-      return { icon: 'weather-lightning-rainy', label: t('weather_signal_thunder') };
+      return {
+        icon: 'weather-lightning-rainy',
+        label: t('weather_signal_thunder'),
+      };
     case 'rain':
     default:
-      return { icon: 'weather-rainy', label: t('weather_signal_rain') };
+      return {icon: 'weather-rainy', label: t('weather_signal_rain')};
   }
 };
 
-const formatPrimaryTemperature = (raw: string | number | null | undefined): string => {
+const formatPrimaryTemperature = (
+  raw: string | number | null | undefined,
+  locale?: string | null,
+  countryCode?: string | null,
+  userPreference?: TemperatureUnit | null,
+): string => {
   const normalized = sanitizeTemperatureLabel(raw);
   if (!normalized || normalized === '--') return '--';
   const numeric = normalized.match(/-?\d+(?:[.,]\d+)?/);
   if (!numeric) return '--';
   const value = Number(numeric[0].replace(',', '.'));
   if (!Number.isFinite(value)) return '--';
-  return `${Math.round(value)}${DEGREE_SYMBOL}`;
+  return (
+    formatTemperatureCelsius(value, locale, countryCode, userPreference) || '--'
+  );
 };
 
 const getRoundedTemperatureValue = (
@@ -240,592 +294,714 @@ const getRoundedTemperatureValue = (
   return Number.isFinite(value) ? Math.round(value) : null;
 };
 
-const formatRoundedTemperatureValue = (value: number | null): string => {
+const formatRoundedTemperatureValue = (
+  value: number | null,
+  locale?: string | null,
+  countryCode?: string | null,
+  userPreference?: TemperatureUnit | null,
+): string => {
   if (value === null) return '';
-  return `${value}${DEGREE_SYMBOL}`;
+  return formatTemperatureCelsius(value, locale, countryCode, userPreference);
 };
 
 const isFiniteCoordinate = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value);
 
 export const WeatherWidget = React.memo(
-  ({ refreshToken, operationalWeatherSignal }: WeatherWidgetProps) => {
-  const { colors } = useTheme();
-  const { t } = useTranslation();
-  const { securityState } = useSecurity();
-  const { width: screenWidth } = useWindowDimensions();
-  const [loading, setLoading] = useState(true);
-  const [hasLoaded, setHasLoaded] = useState(false);
-  const [city, setCity] = useState('');
-  const [weather, setWeather] = useState({
-    temp: '--',
-    icon: 'weather-cloudy',
-    label: '',
-    forecast: '',
-    maxTemp: '',
-    minTemp: '',
-    feelsLike: '',
-    intelligenceSignal: null as WeatherResult['intelligenceSignal'],
-    isDay: true,
-    sunrise: '',
-    sunset: '',
-    timeZone: '',
-  });
-  const [forecastDays, setForecastDays] = useState<WeatherResult['forecastDays']>([]);
-  const [forecastVisible, setForecastVisible] = useState(false);
-  const lastSnapshot = useRef<{
-    city: string;
-    temp: string;
-    icon: string;
-    label: string;
-    forecast: string;
-    maxTemp: string;
-    minTemp: string;
-    feelsLike: string;
-    intelligenceSignal: WeatherResult['intelligenceSignal'];
-    isDay: boolean;
-    sunrise: string;
-    sunset: string;
-    timeZone: string;
-    forecastKey: string;
-  } | null>(null);
-  const loadGuardRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const phaseTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [phaseClockTick, setPhaseClockTick] = useState(0);
+  ({refreshToken, operationalWeatherSignal}: WeatherWidgetProps) => {
+    const {colors} = useTheme();
+    const {t, i18n} = useTranslation();
+    const {securityState} = useSecurity();
+    const {width: screenWidth} = useWindowDimensions();
+    const [loading, setLoading] = useState(true);
+    const [hasLoaded, setHasLoaded] = useState(false);
+    const [city, setCity] = useState('');
+    const [weather, setWeather] = useState({
+      temp: '--',
+      icon: 'weather-cloudy',
+      label: '',
+      forecast: '',
+      maxTemp: '',
+      minTemp: '',
+      feelsLike: '',
+      intelligenceSignal: null as WeatherResult['intelligenceSignal'],
+      isDay: true,
+      sunrise: '',
+      sunset: '',
+      timeZone: '',
+    });
+    const [forecastDays, setForecastDays] = useState<
+      WeatherResult['forecastDays']
+    >([]);
+    const [forecastVisible, setForecastVisible] = useState(false);
+    const [userTempPreference, setUserTempPreference] =
+      useState<TemperatureUnit | null>(null);
+    const lastSnapshot = useRef<{
+      city: string;
+      temp: string;
+      icon: string;
+      label: string;
+      forecast: string;
+      maxTemp: string;
+      minTemp: string;
+      feelsLike: string;
+      intelligenceSignal: WeatherResult['intelligenceSignal'];
+      isDay: boolean;
+      sunrise: string;
+      sunset: string;
+      timeZone: string;
+      forecastKey: string;
+    } | null>(null);
+    const loadGuardRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const phaseTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const [phaseClockTick, setPhaseClockTick] = useState(0);
 
-  useEffect(() => {
-    void loadWeather();
-  }, [securityState.location?.latitude, securityState.location?.longitude]);
+    useEffect(() => {
+      void (async () => {
+        const pref = await getUserTemperaturePreference();
+        setUserTempPreference(pref);
+      })();
+    }, []);
 
-  useEffect(() => {
-    const intervalId = setInterval(() => {
-      void loadWeather();
-    }, WEATHER_AUTO_REFRESH_MS);
-    return () => clearInterval(intervalId);
-  }, [securityState.location?.latitude, securityState.location?.longitude]);
+    useFocusEffect(
+      useCallback(() => {
+        let isActive = true;
+        void (async () => {
+          const pref = await getUserTemperaturePreference();
+          if (isActive) {
+            setUserTempPreference(pref);
+          }
+        })();
+        return () => {
+          isActive = false;
+        };
+      }, []),
+    );
 
-  const isUsableLocationName = (value?: string) => {
-    return isUsableWeatherCityName(value, [t('monitoring_title'), t('gps_off'), '--']);
-  };
+    useEffect(() => {
+      const intervalId = setInterval(() => {
+        void loadWeather();
+      }, WEATHER_AUTO_REFRESH_MS);
+      return () => clearInterval(intervalId);
+    }, [securityState.location?.latitude, securityState.location?.longitude]);
 
-  const locationFallback = useMemo(() => {
-    const byName = toCityOnlyLabel(securityState.locationName);
-    if (isUsableLocationName(byName)) return byName;
-    return '';
-  }, [
-    securityState.locationName,
-    t,
-  ]);
+    const isUsableLocationName = (value?: string) => {
+      return isUsableWeatherCityName(value, [
+        t('monitoring_title'),
+        t('gps_off'),
+        '--',
+      ]);
+    };
 
-  useEffect(() => {
-    const nextLocationName = toCityOnlyLabel(securityState.locationName);
-    if (!isUsableLocationName(nextLocationName)) return;
-    if (city !== nextLocationName) {
-      setCity(nextLocationName);
-    }
-  }, [city, securityState.locationName, t]);
+    const locationFallback = useMemo(() => {
+      const byName = toCityOnlyLabel(securityState.locationName);
+      if (isUsableLocationName(byName)) return byName;
+      return '';
+    }, [securityState.locationName, t]);
 
-  useEffect(() => {
-    if (typeof refreshToken === 'number' && refreshToken > 0) {
-      void loadWeather(true);
-    }
-  }, [refreshToken]);
+    useEffect(() => {
+      const nextLocationName = toCityOnlyLabel(securityState.locationName);
+      if (!isUsableLocationName(nextLocationName)) return;
+      if (city !== nextLocationName) {
+        setCity(nextLocationName);
+      }
+    }, [city, securityState.locationName, t]);
 
-  useEffect(() => {
-    return () => {
-      if (loadGuardRef.current) {
+    useEffect(() => {
+      if (typeof refreshToken === 'number' && refreshToken > 0) {
+        void loadWeather(true);
+      }
+    }, [refreshToken]);
+
+    useEffect(() => {
+      return () => {
+        if (loadGuardRef.current) {
+          clearTimeout(loadGuardRef.current);
+          loadGuardRef.current = null;
+        }
+        if (phaseTickRef.current) {
+          clearInterval(phaseTickRef.current);
+          phaseTickRef.current = null;
+        }
+      };
+    }, []);
+
+    useEffect(() => {
+      if (phaseTickRef.current) return;
+      phaseTickRef.current = setInterval(
+        () => {
+          setPhaseClockTick(prev => prev + 1);
+        },
+        5 * 60 * 1000,
+      );
+      return () => {
+        if (phaseTickRef.current) {
+          clearInterval(phaseTickRef.current);
+          phaseTickRef.current = null;
+        }
+      };
+    }, []);
+
+    useEffect(() => {
+      if (hasLoaded && loadGuardRef.current) {
         clearTimeout(loadGuardRef.current);
         loadGuardRef.current = null;
       }
-      if (phaseTickRef.current) {
-        clearInterval(phaseTickRef.current);
-        phaseTickRef.current = null;
-      }
-    };
-  }, []);
+    }, [hasLoaded]);
 
-  useEffect(() => {
-    if (phaseTickRef.current) return;
-    phaseTickRef.current = setInterval(() => {
-      setPhaseClockTick(prev => prev + 1);
-    }, 5 * 60 * 1000);
-    return () => {
-      if (phaseTickRef.current) {
-        clearInterval(phaseTickRef.current);
-        phaseTickRef.current = null;
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    if (hasLoaded && loadGuardRef.current) {
-      clearTimeout(loadGuardRef.current);
-      loadGuardRef.current = null;
-    }
-  }, [hasLoaded]);
-
-  const applyWeather = (data: {
-    city: string;
-    temp: string;
-    icon: string;
-    label: string;
-    forecastLabel?: string;
-    forecastDays?: WeatherResult['forecastDays'];
-    maxTemp?: string;
-    minTemp?: string;
+    const applyWeather = (data: {
+      city: string;
+      temp: string;
+      icon: string;
+      label: string;
+      forecastLabel?: string;
+      forecastDays?: WeatherResult['forecastDays'];
+      maxTemp?: string;
+      minTemp?: string;
       feelsLike?: string;
       intelligenceSignal?: WeatherResult['intelligenceSignal'];
       isDay?: boolean;
-    sunrise?: string;
-    sunset?: string;
-    timeZone?: string;
-  }) => {
-    const sanitizedCity = sanitizeWeatherText(data.city);
-    const sanitizedLabel = sanitizeWeatherText(data.label);
-    const sanitizedForecastLabel = sanitizeWeatherText(data.forecastLabel);
-    const directCity =
-      sanitizedCity && isUsableLocationName(sanitizedCity)
-        ? toCityOnlyLabel(sanitizedCity)
-        : undefined;
-    const resolvedCity =
-      directCity ||
-      locationFallback ||
-      lastSnapshot.current?.city ||
-      city ||
-      t('gps_off');
-    const resolvedLabel =
-      sanitizedLabel && sanitizedLabel !== '...'
-        ? sanitizedLabel
-        : '--';
-    const resolvedForecast = sanitizedForecastLabel || '';
-    const nextForecastDays = data.forecastDays || [];
-    const forecastKey = nextForecastDays
-      .map(day => `${day?.dayLabel}-${day?.icon}-${day?.maxTemp}-${day?.minTemp}`)
-      .join('|');
-    const next = {
-      city: resolvedCity,
-      temp: sanitizeTemperatureLabel(data.temp) || '--',
-      icon: sanitizeWeatherIconName(data.icon),
-      label: resolvedLabel,
-      forecast: resolvedForecast,
-      maxTemp: sanitizeTemperatureLabel(data.maxTemp) || '',
-      minTemp: sanitizeTemperatureLabel(data.minTemp) || '',
-      feelsLike: sanitizeTemperatureLabel(data.feelsLike) || '',
-      intelligenceSignal: data.intelligenceSignal
-        ? {
-            ...data.intelligenceSignal,
-            icon: sanitizeWeatherIconName(data.intelligenceSignal.icon),
-            label: sanitizeWeatherText(data.intelligenceSignal.label),
-          }
-        : null,
-      isDay: typeof data.isDay === 'boolean' ? data.isDay : weather.isDay,
-      sunrise: typeof data.sunrise === 'string' ? data.sunrise : weather.sunrise,
-      sunset: typeof data.sunset === 'string' ? data.sunset : weather.sunset,
-      timeZone: typeof data.timeZone === 'string' ? data.timeZone : weather.timeZone,
-      forecastKey,
-    };
-    const prev = lastSnapshot.current;
-    if (
-      prev &&
-      prev.city === next.city &&
-      prev.temp === next.temp &&
-      prev.icon === next.icon &&
-      prev.label === next.label &&
-      prev.forecast === next.forecast &&
-      prev.maxTemp === next.maxTemp &&
-      prev.minTemp === next.minTemp &&
-      prev.feelsLike === next.feelsLike &&
-      JSON.stringify(prev.intelligenceSignal || null) === JSON.stringify(next.intelligenceSignal || null) &&
-      prev.isDay === next.isDay &&
-      prev.sunrise === next.sunrise &&
-      prev.sunset === next.sunset &&
-      prev.timeZone === next.timeZone &&
-      prev.forecastKey === next.forecastKey
-    ) {
-      return;
-    }
-    lastSnapshot.current = next;
-    setCity(next.city);
-    setWeather({
-      temp: next.temp,
-      icon: next.icon,
-      label: next.label,
-      forecast: next.forecast,
-      maxTemp: next.maxTemp,
-      minTemp: next.minTemp,
-      feelsLike: next.feelsLike,
-      intelligenceSignal: next.intelligenceSignal,
-      isDay: next.isDay,
-      sunrise: next.sunrise,
-      sunset: next.sunset,
-      timeZone: next.timeZone,
-    });
-    setForecastDays(
-      nextForecastDays.map(day => ({
-        ...day,
-        dayLabel: sanitizeWeatherText(day.dayLabel),
-        icon: sanitizeWeatherIconName(day.icon),
-        maxTemp: sanitizeTemperatureLabel(day.maxTemp) || '--',
-        minTemp: sanitizeTemperatureLabel(day.minTemp) || '--',
-      })),
-    );
-  };
-
-  const applyFallbackState = () => {
-    const lastKnownCity =
-      lastSnapshot.current?.city || city || locationFallback || t('gps_off');
-    setCity(lastKnownCity);
-    setWeather(prev => ({
-      ...prev,
-      label:
-        prev.label && prev.label !== '...' && prev.label !== '--'
-          ? prev.label
-          : '',
-      intelligenceSignal: prev.intelligenceSignal || null,
-    }));
-    setLoading(false);
-    setHasLoaded(true);
-  };
-
-  const loadWeather = async (force = false) => {
-    const hasStableSnapshot = Boolean(lastSnapshot.current);
-
-    if (!hasLoaded && !hasStableSnapshot && !loadGuardRef.current) {
-      loadGuardRef.current = setTimeout(() => {
-        applyFallbackState();
-      }, WEATHER_LOAD_GUARD_MS);
-    }
-
-    if (!hasLoaded && !hasStableSnapshot) {
-      setLoading(true);
-    }
-
-    try {
-      if (!force) {
-        const cached = await WeatherService.getCachedWeather();
-        if (cached) {
-          applyWeather(cached);
-          setLoading(false);
-          setHasLoaded(true);
-        }
-      }
-
-      const lat = securityState.location?.latitude;
-      const lon = securityState.location?.longitude;
-      const hasCoordinates =
-        canUseLocationForRiskMaps(securityState) && isFiniteCoordinatePair(lat, lon);
-
-      const resolve = async (latitude: number, longitude: number) => {
-        const data = await WeatherService.getCurrentWeather(latitude, longitude, { force });
-        applyWeather(data);
-        setLoading(false);
-        setHasLoaded(true);
+      sunrise?: string;
+      sunset?: string;
+      timeZone?: string;
+    }) => {
+      const sanitizedCity = sanitizeWeatherText(data.city);
+      const sanitizedLabel = sanitizeWeatherText(data.label);
+      const sanitizedForecastLabel = sanitizeWeatherText(data.forecastLabel);
+      const directCity =
+        sanitizedCity && isUsableLocationName(sanitizedCity)
+          ? toCityOnlyLabel(sanitizedCity)
+          : undefined;
+      const resolvedCity =
+        directCity ||
+        locationFallback ||
+        lastSnapshot.current?.city ||
+        city ||
+        t('gps_off');
+      const resolvedLabel =
+        sanitizedLabel && sanitizedLabel !== '...' ? sanitizedLabel : '--';
+      const resolvedForecast = sanitizedForecastLabel || '';
+      const nextForecastDays = data.forecastDays || [];
+      const forecastKey = nextForecastDays
+        .map(
+          day =>
+            `${day?.dayLabel}-${day?.icon}-${day?.maxTemp}-${day?.minTemp}`,
+        )
+        .join('|');
+      const next = {
+        city: resolvedCity,
+        temp: sanitizeTemperatureLabel(data.temp) || '--',
+        icon: sanitizeWeatherIconName(data.icon),
+        label: resolvedLabel,
+        forecast: resolvedForecast,
+        maxTemp: sanitizeTemperatureLabel(data.maxTemp) || '',
+        minTemp: sanitizeTemperatureLabel(data.minTemp) || '',
+        feelsLike: sanitizeTemperatureLabel(data.feelsLike) || '',
+        intelligenceSignal: data.intelligenceSignal
+          ? {
+              ...data.intelligenceSignal,
+              icon: sanitizeWeatherIconName(data.intelligenceSignal.icon),
+              label: sanitizeWeatherText(data.intelligenceSignal.label),
+            }
+          : null,
+        isDay: typeof data.isDay === 'boolean' ? data.isDay : weather.isDay,
+        sunrise:
+          typeof data.sunrise === 'string' ? data.sunrise : weather.sunrise,
+        sunset: typeof data.sunset === 'string' ? data.sunset : weather.sunset,
+        timeZone:
+          typeof data.timeZone === 'string' ? data.timeZone : weather.timeZone,
+        forecastKey,
       };
-
-      if (hasCoordinates && isFiniteCoordinate(lat) && isFiniteCoordinate(lon)) {
-        await resolve(lat, lon);
+      const prev = lastSnapshot.current;
+      if (
+        prev &&
+        prev.city === next.city &&
+        prev.temp === next.temp &&
+        prev.icon === next.icon &&
+        prev.label === next.label &&
+        prev.forecast === next.forecast &&
+        prev.maxTemp === next.maxTemp &&
+        prev.minTemp === next.minTemp &&
+        prev.feelsLike === next.feelsLike &&
+        JSON.stringify(prev.intelligenceSignal || null) ===
+          JSON.stringify(next.intelligenceSignal || null) &&
+        prev.isDay === next.isDay &&
+        prev.sunrise === next.sunrise &&
+        prev.sunset === next.sunset &&
+        prev.timeZone === next.timeZone &&
+        prev.forecastKey === next.forecastKey
+      ) {
         return;
       }
+      lastSnapshot.current = next;
+      setCity(next.city);
+      setWeather({
+        temp: next.temp,
+        icon: next.icon,
+        label: next.label,
+        forecast: next.forecast,
+        maxTemp: next.maxTemp,
+        minTemp: next.minTemp,
+        feelsLike: next.feelsLike,
+        intelligenceSignal: next.intelligenceSignal,
+        isDay: next.isDay,
+        sunrise: next.sunrise,
+        sunset: next.sunset,
+        timeZone: next.timeZone,
+      });
+      setForecastDays(
+        nextForecastDays.map(day => ({
+          ...day,
+          dayLabel: sanitizeWeatherText(day.dayLabel),
+          icon: sanitizeWeatherIconName(day.icon),
+          maxTemp: sanitizeTemperatureLabel(day.maxTemp) || '--',
+          minTemp: sanitizeTemperatureLabel(day.minTemp) || '--',
+        })),
+      );
+    };
 
-      if (!hasStableSnapshot && !hasLoaded) {
-        applyFallbackState();
-      } else {
-        setLoading(false);
+    const applyFallbackState = () => {
+      const lastKnownCity =
+        lastSnapshot.current?.city || city || locationFallback || t('gps_off');
+      setCity(lastKnownCity);
+      setWeather(prev => ({
+        ...prev,
+        label:
+          prev.label && prev.label !== '...' && prev.label !== '--'
+            ? prev.label
+            : '',
+        intelligenceSignal: prev.intelligenceSignal || null,
+      }));
+      setLoading(false);
+      setHasLoaded(true);
+    };
+
+    const loadWeather = async (force = false) => {
+      const hasStableSnapshot = Boolean(lastSnapshot.current);
+
+      if (!hasLoaded && !hasStableSnapshot && !loadGuardRef.current) {
+        loadGuardRef.current = setTimeout(() => {
+          applyFallbackState();
+        }, WEATHER_LOAD_GUARD_MS);
       }
-    } catch {
-      if (!hasStableSnapshot && !hasLoaded) {
-        applyFallbackState();
-      } else {
-        setLoading(false);
+
+      if (!hasLoaded && !hasStableSnapshot) {
+        setLoading(true);
       }
-    }
-  };
 
-  const isInitialLoading = loading && !hasLoaded;
+      try {
+        if (!force) {
+          const cached = await GetWeatherFeedQuery.getCached();
+          if (cached) {
+            applyWeather(cached);
+            setLoading(false);
+            setHasLoaded(true);
+          }
+        }
 
-  const openForecast = () => {
-    ReactNativeHapticFeedback.trigger(ThemeTokens.haptics.light);
-    setForecastVisible(true);
-  };
+        const lat = securityState.location?.latitude;
+        const lon = securityState.location?.longitude;
+        // Weather remains useful with approximate coordinates; keep precise-only
+        // gating for SOS/maps elsewhere and allow this read-only bar to use the
+        // latest finite location we have.
+        const hasCoordinates = isFiniteCoordinatePair(lat, lon);
 
-  const timeOfDayPhase = useMemo(
-    () =>
-      getTimeOfDayPhase({
-        now: new Date(),
-        timezone: weather.timeZone || undefined,
-        isDay: weather.isDay,
-        sunrise: weather.sunrise || undefined,
-        sunset: weather.sunset || undefined,
+        const resolve = async (latitude: number, longitude: number) => {
+          const data = await GetWeatherFeedQuery.execute({
+            latitude,
+            longitude,
+            force,
+          });
+          applyWeather(data);
+          setLoading(false);
+          setHasLoaded(true);
+        };
+
+        if (
+          hasCoordinates &&
+          isFiniteCoordinate(lat) &&
+          isFiniteCoordinate(lon)
+        ) {
+          await resolve(lat, lon);
+          return;
+        }
+
+        if (!hasStableSnapshot && !hasLoaded) {
+          applyFallbackState();
+        } else {
+          setLoading(false);
+        }
+      } catch {
+        if (!hasStableSnapshot && !hasLoaded) {
+          applyFallbackState();
+        } else {
+          setLoading(false);
+        }
+      }
+    };
+
+    const isInitialLoading = loading && !hasLoaded;
+
+    const openForecast = () => {
+      ReactNativeHapticFeedback.trigger(ThemeTokens.haptics.light);
+      setForecastVisible(true);
+    };
+
+    const timeOfDayPhase = useMemo(
+      () =>
+        getTimeOfDayPhase({
+          now: new Date(),
+          timezone: weather.timeZone || undefined,
+          isDay: weather.isDay,
+          sunrise: weather.sunrise || undefined,
+          sunset: weather.sunset || undefined,
+        }),
+      [
+        phaseClockTick,
+        weather.isDay,
+        weather.sunrise,
+        weather.sunset,
+        weather.timeZone,
+      ],
+    );
+    const weatherBarColors = useMemo(
+      () => ({
+        backgroundColor: ThemeTokens.WeatherBar.bg[timeOfDayPhase],
+        borderColor: ThemeTokens.WeatherBar.border[timeOfDayPhase],
+        textColor: ThemeTokens.WeatherBar.text[timeOfDayPhase],
+        textSecondaryColor:
+          ThemeTokens.WeatherBar.textSecondary[timeOfDayPhase],
+        textTertiaryColor: ThemeTokens.WeatherBar.textTertiary[timeOfDayPhase],
+        iconTint: ThemeTokens.WeatherBar.iconTint[timeOfDayPhase],
       }),
-    [phaseClockTick, weather.isDay, weather.sunrise, weather.sunset, weather.timeZone],
-  );
-  const weatherBarColors = useMemo(
-    () => ({
-      backgroundColor: ThemeTokens.WeatherBar.bg[timeOfDayPhase],
-      borderColor: ThemeTokens.WeatherBar.border[timeOfDayPhase],
-      textColor: ThemeTokens.WeatherBar.text[timeOfDayPhase],
-      textSecondaryColor: ThemeTokens.WeatherBar.textSecondary[timeOfDayPhase],
-      textTertiaryColor: ThemeTokens.WeatherBar.textTertiary[timeOfDayPhase],
-      iconTint: ThemeTokens.WeatherBar.iconTint[timeOfDayPhase],
-    }),
-    [timeOfDayPhase],
-  );
+      [timeOfDayPhase],
+    );
 
-  const homeWeatherBarColors = useMemo(
-    () => ({
-      backgroundColor: ThemeTokens.colors.light.primary,
-      borderColor: 'rgba(17,17,17,0.08)',
-      textColor: '#FFFFFF',
-      textSecondaryColor: 'rgba(255,255,255,0.92)',
-      textTertiaryColor: 'rgba(255,255,255,0.80)',
-      iconTint: '#FFFFFF',
-    }),
-    [],
-  );
-  const canonicalSignal = useMemo(
-    () =>
-      resolveCanonicalWeatherSignal([
-        operationalWeatherSignal || {},
-        weather.intelligenceSignal || {},
-        { icon: weather.icon, label: weather.label },
-        { label: weather.forecast },
-      ]),
-    [
-      operationalWeatherSignal,
-      weather.forecast,
-      weather.icon,
-      weather.intelligenceSignal,
-      weather.label,
-    ],
-  );
-  const canonicalPresentation = canonicalSignal
-    ? mapCanonicalSignalToWeatherPresentation(canonicalSignal, t)
-    : null;
-  const weatherVisualState = useMemo(
-    () =>
-      resolveWeatherVisualState([
-        operationalWeatherSignal || {},
-        weather.intelligenceSignal || {},
-        { icon: weather.icon, label: weather.label },
-        { label: weather.forecast },
-      ]),
-    [
-      operationalWeatherSignal,
-      weather.forecast,
-      weather.icon,
-      weather.intelligenceSignal,
-      weather.label,
-    ],
-  );
-  const displayedIcon = sanitizeWeatherIconName(
-    mapWeatherVisualStateToIcon(weatherVisualState),
-  );
-  const displayedConditionLabel = sanitizeWeatherText(
-    canonicalPresentation?.label ||
-      (operationalWeatherSignal?.label && operationalWeatherSignal.label.trim()
-        ? operationalWeatherSignal.label
-        : weather.intelligenceSignal?.label && weather.intelligenceSignal.label.trim()
-          ? weather.intelligenceSignal.label
-          : weather.label),
-  );
-  const tempDisplay = formatPrimaryTemperature(weather.temp);
+    const homeWeatherBarColors = useMemo(() => {
+      // Always use Alert red color for premium, cohesive branding
+      const bgColor = ThemeTokens.colors.primary; // Alert Red (#D32F2F)
 
-  const feelsLikeValue = getRoundedTemperatureValue(weather.feelsLike);
-  const fallbackRangeValues = extractTemperatureNumbers(weather.forecast);
-  const maxTempValue = getRoundedTemperatureValue(weather.maxTemp) ?? (fallbackRangeValues[0] ?? null);
-  const minTempValue = getRoundedTemperatureValue(weather.minTemp) ?? (fallbackRangeValues[1] ?? null);
-  const feelsLikeDisplay = formatRoundedTemperatureValue(feelsLikeValue);
-  const maxMinLabel =
-    maxTempValue !== null && minTempValue !== null
-      ? `${formatRoundedTemperatureValue(maxTempValue)}/${formatRoundedTemperatureValue(minTempValue)}`
-      : formatTemperatureRangeDisplay(weather.maxTemp, weather.minTemp, weather.forecast);
-  const feelsLikeLabel = feelsLikeDisplay
-    ? t('weather_feels_like', { temp: feelsLikeDisplay })
-    : '';
-  const safeCity = sanitizeWeatherText(city);
-  const cityDisplay =
-    safeCity && isUsableLocationName(safeCity) ? safeCity : locationFallback || t('gps_off');
-  const conditionLabel =
-    typeof displayedConditionLabel === 'string' ? displayedConditionLabel.trim() : '';
-  const conditionDisplay =
-    conditionLabel &&
-    conditionLabel !== '...' &&
-    conditionLabel !== '--' &&
-    conditionLabel !== '?'
-      ? conditionLabel
-      : t('forecast_unavailable');
-  const summaryLine = [conditionDisplay, maxMinLabel, feelsLikeLabel]
-    .filter(item => item && item.trim().length > 0)
-    .join(' • ');
-  const weatherAccessibilityLabel = t('weather_city_accessibility', {
-    city: cityDisplay,
-    temp: tempDisplay,
-    condition: conditionDisplay,
-  });
-  const cityAccessibilityLabel = t('city_accessibility_label', {
-    defaultValue: `Cidade: ${cityDisplay}`,
-    city: cityDisplay,
-  });
-  const cityAllowsTwoLines = cityDisplay.length > 20 && screenWidth >= 390;
-  const cityNumberOfLines = cityAllowsTwoLines ? 2 : 1;
-  const homeIconBaseSize =
-    screenWidth < 360
-      ? ThemeTokens.WeatherIcon.sizes.homeCompact
-      : ThemeTokens.WeatherIcon.sizes.home;
-  const homeIconSize =
-    Math.round(homeIconBaseSize * HOME_WEATHER_ICON_SCALE);
-  const homeIconHitArea = Math.max(
-    homeIconSize + 2,
-    Math.round(ThemeTokens.WeatherIcon.sizes.hitArea * HOME_WEATHER_HEIGHT_SCALE),
-  );
-  const iconLatitude = isFiniteCoordinate(securityState.location?.latitude)
-    ? securityState.location.latitude
-    : null;
+      return {
+        backgroundColor: bgColor,
+        borderColor: 'rgba(17,17,17,0.08)',
+        textColor: '#FFFFFF',
+        textSecondaryColor: 'rgba(255,255,255,0.92)',
+        textTertiaryColor: 'rgba(255,255,255,0.80)',
+        iconTint: '#FFFFFF',
+      };
+    }, []);
+    const canonicalSignal = useMemo(
+      () =>
+        resolveCanonicalWeatherSignal([
+          operationalWeatherSignal || {},
+          weather.intelligenceSignal || {},
+          {icon: weather.icon, label: weather.label},
+          {label: weather.forecast},
+        ]),
+      [
+        operationalWeatherSignal,
+        weather.forecast,
+        weather.icon,
+        weather.intelligenceSignal,
+        weather.label,
+      ],
+    );
+    const canonicalPresentation = canonicalSignal
+      ? mapCanonicalSignalToWeatherPresentation(canonicalSignal, t)
+      : null;
+    const resolvedCountryCode =
+      typeof securityState.locationCountryCode === 'string' &&
+      securityState.locationCountryCode.trim().length === 2
+        ? securityState.locationCountryCode.trim().toUpperCase()
+        : undefined;
+    const weatherVisualState = useMemo(
+      () =>
+        resolveWeatherVisualState([
+          operationalWeatherSignal || {},
+          weather.intelligenceSignal || {},
+          {icon: weather.icon, label: weather.label},
+          {label: weather.forecast},
+        ]),
+      [
+        operationalWeatherSignal,
+        weather.forecast,
+        weather.icon,
+        weather.intelligenceSignal,
+        weather.label,
+      ],
+    );
+    const displayedIcon = sanitizeWeatherIconName(
+      mapWeatherVisualStateToIcon(weatherVisualState),
+    );
+    const displayedConditionLabel = sanitizeWeatherText(
+      canonicalPresentation?.label ||
+        (operationalWeatherSignal?.label &&
+        operationalWeatherSignal.label.trim()
+          ? operationalWeatherSignal.label
+          : weather.intelligenceSignal?.label &&
+              weather.intelligenceSignal.label.trim()
+            ? weather.intelligenceSignal.label
+            : weather.label),
+    );
+    const temperatureLocale = i18n.language;
+    const tempDisplay = formatPrimaryTemperature(
+      weather.temp,
+      temperatureLocale,
+      resolvedCountryCode,
+      userTempPreference,
+    );
 
-  return (
-    <View style={styles.container}>
-      <View
-        style={[
-          styles.card,
-          {
-            backgroundColor: homeWeatherBarColors.backgroundColor,
-            borderColor: homeWeatherBarColors.borderColor,
-          },
-        ]}
-      >
-        <TouchableOpacity
-          style={styles.mainTapArea}
-          activeOpacity={0.88}
-          onPress={openForecast}
-          accessibilityRole="button"
-          accessibilityLabel={weatherAccessibilityLabel}
-          accessibilityHint={t('home_bar_tap_details')}
-        >
-          <View style={styles.topRow}>
-            <Text style={[styles.tempBig, { color: homeWeatherBarColors.textColor }]}>{tempDisplay}</Text>
-            <View style={[styles.weatherIconSlot, { width: homeIconHitArea, height: homeIconHitArea }]}>
-              {isInitialLoading ? (
-                <ActivityIndicator color={homeWeatherBarColors.iconTint} />
-              ) : (
-                <WeatherAnimatedIcon
-                  conditionCode={displayedIcon}
-                  isDay={weather.isDay}
-                  latitude={iconLatitude}
-                  size={homeIconSize}
-                  renderMode="hero"
-                  style={styles.weatherIconWrap}
-                />
-              )}
-            </View>
-          </View>
+    const feelsLikeValue = getRoundedTemperatureValue(weather.feelsLike);
+    const fallbackRangeValues = extractTemperatureNumbers(weather.forecast);
+    const maxTempValue =
+      getRoundedTemperatureValue(weather.maxTemp) ??
+      fallbackRangeValues[0] ??
+      null;
+    const minTempValue =
+      getRoundedTemperatureValue(weather.minTemp) ??
+      fallbackRangeValues[1] ??
+      null;
+    const feelsLikeDisplay = formatRoundedTemperatureValue(
+      feelsLikeValue,
+      temperatureLocale,
+      resolvedCountryCode,
+      userTempPreference,
+    );
+    const maxMinLabel =
+      maxTempValue !== null && minTempValue !== null
+        ? `${formatRoundedTemperatureValue(
+            maxTempValue,
+            temperatureLocale,
+            resolvedCountryCode,
+            userTempPreference,
+          )}/${formatRoundedTemperatureValue(
+            minTempValue,
+            temperatureLocale,
+            resolvedCountryCode,
+            userTempPreference,
+          )}`
+        : formatTemperatureRangeDisplay(
+            weather.maxTemp,
+            weather.minTemp,
+            weather.forecast,
+            temperatureLocale,
+            resolvedCountryCode,
+            userTempPreference,
+          );
+    const feelsLikeLabel = feelsLikeDisplay
+      ? t('weather_feels_like', {temp: feelsLikeDisplay})
+      : '';
+    const safeCity = sanitizeWeatherText(city);
+    const cityDisplay =
+      safeCity && isUsableLocationName(safeCity)
+        ? safeCity
+        : locationFallback || t('gps_off');
+    const conditionLabel =
+      typeof displayedConditionLabel === 'string'
+        ? displayedConditionLabel.trim()
+        : '';
+    const conditionDisplay =
+      conditionLabel &&
+      conditionLabel !== '...' &&
+      conditionLabel !== '--' &&
+      conditionLabel !== '?'
+        ? conditionLabel
+        : t('forecast_unavailable');
+    const summaryLine = [conditionDisplay, maxMinLabel, feelsLikeLabel]
+      .filter(item => item && item.trim().length > 0)
+      .join(' • ');
+    const weatherAccessibilityLabel = t('weather_city_accessibility', {
+      city: cityDisplay,
+      temp: tempDisplay,
+      condition: conditionDisplay,
+    });
+    const cityAccessibilityLabel = t('city_accessibility_label', {
+      defaultValue: `Cidade: ${cityDisplay}`,
+      city: cityDisplay,
+    });
+    const cityAllowsTwoLines = cityDisplay.length > 20 && screenWidth >= 390;
+    const cityNumberOfLines = cityAllowsTwoLines ? 2 : 1;
+    const homeIconBaseSize =
+      screenWidth < 360
+        ? ThemeTokens.WeatherIcon.sizes.homeCompact
+        : ThemeTokens.WeatherIcon.sizes.home;
+    const homeIconSize = Math.round(homeIconBaseSize * HOME_WEATHER_ICON_SCALE);
+    const homeIconHitArea = Math.max(
+      homeIconSize + 2,
+      Math.round(
+        ThemeTokens.WeatherIcon.sizes.hitArea * HOME_WEATHER_HEIGHT_SCALE,
+      ),
+    );
+    const iconLatitude = isFiniteCoordinate(securityState.location?.latitude)
+      ? securityState.location.latitude
+      : null;
 
-          <View style={styles.centerMeta}>
-            <View style={styles.cityRow}>
-              <Icon
-                name="map-marker"
-                size={18}
-                color={homeWeatherBarColors.iconTint}
-                style={styles.cityIcon}
-              />
-              <View style={styles.cityTextWrap}>
-                <Text
-                  style={[styles.cityName, { color: homeWeatherBarColors.textColor }]}
-                  accessibilityRole="text"
-                  accessibilityLabel={cityAccessibilityLabel}
-                  numberOfLines={cityNumberOfLines}
-                  ellipsizeMode="tail"
-                  allowFontScaling
-                  maxFontSizeMultiplier={ThemeTokens.WeatherBar.CityText.maxFontSizeMultiplier}
-                >
-                  {cityDisplay}
-                </Text>
-              </View>
-            </View>
-            <Text
-              style={[styles.summaryText, { color: homeWeatherBarColors.textSecondaryColor }]}
-              numberOfLines={2}
-              ellipsizeMode="tail"
-              allowFontScaling
-              maxFontSizeMultiplier={1.3}
-            >
-              {summaryLine}
-            </Text>
-          </View>
-        </TouchableOpacity>
-      </View>
-
-      <Modal
-        visible={forecastVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setForecastVisible(false)}
-      >
-        <Pressable style={styles.modalOverlay} onPress={() => setForecastVisible(false)}>
-          <Pressable
-            style={[
-              styles.modalCard,
-              {
-                backgroundColor: weatherBarColors.backgroundColor,
-                borderColor: weatherBarColors.borderColor,
-              },
-            ]}
-            onPress={() => {}}
-          >
-            <Text style={[styles.modalTitleCentered, { color: weatherBarColors.textColor }]}>
-              {cityDisplay}
-            </Text>
-
-            {forecastDays && forecastDays.length > 0 ? (
-              <View style={styles.forecastGrid}>
-                {forecastDays.map((day, index) => (
-                  <View key={`${day.dayLabel}-${index}`} style={styles.forecastItem}>
-                    <Text style={[styles.forecastDay, { color: weatherBarColors.textColor }]}>
-                      {day.dayLabel}
-                    </Text>
-                    <WeatherIcon icon={day.icon} size={32} />
-                    <Text
-                      style={[
-                        styles.forecastTemps,
-                        { color: weatherBarColors.textSecondaryColor },
-                      ]}
-                    >
-                      {sanitizeTemperatureLabel(day.maxTemp)} / {sanitizeTemperatureLabel(day.minTemp)}
-                    </Text>
-                    {typeof day.rainChance === 'number' ? (
-                      <Text
-                        style={[
-                          styles.forecastRain,
-                          { color: weatherBarColors.textSecondaryColor },
-                        ]}
-                      >
-                        {t('forecast_rain_chance', { chance: day.rainChance })}
-                      </Text>
-                    ) : null}
-                  </View>
-                ))}
-              </View>
-            ) : (
+    return (
+      <View style={styles.container}>
+        <View
+          style={[
+            styles.card,
+            {
+              backgroundColor: homeWeatherBarColors.backgroundColor,
+              borderColor: homeWeatherBarColors.borderColor,
+            },
+          ]}>
+          <TouchableOpacity
+            style={styles.mainTapArea}
+            activeOpacity={0.88}
+            onPress={openForecast}
+            accessibilityRole="button"
+            accessibilityLabel={weatherAccessibilityLabel}
+            accessibilityHint={t('home_bar_tap_details')}>
+            <View style={styles.topRow}>
               <Text
                 style={[
-                  styles.emptyForecast,
-                  { color: weatherBarColors.textSecondaryColor },
-                ]}
-              >
-                {t('forecast_unavailable')}
+                  styles.tempBig,
+                  {color: homeWeatherBarColors.textColor},
+                ]}>
+                {tempDisplay}
               </Text>
-            )}
+              <View
+                style={[
+                  styles.weatherIconSlot,
+                  {width: homeIconHitArea, height: homeIconHitArea},
+                ]}>
+                {isInitialLoading ? (
+                  <ActivityIndicator color={homeWeatherBarColors.iconTint} />
+                ) : (
+                  <WeatherAnimatedIcon
+                    conditionCode={displayedIcon}
+                    isDay={weather.isDay}
+                    latitude={iconLatitude}
+                    size={homeIconSize}
+                    renderMode="hero"
+                    style={styles.weatherIconWrap}
+                  />
+                )}
+              </View>
+            </View>
 
-            <TouchableOpacity
-              style={[styles.modalButton, { backgroundColor: colors.primary }]}
-              onPress={() => setForecastVisible(false)}
-            >
-              <Text style={styles.modalButtonText}>{t('close')}</Text>
-            </TouchableOpacity>
-          </Pressable>
-        </Pressable>
-      </Modal>
-    </View>
-  );
+            <View style={styles.centerMeta}>
+              <View style={styles.cityRow}>
+                <Icon
+                  name="map-marker"
+                  size={18}
+                  color={homeWeatherBarColors.iconTint}
+                  style={styles.cityIcon}
+                />
+                <View style={styles.cityTextWrap}>
+                  <Text
+                    style={[
+                      styles.cityName,
+                      {color: homeWeatherBarColors.textColor},
+                    ]}
+                    accessibilityRole="text"
+                    accessibilityLabel={cityAccessibilityLabel}
+                    numberOfLines={cityNumberOfLines}
+                    ellipsizeMode="tail"
+                    allowFontScaling
+                    maxFontSizeMultiplier={
+                      ThemeTokens.WeatherBar.CityText.maxFontSizeMultiplier
+                    }>
+                    {cityDisplay}
+                  </Text>
+                </View>
+              </View>
+              <Text
+                style={[
+                  styles.summaryText,
+                  {color: homeWeatherBarColors.textSecondaryColor},
+                ]}
+                numberOfLines={2}
+                ellipsizeMode="tail"
+                allowFontScaling
+                maxFontSizeMultiplier={1.3}>
+                {summaryLine}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+
+        <BasePopup
+          accessibilityLabel={cityDisplay}
+          contentStyle={[
+            styles.modalCard,
+            {
+              backgroundColor: weatherBarColors.backgroundColor,
+              borderColor: weatherBarColors.borderColor,
+            },
+          ]}
+          maxWidth={520}
+          onClose={() => setForecastVisible(false)}
+          placement="center"
+          visible={forecastVisible}>
+          <Text
+            style={[
+              styles.modalTitleCentered,
+              {color: weatherBarColors.textColor},
+            ]}>
+            {cityDisplay}
+          </Text>
+
+          {forecastDays && forecastDays.length > 0 ? (
+            <View style={styles.forecastGrid}>
+              {forecastDays.map((day, index) => (
+                <View
+                  key={`${day.dayLabel}-${index}`}
+                  style={styles.forecastItem}>
+                  <Text
+                    style={[
+                      styles.forecastDay,
+                      {color: weatherBarColors.textColor},
+                    ]}>
+                    {day.dayLabel}
+                  </Text>
+                  <WeatherIcon icon={day.icon} size={32} />
+                  <Text
+                    style={[
+                      styles.forecastTemps,
+                      {color: weatherBarColors.textSecondaryColor},
+                    ]}>
+                    {formatTemperatureRangeDisplay(
+                      day.maxTemp,
+                      day.minTemp,
+                      undefined,
+                      temperatureLocale,
+                      resolvedCountryCode,
+                      userTempPreference,
+                    )}
+                  </Text>
+                  {typeof day.rainChance === 'number' ? (
+                    <Text
+                      style={[
+                        styles.forecastRain,
+                        {color: weatherBarColors.textSecondaryColor},
+                      ]}>
+                      {t('forecast_rain_chance', {chance: day.rainChance})}
+                    </Text>
+                  ) : null}
+                </View>
+              ))}
+            </View>
+          ) : (
+            <Text
+              style={[
+                styles.emptyForecast,
+                {color: weatherBarColors.textSecondaryColor},
+              ]}>
+              {t('forecast_unavailable')}
+            </Text>
+          )}
+
+          <TouchableOpacity
+            accessibilityRole="button"
+            style={[styles.modalButton, {backgroundColor: colors.primary}]}
+            onPress={() => setForecastVisible(false)}>
+            <Text style={styles.modalButtonText}>{t('close')}</Text>
+          </TouchableOpacity>
+        </BasePopup>
+      </View>
+    );
   },
 );
 
@@ -836,7 +1012,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: ThemeTokens.spacing.lg,
     marginTop: ThemeTokens.spacing.md,
   },
-  loadingContainer: { height: 110, justifyContent: 'center' },
+  loadingContainer: {height: 110, justifyContent: 'center'},
   card: {
     borderRadius: ThemeTokens.radius.xl,
     position: 'relative',
@@ -880,9 +1056,9 @@ const styles = StyleSheet.create({
     height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
-    transform: [{ translateY: -4 }, { scale: 1 }],
+    transform: [{translateY: -4}, {scale: 1}],
   },
-  centerMeta: { alignItems: 'stretch', marginTop: 2 },
+  centerMeta: {alignItems: 'stretch', marginTop: 2},
   cityRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -929,14 +1105,8 @@ const styles = StyleSheet.create({
     width: '100%',
     fontFamily: FONT_FAMILY,
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    justifyContent: 'center',
-    padding: ThemeTokens.spacing.xl,
-  },
   modalCard: {
-    borderRadius: ThemeTokens.radius.lg,
+    borderRadius: 28,
     padding: ThemeTokens.spacing.lg,
     borderWidth: 1,
   },
@@ -986,8 +1156,8 @@ const styles = StyleSheet.create({
     fontFamily: FONT_FAMILY,
   },
   modalButton: {
-    height: 46,
-    borderRadius: ThemeTokens.radius.md,
+    minHeight: 50,
+    borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -998,4 +1168,3 @@ const styles = StyleSheet.create({
     fontFamily: FONT_FAMILY,
   },
 });
-

@@ -1,15 +1,19 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { RouteTransportMode } from './RouteDestinationService';
+import type {
+  RouteAdvisory,
+  RouteDetails,
+  RoutePoint,
+  RoutePrecision,
+  RouteTransportMode,
+} from '../domain/route/RouteModels';
 import RoutingService from './maps/RoutingService';
+import type { RouteOption } from './maps/types';
 
-export type RoutePoint = { latitude: number; longitude: number };
-
-export type RouteDetails = {
-  line: Array<[number, number]>;
-  distanceKm?: number;
-  durationMin?: number;
-  transportMode?: RouteTransportMode;
-};
+export type {
+  RouteDetails,
+  RoutePoint,
+  RouteTransportMode,
+} from '../domain/route/RouteModels';
 
 const ROUTE_CACHE_TTL = 5 * 60 * 1000; // 5min
 const ROUTE_CACHE_PREFIX = '@Alert:RouteCache:v3:';
@@ -24,28 +28,6 @@ const buildCacheKey = (
   `${ROUTE_CACHE_PREFIX}${transportMode}:${roundCoord(from.latitude)}:${roundCoord(
     from.longitude,
   )}:${roundCoord(to.latitude)}:${roundCoord(to.longitude)}`;
-
-const resolveRouteProfile = (transportMode: RouteTransportMode) => {
-  if (transportMode === 'bike') return 'cycling';
-  if (transportMode === 'walk') return 'walking';
-  return 'driving';
-};
-
-const toRadians = (value: number) => (value * Math.PI) / 180;
-
-const haversineKm = (from: RoutePoint, to: RoutePoint) => {
-  const earthRadiusKm = 6371;
-  const dLat = toRadians(to.latitude - from.latitude);
-  const dLon = toRadians(to.longitude - from.longitude);
-  const lat1 = toRadians(from.latitude);
-  const lat2 = toRadians(to.latitude);
-
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return earthRadiusKm * c;
-};
 
 const roundDistanceKm = (value: number | undefined) =>
   Number.isFinite(value) ? Math.round(Number(value) * 10) / 10 : undefined;
@@ -148,6 +130,7 @@ const readCache = async (key: string): Promise<RouteDetails | null> => {
 };
 
 const writeCache = async (key: string, data: RouteDetails) => {
+  if (!isCacheableRouteDetails(data)) return;
   try {
     await AsyncStorage.setItem(
       key,
@@ -158,92 +141,132 @@ const writeCache = async (key: string, data: RouteDetails) => {
   }
 };
 
+const isCacheableRouteDetails = (details: RouteDetails | null | undefined): details is RouteDetails =>
+  Boolean(
+    details &&
+      details.routeMode === 'provider' &&
+      details.precision === 'high' &&
+      !details.degraded &&
+      details.providerAvailable &&
+      Array.isArray(details.line) &&
+      details.line.length >= 2 &&
+      hasUsableDistance(details.distanceKm) &&
+      Number.isFinite(details.durationMin) &&
+      Number(details.durationMin) > 0,
+  );
+
+const buildAdvisory = (
+  advisory: RouteAdvisory | null | undefined,
+  fallbackCode: string | null,
+): RouteAdvisory | null => {
+  if (advisory?.code) return advisory;
+  if (!fallbackCode) return null;
+  return {
+    code: fallbackCode,
+    severity: 'warning',
+  };
+};
+
+const buildUnavailableRouteDetails = (params: {
+  transportMode: RouteTransportMode;
+  reasonCode?: string | null;
+  advisoryCode?: string | null;
+  providerId?: string;
+}): RouteDetails => ({
+  line: [],
+  distanceKm: undefined,
+  durationMin: undefined,
+  transportMode: params.transportMode,
+  routeMode: 'unavailable',
+  precision: 'none',
+  degraded: true,
+  providerAvailable: false,
+  providerId: params.providerId,
+  reasonCode: params.reasonCode || 'route_unavailable',
+  advisory: buildAdvisory(null, params.advisoryCode || 'route_advisory_unavailable'),
+});
+
+const toRouteDetails = (
+  route: RouteOption,
+  transportMode: RouteTransportMode,
+): RouteDetails => {
+  const geometry = Array.isArray(route.geometry) ? route.geometry : [];
+  if (geometry.length < 2) {
+    return buildUnavailableRouteDetails({
+      transportMode,
+      reasonCode: route.reasonCode || 'route_geometry_unavailable',
+      advisoryCode: route.advisory?.code || 'route_advisory_unavailable',
+      providerId: route.providerId || route.trust?.providerId,
+    });
+  }
+
+  const distanceKm = roundDistanceKm(route.distanceKm);
+  const durationMin = estimateDurationByMode({
+    distanceKm,
+    routeDurationMin: route.etaMin,
+    transportMode,
+  });
+
+  return {
+    line: geometry,
+    distanceKm,
+    durationMin,
+    transportMode,
+    routeMode: route.routeMode,
+    precision: route.precision as RoutePrecision,
+    degraded: Boolean(route.degraded),
+    providerAvailable: Boolean(route.providerAvailable),
+    providerId: route.providerId || route.trust?.providerId,
+    reasonCode: route.reasonCode || null,
+    advisory: buildAdvisory(
+      route.advisory,
+      route.routeMode === 'estimated_straight_line'
+        ? 'route_advisory_estimated_straight_line'
+        : route.routeMode === 'unavailable'
+          ? 'route_advisory_unavailable'
+          : null,
+    ),
+  };
+};
+
 export const RouteService = {
   async getRouteDetails(
     from: RoutePoint,
     to: RoutePoint,
     transportMode: RouteTransportMode = 'car',
   ): Promise<RouteDetails> {
-    const fallbackLine: Array<[number, number]> = [
-      [from.longitude, from.latitude],
-      [to.longitude, to.latitude],
-    ];
-    const fallbackDistanceKm = roundDistanceKm(haversineKm(from, to));
-    const fallback: RouteDetails = {
-      line: fallbackLine,
-      distanceKm: fallbackDistanceKm,
-      durationMin: estimateDurationByMode({
-        distanceKm: fallbackDistanceKm,
-        transportMode,
-      }),
-      transportMode,
-    };
-
     const cacheKey = buildCacheKey(from, to, transportMode);
     const cached = await readCache(cacheKey);
-    if (cached) return cached;
+    if (isCacheableRouteDetails(cached)) return cached;
 
     try {
-      if (transportMode === 'car' || transportMode === 'motorcycle') {
-        const routeOptions = await RoutingService.getRouteOptions({
-          from: [from.longitude, from.latitude],
-          to: [to.longitude, to.latitude],
-          locale: resolveLocale(),
-          riskPenalty: 0,
-        }).catch(() => []);
+      const routeOptions = await RoutingService.getRouteOptions({
+        from: [from.longitude, from.latitude],
+        to: [to.longitude, to.latitude],
+        locale: resolveLocale(),
+        transportMode,
+        riskPenalty: 0,
+      }).catch(() => []);
 
-        const preferredRoute = Array.isArray(routeOptions) && routeOptions.length > 0 ? routeOptions[0] : null;
-        if (preferredRoute && Array.isArray(preferredRoute.geometry) && preferredRoute.geometry.length >= 2) {
-          const distanceKm = roundDistanceKm(preferredRoute.distanceKm);
-          const durationMin = estimateDurationByMode({
-            distanceKm,
-            routeDurationMin: preferredRoute.etaMin,
-            transportMode,
-          });
-
-          if (hasUsableDistance(distanceKm) && Number.isFinite(durationMin) && Number(durationMin) > 0) {
-            const details: RouteDetails = {
-              line: preferredRoute.geometry,
-              distanceKm,
-              durationMin,
-              transportMode,
-            };
-            await writeCache(cacheKey, details);
-            return details;
-          }
-        }
+      const preferredRoute =
+        Array.isArray(routeOptions) && routeOptions.length > 0 ? routeOptions[0] : null;
+      if (preferredRoute) {
+        const details = toRouteDetails(preferredRoute, transportMode);
+        await writeCache(cacheKey, details);
+        return details;
       }
 
-      const profile = resolveRouteProfile(transportMode);
-      const url = `https://router.project-osrm.org/route/v1/${profile}/${from.longitude},${from.latitude};${to.longitude},${to.latitude}?overview=full&geometries=geojson`;
-      const res = await fetch(url);
-      if (!res.ok) return fallback;
-      const data = await res.json();
-      const route = data?.routes?.[0];
-      const coords = route?.geometry?.coordinates;
-      if (!coords || !Array.isArray(coords)) return fallback;
-
-      const distanceKm = roundDistanceKm(
-        typeof route?.distance === 'number' ? route.distance / 1000 : haversineKm(from, to),
-      );
-      const rawRouteDurationMin =
-        typeof route?.duration === 'number' ? Math.max(1, Math.round(route.duration / 60)) : undefined;
-      const durationMin = estimateDurationByMode({
-        distanceKm,
-        routeDurationMin: rawRouteDurationMin,
+      return buildUnavailableRouteDetails({
         transportMode,
+        reasonCode: 'route_unavailable',
+        advisoryCode: 'route_advisory_unavailable',
       });
-
-      const details: RouteDetails = {
-        line: coords as Array<[number, number]>,
-        distanceKm,
-        durationMin,
-        transportMode,
-      };
-      await writeCache(cacheKey, details);
-      return details;
     } catch {
-      return fallback;
+      return buildUnavailableRouteDetails({
+        transportMode,
+        reasonCode: 'route_backend_unavailable',
+        advisoryCode: 'route_advisory_unavailable',
+      });
     }
   },
 

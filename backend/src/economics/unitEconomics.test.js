@@ -1,7 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  allocateMonthlyCostPerUnit,
   assertWithinUnitEconomics,
+  evaluatePerUserCostPolicy,
   evaluateUnitEconomics,
   evaluateFlowBudget,
   estimateMonthlyVariableCost,
@@ -33,29 +35,41 @@ test('unit economics enforces freemium and premium guardrails', () => {
 
 test('monthly variable cost exposes flow-level cost components', () => {
   const estimate = estimateMonthlyVariableCost({
+    costAllocationUsers: 1000,
+    queueRedisMonthlyUsd: 30,
+    cacheRedisMonthlyUsd: 20,
+    workerComputeMonthlyUsd: 15,
     feedRefreshesPerDay: 6,
     providerMissRate: 0.05,
     weatherRefreshesPerDay: 3,
     mapSessionsPerMonth: 12,
+    routingRequestsPerMonth: 4,
     sosPerMonth: 0.05,
     pushPerMonth: 0.4,
     queueJobsPerMonth: 2,
     cacheOperationsPerMonth: 40,
     backendRequestsPerMonth: 45,
+    backgroundWorkerExecutionsPerMonth: 2,
     paymentTransactionsPerMonth: 1,
     paymentGrossRevenueUsd: 5,
     storageMbMonth: 4,
   });
 
   assert.ok(estimate.totalUsd > 0);
+  assert.ok(estimate.components.queueRedis > 0);
+  assert.ok(estimate.components.cacheRedis > 0);
+  assert.ok(estimate.components.workerCompute > 0);
   assert.ok(estimate.components.feedServing > 0);
   assert.ok(estimate.components.providerMisses > 0);
   assert.ok(estimate.components.weatherProviderMisses > 0);
   assert.ok(estimate.components.maps > 0);
+  assert.ok(estimate.components.routing > 0);
   assert.ok(estimate.components.sosRelay > 0);
+  assert.ok(estimate.components.pushFanout > 0);
   assert.ok(estimate.components.queueJobs > 0);
   assert.ok(estimate.components.cache > 0);
-  assert.ok(estimate.components.backendServing > 0);
+  assert.ok(estimate.components.webServing > 0);
+  assert.ok(estimate.components.backgroundWorkerExecution > 0);
   assert.ok(estimate.components.paymentFees > 0);
   assert.ok(estimate.components.storage > 0);
 });
@@ -114,4 +128,42 @@ test('flow budget marks economically suicidal paths as requiring a cheaper path'
   assert.equal(result.decision, 'requires_cheaper_path');
   assert.ok(result.recommendedActions.length > 0);
   assert.ok(result.guardrail.overBudgetUsd > 0);
+});
+
+test('monthly cost allocation can be converted into a per-unit operational cost', () => {
+  const unitCost = allocateMonthlyCostPerUnit({
+    totalMonthlyUsd: 7,
+    units: 4,
+  });
+
+  assert.equal(unitCost, 1.75);
+});
+
+test('per-user cost policy emits explicit allow and block decisions for 20% and 30% caps', () => {
+  const premiumAllowed = evaluatePerUserCostPolicy({
+    tier: 'premium',
+    revenueAmount: 10,
+    totalCostAmount: 2.5,
+  });
+  const freeBlocked = evaluatePerUserCostPolicy({
+    tier: 'free',
+    revenueAmount: 1,
+    totalCostAmount: 0.25,
+  });
+  const freeRequiresCheaperPath = evaluatePerUserCostPolicy({
+    tier: 'free',
+    revenueAmount: 1,
+    totalCostAmount: 0.7,
+  });
+
+  assert.equal(premiumAllowed.targetCostCapPercent, 0.3);
+  assert.equal(premiumAllowed.decision, 'allow');
+  assert.equal(premiumAllowed.requiresCheaperPath, false);
+  assert.equal(premiumAllowed.blockOrDegrade, false);
+  assert.equal(freeBlocked.targetCostCapPercent, 0.2);
+  assert.equal(freeBlocked.decision, 'block_or_degrade');
+  assert.equal(freeBlocked.requiresCheaperPath, false);
+  assert.equal(freeBlocked.blockOrDegrade, true);
+  assert.equal(freeRequiresCheaperPath.decision, 'requires_cheaper_path');
+  assert.equal(freeRequiresCheaperPath.requiresCheaperPath, true);
 });

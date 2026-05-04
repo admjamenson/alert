@@ -1,7 +1,54 @@
-const { fetchJsonWithRetry } = require('../fetcher');
+const {fetchJsonWithRetry} = require('../fetcher');
 
 const ROUTING_PROVIDER_ID = 'osrm';
 const DEFAULT_ROUTE_BASE_URL = 'https://router.project-osrm.org/route/v1';
+
+// Safe mode para load test - quando ativo, usa fallback local em vez de OSRM externo
+const isLoadTestSafeMode = () =>
+  process.env.ALERT_LOAD_TEST_SAFE_MODE === 'true' ||
+  process.env.ALERT_LOAD_TEST_SAFE_MODE === '1';
+
+// Calcular rota estimada (linha reta) para safe mode
+const buildEstimatedRoute = (originLat, originLon, destLat, destLon, mode) => {
+  // Calcular distância em linha reta (Haversine simplificado)
+  const R = 6371000; // Raio da Terra em metros
+  const dLat = ((destLat - originLat) * Math.PI) / 180;
+  const dLon = ((destLon - originLon) * Math.PI) / 180;
+  const lat1 = (originLat * Math.PI) / 180;
+  const lat2 = (destLat * Math.PI) / 180;
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.sin(dLon / 2) * Math.sin(dLon / 2) * Math.cos(lat1) * Math.cos(lat2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const distance = R * c;
+
+  // Velocidade estimada por modo (m/s)
+  const speedByMode = {
+    car: 13.89, // ~50 km/h
+    bus: 11.11, // ~40 km/h
+    motorcycle: 13.89, // ~50 km/h
+    bike: 4.17, // ~15 km/h
+    walk: 1.39, // ~5 km/h
+  };
+  const speed = speedByMode[mode] || speedByMode.car;
+  const duration = distance / speed;
+
+  // Criar geometria simples (linha reta)
+  const geometry = {
+    type: 'LineString',
+    coordinates: [
+      [originLon, originLat],
+      [destLon, destLat],
+    ],
+  };
+
+  return {
+    distance,
+    duration,
+    geometry,
+  };
+};
 const DEFAULT_FAILURE_THRESHOLD = 2;
 const DEFAULT_COOLDOWN_MS = 30_000;
 const DEFAULT_MAX_TOTAL_WAIT_MS = 1_600;
@@ -64,7 +111,10 @@ const getProviderCircuitState = healthKey => {
 };
 
 const getActiveRequestCount = targetId =>
-  Math.max(0, Number(PROVIDER_ACTIVE_REQUESTS.get(String(targetId || 'unknown')) || 0));
+  Math.max(
+    0,
+    Number(PROVIDER_ACTIVE_REQUESTS.get(String(targetId || 'unknown')) || 0),
+  );
 
 const incrementActiveRequestCount = targetId => {
   const key = String(targetId || 'unknown');
@@ -87,7 +137,9 @@ const buildProviderPreferenceKey = (mode, regionHint, providerTarget) =>
 const rememberPreferredProviderTarget = (mode, regionHint, providerTarget) => {
   PROVIDER_TARGET_PREFERENCES.set(
     buildProviderPreferenceKey(mode, regionHint, providerTarget),
-    sanitizeProviderTargetId(providerTarget?.targetId || `${ROUTING_PROVIDER_ID}:primary`),
+    sanitizeProviderTargetId(
+      providerTarget?.targetId || `${ROUTING_PROVIDER_ID}:primary`,
+    ),
   );
 };
 
@@ -104,17 +156,31 @@ const readPreferredProviderTargetId = (mode, regionHint, providerTarget) =>
 
 const readProviderSourcePriority = providerTarget =>
   Number(
-    PROVIDER_SOURCE_PRIORITY[String(providerTarget?.source || '').trim().toLowerCase()],
+    PROVIDER_SOURCE_PRIORITY[
+      String(providerTarget?.source || '')
+        .trim()
+        .toLowerCase()
+    ],
   );
 
 const normalizeMode = value => {
-  const normalized = String(value || '').trim().toLowerCase();
-  if (normalized === 'car' || normalized === 'drive' || normalized === 'driving') {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase();
+  if (
+    normalized === 'car' ||
+    normalized === 'drive' ||
+    normalized === 'driving'
+  ) {
     return 'car';
   }
   if (normalized === 'bus') return 'bus';
   if (normalized === 'motorcycle') return 'motorcycle';
-  if (normalized === 'bike' || normalized === 'bicycle' || normalized === 'cycling') {
+  if (
+    normalized === 'bike' ||
+    normalized === 'bicycle' ||
+    normalized === 'cycling'
+  ) {
     return 'bike';
   }
   if (
@@ -142,8 +208,10 @@ const sanitizeProviderTargetId = value =>
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '') || 'unknown';
 
-const buildProviderTarget = ({ source, baseUrl, regionKey }) => {
-  const normalizedSource = String(source || 'primary').trim().toLowerCase();
+const buildProviderTarget = ({source, baseUrl, regionKey}) => {
+  const normalizedSource = String(source || 'primary')
+    .trim()
+    .toLowerCase();
   const normalizedRegionKey = normalizeRegionHint(regionKey);
   let targetId = `${ROUTING_PROVIDER_ID}:${normalizedSource}`;
   if (normalizedSource === 'region' && normalizedRegionKey) {
@@ -158,7 +226,9 @@ const buildProviderTarget = ({ source, baseUrl, regionKey }) => {
 };
 
 const normalizeProviderBaseUrl = value =>
-  String(value || '').trim().replace(/\/+$/, '') || null;
+  String(value || '')
+    .trim()
+    .replace(/\/+$/, '') || null;
 
 const resolveRegionalProviderBaseUrl = (regionHint, routingConfig) => {
   const normalizedRegionHint = normalizeRegionHint(regionHint);
@@ -208,7 +278,10 @@ const resolveProviderTargets = (routingConfig, regionHint, mode) => {
     targets.push(next);
   };
 
-  const regionalTarget = resolveRegionalProviderBaseUrl(regionHint, routingConfig);
+  const regionalTarget = resolveRegionalProviderBaseUrl(
+    regionHint,
+    routingConfig,
+  );
   if (regionalTarget) {
     appendTarget({
       source: 'region',
@@ -228,7 +301,9 @@ const resolveProviderTargets = (routingConfig, regionHint, mode) => {
   });
 
   const preferredTargetId = readPreferredProviderTargetId(mode, regionHint, {
-    regionKey: resolveRegionalProviderBaseUrl(regionHint, routingConfig)?.regionKey || null,
+    regionKey:
+      resolveRegionalProviderBaseUrl(regionHint, routingConfig)?.regionKey ||
+      null,
   });
   if (!preferredTargetId) {
     return targets;
@@ -238,7 +313,9 @@ const resolveProviderTargets = (routingConfig, regionHint, mode) => {
     const leftPriority = readProviderSourcePriority(left);
     const rightPriority = readProviderSourcePriority(right);
     if (Number.isFinite(leftPriority) || Number.isFinite(rightPriority)) {
-      const normalizedLeftPriority = Number.isFinite(leftPriority) ? leftPriority : 99;
+      const normalizedLeftPriority = Number.isFinite(leftPriority)
+        ? leftPriority
+        : 99;
       const normalizedRightPriority = Number.isFinite(rightPriority)
         ? rightPriority
         : 99;
@@ -246,10 +323,16 @@ const resolveProviderTargets = (routingConfig, regionHint, mode) => {
         return normalizedLeftPriority - normalizedRightPriority;
       }
     }
-    if (left.targetId === preferredTargetId && right.targetId !== preferredTargetId) {
+    if (
+      left.targetId === preferredTargetId &&
+      right.targetId !== preferredTargetId
+    ) {
       return -1;
     }
-    if (right.targetId === preferredTargetId && left.targetId !== preferredTargetId) {
+    if (
+      right.targetId === preferredTargetId &&
+      left.targetId !== preferredTargetId
+    ) {
       return 1;
     }
     return 0;
@@ -257,8 +340,8 @@ const resolveProviderTargets = (routingConfig, regionHint, mode) => {
 };
 
 const buildRoutingProviderDebugSnapshot = (
-  { regionHint, transportMode },
-  { config } = {},
+  {regionHint, transportMode},
+  {config} = {},
 ) => {
   const routingConfig = config?.routing || {};
   const resolvedRegionalTarget = resolveRegionalProviderBaseUrl(
@@ -286,7 +369,8 @@ const buildRoutingProviderDebugSnapshot = (
             baseUrl: resolvedRegionalTarget.baseUrl,
             regionKey: resolvedRegionalTarget.regionKey,
           }).targetId,
-          regionKey: normalizeRegionHint(resolvedRegionalTarget.regionKey) || null,
+          regionKey:
+            normalizeRegionHint(resolvedRegionalTarget.regionKey) || null,
           baseUrl: normalizeProviderBaseUrl(resolvedRegionalTarget.baseUrl),
         }
       : null,
@@ -325,7 +409,8 @@ const resetCircuit = providerState => {
 };
 
 const buildMeta = params => ({
-  providerTargetId: params?.providerTargetId || `${ROUTING_PROVIDER_ID}:primary`,
+  providerTargetId:
+    params?.providerTargetId || `${ROUTING_PROVIDER_ID}:primary`,
   providerSource: params?.providerSource || 'primary',
   providerRegionKey: params?.providerRegionKey || null,
   circuitState: params?.circuitState || 'closed',
@@ -337,7 +422,8 @@ const buildMeta = params => ({
 });
 
 const logProviderEvent = (logger, level, event, payload) => {
-  const target = logger && typeof logger[level] === 'function' ? logger[level] : null;
+  const target =
+    logger && typeof logger[level] === 'function' ? logger[level] : null;
   if (!target) return;
   target(`[routing/osrm] ${event}`, payload);
 };
@@ -382,7 +468,8 @@ const registerFailure = (providerState, failure, config, nowMs) => {
   if (!failure?.transient) return readCircuitState(providerState, nowMs);
 
   providerState.consecutiveFailures += 1;
-  providerState.lastReasonCode = failure.reasonCode || 'routing_provider_unavailable';
+  providerState.lastReasonCode =
+    failure.reasonCode || 'routing_provider_unavailable';
   providerState.lastFailureAt = new Date(nowMs).toISOString();
 
   const failureThreshold = Math.max(
@@ -443,8 +530,7 @@ const readMaxConcurrentRequests = config =>
   Math.max(
     1,
     Number(
-      config?.routing?.maxConcurrentRequests ||
-        DEFAULT_MAX_CONCURRENT_REQUESTS,
+      config?.routing?.maxConcurrentRequests || DEFAULT_MAX_CONCURRENT_REQUESTS,
     ),
   );
 
@@ -509,7 +595,8 @@ const buildStaleSnapshotResponse = ({
   routes: staleSnapshot.routes,
   updatedAt: staleSnapshot.updatedAt || new Date().toISOString(),
   providerId: ROUTING_PROVIDER_ID,
-  providerTargetId: providerTarget?.targetId || `${ROUTING_PROVIDER_ID}:primary`,
+  providerTargetId:
+    providerTarget?.targetId || `${ROUTING_PROVIDER_ID}:primary`,
   providerSource: providerTarget?.source || 'primary',
   providerRegionKey: providerTarget?.regionKey || null,
   transportMode: mode,
@@ -550,7 +637,8 @@ const buildProviderFailurePayload = ({
   routes: [],
   updatedAt: updatedAt || new Date().toISOString(),
   providerId: ROUTING_PROVIDER_ID,
-  providerTargetId: providerTarget?.targetId || `${ROUTING_PROVIDER_ID}:primary`,
+  providerTargetId:
+    providerTarget?.targetId || `${ROUTING_PROVIDER_ID}:primary`,
   providerSource: providerTarget?.source || 'primary',
   providerRegionKey: providerTarget?.regionKey || null,
   transportMode: mode,
@@ -607,12 +695,17 @@ const readMinimumAttemptTimeoutMs = targetIndex =>
     ? ALTERNATE_PROVIDER_MIN_TIMEOUT_MS
     : PRIMARY_PROVIDER_MIN_TIMEOUT_MS;
 
-const canTryAnotherProviderTarget = (targets, currentIndex, remainingBudgetMs) =>
+const canTryAnotherProviderTarget = (
+  targets,
+  currentIndex,
+  remainingBudgetMs,
+) =>
   currentIndex < targets.length - 1 &&
-  Number(remainingBudgetMs || 0) >= readMinimumAttemptTimeoutMs(currentIndex + 1);
+  Number(remainingBudgetMs || 0) >=
+    readMinimumAttemptTimeoutMs(currentIndex + 1);
 
 const fetchRouteOptions = async (
-  { fromLat, fromLon, toLat, toLon, transportMode, regionHint },
+  {fromLat, fromLon, toLat, toLon, transportMode, regionHint},
   {
     userAgent,
     config,
@@ -627,6 +720,109 @@ const fetchRouteOptions = async (
   const destinationLat = Number(toLat);
   const destinationLon = Number(toLon);
 
+  // SAFE MODE: Load test seguro - usa fallback local em vez de OSRM externo
+  if (isLoadTestSafeMode()) {
+    if (
+      !isStrictFiniteNumber(fromLat) ||
+      !isStrictFiniteNumber(fromLon) ||
+      !isStrictFiniteNumber(toLat) ||
+      !isStrictFiniteNumber(toLon) ||
+      !Number.isFinite(originLat) ||
+      !Number.isFinite(originLon) ||
+      !Number.isFinite(destinationLat) ||
+      !Number.isFinite(destinationLon)
+    ) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'invalid_coordinates',
+        reasonCode: 'invalid_coordinates',
+        retryable: false,
+        degraded: false,
+        routes: [],
+        updatedAt: new Date(startedAt).toISOString(),
+        providerId: ROUTING_PROVIDER_ID,
+        providerTargetId: `${ROUTING_PROVIDER_ID}:primary`,
+        providerSource: 'primary',
+        providerRegionKey: normalizeRegionHint(regionHint) || null,
+        transportMode: normalizeMode(transportMode),
+        meta: buildMeta({
+          providerRegionKey: normalizeRegionHint(regionHint) || null,
+          circuitState: 'closed',
+          lastFailureAt: null,
+        }),
+      };
+    }
+
+    const mode = normalizeMode(transportMode);
+    const estimatedRoute = buildEstimatedRoute(
+      originLat,
+      originLon,
+      destinationLat,
+      destinationLon,
+      mode,
+    );
+
+    const route = toBackendRoute(estimatedRoute, 0, mode);
+    if (!route) {
+      return {
+        ok: false,
+        status: 500,
+        error: 'routing_estimation_failed',
+        reasonCode: 'routing_estimation_failed',
+        retryable: false,
+        degraded: true,
+        routes: [],
+        updatedAt: new Date(startedAt).toISOString(),
+        providerId: ROUTING_PROVIDER_ID,
+        providerTargetId: `${ROUTING_PROVIDER_ID}:primary`,
+        providerSource: 'primary',
+        providerRegionKey: normalizeRegionHint(regionHint) || null,
+        transportMode: mode,
+        meta: buildMeta({
+          providerRegionKey: normalizeRegionHint(regionHint) || null,
+          circuitState: 'closed',
+          lastFailureAt: null,
+        }),
+      };
+    }
+
+    logProviderEvent(logger, 'info', 'safe_mode_local_fallback', {
+      providerId: ROUTING_PROVIDER_ID,
+      transportMode: mode,
+      distanceMeters: estimatedRoute.distance,
+      durationSec: estimatedRoute.duration,
+    });
+
+    return {
+      ok: true,
+      status: 200,
+      error: null,
+      reasonCode: 'routing_local_estimate_safe_mode',
+      retryable: false,
+      degraded: true,
+      routes: [route],
+      updatedAt: new Date(startedAt).toISOString(),
+      providerId: ROUTING_PROVIDER_ID,
+      providerTargetId: `${ROUTING_PROVIDER_ID}:safe-mode-local`,
+      providerSource: 'local',
+      providerRegionKey: normalizeRegionHint(regionHint) || null,
+      transportMode: mode,
+      meta: buildMeta({
+        providerTargetId: `${ROUTING_PROVIDER_ID}:safe-mode-local`,
+        providerSource: 'local',
+        providerRegionKey: normalizeRegionHint(regionHint) || null,
+        circuitState: 'closed',
+        attempts: 0,
+        cacheHit: false,
+        latencyMs: 0,
+        timeoutMs: 0,
+        lastFailureAt: null,
+      }),
+    };
+  }
+
+  // Modo normal - continua com lógica existente
   if (
     !isStrictFiniteNumber(fromLat) ||
     !isStrictFiniteNumber(fromLon) ||
@@ -687,23 +883,38 @@ const fetchRouteOptions = async (
     destinationLon,
   });
   const staleSnapshot = readStaleRouteSnapshot(cacheKey);
-  const providerTargets = resolveProviderTargets(routingConfig, regionHint, mode);
+  const providerTargets = resolveProviderTargets(
+    routingConfig,
+    regionHint,
+    mode,
+  );
   const profile = MODE_TO_PROFILE[mode] || MODE_TO_PROFILE.car;
   const alternatives = profile === 'driving' ? 'true' : 'false';
   const maxConcurrentRequests = readMaxConcurrentRequests(config);
   const deadlineMs = startedAt + maxTotalWaitMs;
   let lastFailurePayload = null;
 
-  for (let targetIndex = 0; targetIndex < providerTargets.length; targetIndex += 1) {
+  for (
+    let targetIndex = 0;
+    targetIndex < providerTargets.length;
+    targetIndex += 1
+  ) {
     const providerTarget = providerTargets[targetIndex];
-    const providerHealthKey = buildProviderHealthKey(providerTarget, mode, regionHint);
+    const providerHealthKey = buildProviderHealthKey(
+      providerTarget,
+      mode,
+      regionHint,
+    );
     const providerState = getProviderCircuitState(providerHealthKey);
     const attemptStartedAt = now();
     const remainingBudgetMs = Math.max(
       0,
       deadlineMs - Number(attemptStartedAt || Date.now()),
     );
-    const currentCircuitState = readCircuitState(providerState, attemptStartedAt);
+    const currentCircuitState = readCircuitState(
+      providerState,
+      attemptStartedAt,
+    );
     const lastFailureAt = providerState.lastFailureAt;
 
     if (remainingBudgetMs < readMinimumAttemptTimeoutMs(targetIndex)) {
@@ -754,13 +965,20 @@ const fetchRouteOptions = async (
         retryable: true,
       });
 
-      if (canTryAnotherProviderTarget(providerTargets, targetIndex, remainingBudgetMs)) {
+      if (
+        canTryAnotherProviderTarget(
+          providerTargets,
+          targetIndex,
+          remainingBudgetMs,
+        )
+      ) {
         logProviderEvent(logger, 'warn', 'provider_fallback_next', {
           providerId: ROUTING_PROVIDER_ID,
           providerTargetId: providerTarget.targetId,
           providerSource: providerTarget.source,
           providerRegionKey: providerTarget.regionKey,
-          nextProviderTargetId: providerTargets[targetIndex + 1]?.targetId || null,
+          nextProviderTargetId:
+            providerTargets[targetIndex + 1]?.targetId || null,
           reasonCode:
             providerState.lastReasonCode || 'routing_provider_circuit_open',
           transportMode: mode,
@@ -805,13 +1023,20 @@ const fetchRouteOptions = async (
         maxConcurrentRequests,
       });
 
-      if (canTryAnotherProviderTarget(providerTargets, targetIndex, remainingBudgetMs)) {
+      if (
+        canTryAnotherProviderTarget(
+          providerTargets,
+          targetIndex,
+          remainingBudgetMs,
+        )
+      ) {
         logProviderEvent(logger, 'warn', 'provider_fallback_next', {
           providerId: ROUTING_PROVIDER_ID,
           providerTargetId: providerTarget.targetId,
           providerSource: providerTarget.source,
           providerRegionKey: providerTarget.regionKey,
-          nextProviderTargetId: providerTargets[targetIndex + 1]?.targetId || null,
+          nextProviderTargetId:
+            providerTargets[targetIndex + 1]?.targetId || null,
           reasonCode: 'routing_provider_saturated',
           transportMode: mode,
         });
@@ -851,10 +1076,9 @@ const fetchRouteOptions = async (
       });
     }
 
-    const routeBaseUrl = String(providerTarget.baseUrl || DEFAULT_ROUTE_BASE_URL).replace(
-      /\/+$/,
-      '',
-    );
+    const routeBaseUrl = String(
+      providerTarget.baseUrl || DEFAULT_ROUTE_BASE_URL,
+    ).replace(/\/+$/, '');
     const url =
       `${routeBaseUrl}/${profile}/` +
       `${destinationSafe(originLon)},${destinationSafe(originLat)};` +
@@ -942,13 +1166,20 @@ const fetchRouteOptions = async (
       });
       clearPreferredProviderTarget(mode, regionHint, providerTarget);
 
-      if (canTryAnotherProviderTarget(providerTargets, targetIndex, remainingBudgetMs)) {
+      if (
+        canTryAnotherProviderTarget(
+          providerTargets,
+          targetIndex,
+          remainingBudgetMs,
+        )
+      ) {
         logProviderEvent(logger, 'warn', 'provider_fallback_next', {
           providerId: ROUTING_PROVIDER_ID,
           providerTargetId: providerTarget.targetId,
           providerSource: providerTarget.source,
           providerRegionKey: providerTarget.regionKey,
-          nextProviderTargetId: providerTargets[targetIndex + 1]?.targetId || null,
+          nextProviderTargetId:
+            providerTargets[targetIndex + 1]?.targetId || null,
           reasonCode: failure.reasonCode,
           transportMode: mode,
         });
@@ -988,7 +1219,9 @@ const fetchRouteOptions = async (
       return lastFailurePayload;
     }
 
-    const rawRoutes = Array.isArray(response.json?.routes) ? response.json.routes : [];
+    const rawRoutes = Array.isArray(response.json?.routes)
+      ? response.json.routes
+      : [];
     const routes = rawRoutes
       .map((route, index) => toBackendRoute(route, index, mode))
       .filter(Boolean);
@@ -1042,14 +1275,19 @@ const fetchRouteOptions = async (
 
       if (
         reasonCode === 'routing_no_route' &&
-        canTryAnotherProviderTarget(providerTargets, targetIndex, remainingBudgetMs)
+        canTryAnotherProviderTarget(
+          providerTargets,
+          targetIndex,
+          remainingBudgetMs,
+        )
       ) {
         logProviderEvent(logger, 'warn', 'provider_fallback_next', {
           providerId: ROUTING_PROVIDER_ID,
           providerTargetId: providerTarget.targetId,
           providerSource: providerTarget.source,
           providerRegionKey: providerTarget.regionKey,
-          nextProviderTargetId: providerTargets[targetIndex + 1]?.targetId || null,
+          nextProviderTargetId:
+            providerTargets[targetIndex + 1]?.targetId || null,
           reasonCode,
           transportMode: mode,
         });
@@ -1079,7 +1317,8 @@ const fetchRouteOptions = async (
       reasonCode: null,
       retryable: false,
       degraded:
-        completedCircuitState === 'half_open' || Number(response.attempts || 0) > 1,
+        completedCircuitState === 'half_open' ||
+        Number(response.attempts || 0) > 1,
       routes,
       updatedAt: response.fetchedAt || new Date().toISOString(),
       providerId: ROUTING_PROVIDER_ID,
@@ -1129,11 +1368,13 @@ module.exports = {
     STALE_ROUTE_CACHE.clear();
   },
   __dangerousGetRoutingProviderStateForTests: () => ({
-    providers: Array.from(PROVIDER_CIRCUIT_STATES.entries()).map(([healthKey, state]) => ({
-      healthKey,
-      ...state,
-      circuitState: readCircuitState(state, Date.now()),
-    })),
+    providers: Array.from(PROVIDER_CIRCUIT_STATES.entries()).map(
+      ([healthKey, state]) => ({
+        healthKey,
+        ...state,
+        circuitState: readCircuitState(state, Date.now()),
+      }),
+    ),
     activeRequests: Object.fromEntries(PROVIDER_ACTIVE_REQUESTS.entries()),
     preferences: Object.fromEntries(PROVIDER_TARGET_PREFERENCES.entries()),
   }),

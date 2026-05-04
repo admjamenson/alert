@@ -24,6 +24,7 @@ import {
   buildPersistedNavigationPayload,
 } from './navigationStatePersistence';
 import { performance } from '../utils/performance';
+import { markStartupPhase } from '../startup/startupTelemetry';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const NAVIGABLE_DEEP_LINK_HOSTS = new Set([
@@ -100,7 +101,9 @@ const isNavigableDeepLink = (url: string): boolean => {
 const isBillingReturnDeepLink = (url: string): boolean =>
   url.startsWith('alertapp://') && getDeepLinkHost(url) === 'billing-return';
 
-const getActiveRouteName = (state: any): string | undefined => {
+const getActiveRouteName = (
+  state: NavigationState | PartialState<NavigationState> | undefined,
+): string | undefined => {
   if (!state || !Array.isArray(state.routes) || state.routes.length === 0) {
     return undefined;
   }
@@ -169,9 +172,12 @@ const RootNavigator = () => {
     (url: string): boolean => {
       if (!navigationRef.isReady()) return false;
       const normalizedPath = String(url || '').replace(/^alertapp:\/\//i, '');
-      const nextState = getStateFromPath(normalizedPath, startupLinkingConfig as any);
+      const nextState = getStateFromPath<RootStackParamList>(
+        normalizedPath,
+        startupLinkingConfig,
+      );
       if (!nextState) return false;
-      navigationRef.dispatch(CommonActions.reset(nextState as any));
+      navigationRef.resetRoot(nextState);
       return true;
     },
     [navigationRef, startupLinkingConfig],
@@ -200,11 +206,11 @@ const RootNavigator = () => {
       if (pushLink && isNavigableDeepLink(pushLink)) {
         return pushLink;
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (__DEV__) {
         console.log(
           '[NAV] startup notification lookup failed:',
-          String(error?.message || error || 'unknown'),
+          String(error instanceof Error ? error.message : error || 'unknown'),
         );
       }
     }
@@ -221,11 +227,11 @@ const RootNavigator = () => {
         if (serialized === lastPersistedNavStateRef.current) return;
         lastPersistedNavStateRef.current = serialized;
         await AsyncStorage.setItem(NAV_STATE_STORAGE_KEY, serialized);
-      } catch (error: any) {
+      } catch (error: unknown) {
         if (__DEV__) {
           console.log(
             '[NAV] persist failed:',
-            String(error?.message || error || 'unknown'),
+            String(error instanceof Error ? error.message : error || 'unknown'),
           );
         }
       }
@@ -279,11 +285,11 @@ const RootNavigator = () => {
                 }
               },
             );
-          } catch (error: any) {
+          } catch (error: unknown) {
             if (__DEV__) {
               console.log(
                 '[NAV] notification subscription failed:',
-                String(error?.message || error || 'unknown'),
+                String(error instanceof Error ? error.message : error || 'unknown'),
               );
             }
           }
@@ -333,9 +339,7 @@ const RootNavigator = () => {
       if (delayId) {
         clearTimeout(delayId);
       }
-      if (typeof (interactionTask as any)?.cancel === 'function') {
-        (interactionTask as any).cancel();
-      }
+      interactionTask.cancel();
     };
   }, [applyStartupUrl, resolveStartupUrl]);
 
@@ -344,6 +348,7 @@ const RootNavigator = () => {
       ref={navigationRef}
       linking={linking}
       onReady={() => {
+        markStartupPhase('MAIN_APP_READY');
         performance.mark('nav_ready');
         const measure = performance.measure('nav_ready', 'app_init', 'nav_ready');
         const routeName = navigationRef.getCurrentRoute()?.name;
@@ -365,7 +370,7 @@ const RootNavigator = () => {
     >
       <Stack.Navigator
         id={undefined}
-        initialRouteName="FastHome"
+        initialRouteName="Home"
         screenOptions={{
           headerShown: false,
           animation: 'slide_from_right',
@@ -420,7 +425,7 @@ const RootNavigator = () => {
         />
         <Stack.Screen
           name="ChatMonitor"
-          getComponent={() => require('../screens/home/ChatMonitorScreen').ChatMonitorScreen}
+          getComponent={() => require('../screens/home/ChatMonitorScreen').default}
         />
         <Stack.Screen
           name="Conversations"
@@ -518,6 +523,14 @@ const RootNavigator = () => {
           name="ThemeSettings"
           getComponent={() => require('../screens/ThemeSettings').default}
         />
+        {__DEV__ ? (
+          <Stack.Screen
+            name="PopupValidation"
+            getComponent={() =>
+              require('../screens/debug/PopupValidationScreen').default
+            }
+          />
+        ) : null}
         <Stack.Screen
           name="AlertDetails"
           getComponent={() => require('../screens/AlertDetailsScreen').default}
@@ -525,6 +538,10 @@ const RootNavigator = () => {
         <Stack.Screen
           name="WebView"
           getComponent={() => require('../screens/WebViewScreen').default}
+        />
+        <Stack.Screen
+          name="LegalNotice"
+          getComponent={() => require('../screens/settings/LegalNoticeScreen').default}
         />
       </Stack.Navigator>
     </NavigationContainer>

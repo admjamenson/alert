@@ -38,7 +38,7 @@ type SeedHazard = {
   titleKey: string;
   summaryKey: string;
   sourceName: string;
-  sourceUrl: string;
+  sourceUrl?: string;
 };
 
 const SEED_HAZARDS: SeedHazard[] = [
@@ -46,57 +46,49 @@ const SEED_HAZARDS: SeedHazard[] = [
     id: 'hazard-1',
     titleKey: 'notification_seed_hazard_1_title',
     summaryKey: 'notification_seed_hazard_1_summary',
-    sourceName: 'INMET',
-    sourceUrl: 'https://www.inmet.gov.br/',
+    sourceName: 'Alert Seed',
   },
   {
     id: 'hazard-2',
     titleKey: 'notification_seed_hazard_2_title',
     summaryKey: 'notification_seed_hazard_2_summary',
-    sourceName: 'Defesa Civil',
-    sourceUrl: 'https://www.gov.br/defesacivil/',
+    sourceName: 'Alert Seed',
   },
   {
     id: 'hazard-3',
     titleKey: 'notification_seed_hazard_3_title',
     summaryKey: 'notification_seed_hazard_3_summary',
-    sourceName: 'USGS',
-    sourceUrl: 'https://earthquake.usgs.gov/',
+    sourceName: 'Alert Seed',
   },
   {
     id: 'hazard-4',
     titleKey: 'notification_seed_hazard_4_title',
     summaryKey: 'notification_seed_hazard_4_summary',
-    sourceName: 'Defesa Civil',
-    sourceUrl: 'https://www.gov.br/defesacivil/',
+    sourceName: 'Alert Seed',
   },
   {
     id: 'hazard-5',
     titleKey: 'notification_seed_hazard_5_title',
     summaryKey: 'notification_seed_hazard_5_summary',
-    sourceName: 'CEMADEN',
-    sourceUrl: 'https://www.gov.br/cemaden/',
+    sourceName: 'Alert Seed',
   },
   {
     id: 'hazard-6',
     titleKey: 'notification_seed_hazard_6_title',
     summaryKey: 'notification_seed_hazard_6_summary',
-    sourceName: 'INMET',
-    sourceUrl: 'https://www.inmet.gov.br/',
+    sourceName: 'Alert Seed',
   },
   {
     id: 'hazard-7',
     titleKey: 'notification_seed_hazard_7_title',
     summaryKey: 'notification_seed_hazard_7_summary',
-    sourceName: 'NOAA',
-    sourceUrl: 'https://www.noaa.gov/',
+    sourceName: 'Alert Seed',
   },
   {
     id: 'hazard-8',
     titleKey: 'notification_seed_hazard_8_title',
     summaryKey: 'notification_seed_hazard_8_summary',
-    sourceName: 'UNESCO IOC',
-    sourceUrl: 'https://ioc.unesco.org/',
+    sourceName: 'Alert Seed',
   },
 ];
 
@@ -217,7 +209,7 @@ export const NotificationService = {
     if (!Number.isFinite(seenAt) || seenAt <= 0) return list.length;
 
     return list.filter(item => {
-      const ts = Date.parse(item.timestamp);
+      const ts = Date.parse(String(item.timestamp || ''));
       return Number.isFinite(ts) && ts > seenAt;
     }).length;
   },

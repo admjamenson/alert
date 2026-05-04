@@ -138,9 +138,11 @@ const MonitoringInfoOverlay = ({
             weight="bold"
             tone="inverse"
             style={styles.title}
-            numberOfLines={2}
+            numberOfLines={3}
             ellipsizeMode="tail"
-            maxFontSizeMultiplier={1.3}
+            adjustsFontSizeToFit
+            minimumFontScale={0.82}
+            maxFontSizeMultiplier={1.2}
           >
             {title}
           </AppText>
@@ -223,7 +225,7 @@ const MonitoringInfoOverlay = ({
 
       {collapsed ? null : (
         <>
-          <AppText variant="modalBody" tone="inverse" style={styles.summary} numberOfLines={3} maxFontSizeMultiplier={1.35}>
+          <AppText variant="modalBody" tone="inverse" style={styles.summary} numberOfLines={5} maxFontSizeMultiplier={1.25}>
             {summary}
           </AppText>
 
@@ -249,7 +251,8 @@ const MonitoringInfoOverlay = ({
                     weight="semibold"
                     tone={clickable ? 'inverse' : 'inverseSecondary'}
                     style={[styles.sourceName, !clickable && styles.sourceNamePassive]}
-                    numberOfLines={1}
+                    numberOfLines={2}
+                    maxFontSizeMultiplier={1.2}
                   >
                     {source.name}
                   </AppText>
@@ -268,8 +271,8 @@ const MonitoringInfoOverlay = ({
               variant="caption1"
               tone="inverseSecondary"
               style={styles.fallbackLabel}
-              numberOfLines={2}
-              maxFontSizeMultiplier={1.3}
+              numberOfLines={3}
+              maxFontSizeMultiplier={1.2}
             >
               {sourceFallbackLabel}
             </AppText>
@@ -281,8 +284,8 @@ const MonitoringInfoOverlay = ({
             variant="caption1"
             tone="inverseSecondary"
             style={[styles.updated, !hasUpdatedAt && styles.updatedUnknown]}
-            numberOfLines={2}
-            maxFontSizeMultiplier={1.3}
+            numberOfLines={3}
+            maxFontSizeMultiplier={1.2}
           >
             {updatedLabel}
           </AppText>
@@ -296,7 +299,13 @@ const MonitoringInfoOverlay = ({
                 {legendItems.map((item, idx) => (
                   <View key={item.id || `${item.label}-${idx}`} style={styles.legendItem}>
                     <Icon name={item.icon} size={13} color={item.color} />
-                    <AppText variant="caption1" tone="inverseSecondary" style={styles.legendText} numberOfLines={1}>
+                    <AppText
+                      variant="caption1"
+                      tone="inverseSecondary"
+                      style={styles.legendText}
+                      numberOfLines={2}
+                      maxFontSizeMultiplier={1.15}
+                    >
                       {item.label}
                     </AppText>
                   </View>
@@ -310,8 +319,8 @@ const MonitoringInfoOverlay = ({
               variant="caption1"
               tone="inverseSecondary"
               style={styles.swipeHint}
-              numberOfLines={1}
-              maxFontSizeMultiplier={1.2}
+              numberOfLines={2}
+              maxFontSizeMultiplier={1.15}
             >
               {swipeHintLabel}
             </AppText>
@@ -339,7 +348,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 8,
   },
   iconWrap: {
@@ -348,6 +357,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   title: {
+    flex: 1,
+    minWidth: 0,
     flexShrink: 1,
   },
   headerActions: {
@@ -392,9 +403,9 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   sourceRow: {
-    minHeight: 32,
+    minHeight: 38,
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 8,
   },
   sourceName: {
@@ -445,7 +456,7 @@ const styles = StyleSheet.create({
     maxWidth: '100%',
   },
   legendText: {
-    maxWidth: 170,
+    maxWidth: 220,
   },
   swipeHint: {
     color: 'rgba(255,255,255,0.72)',

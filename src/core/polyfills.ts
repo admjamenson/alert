@@ -23,11 +23,62 @@ const P_MOD = 'process';
 // 3. Assign Globals with polyfills
 const { Buffer: BufferPolyfill } = require(B_MOD);
 global.Buffer = BufferPolyfill;
+globalThis.Buffer = BufferPolyfill;
 
 const processPolyfill = require(P_MOD);
 global.process = processPolyfill;
+globalThis.process = processPolyfill;
 
-// 4. Intl.PluralRules polyfill (needed for i18next on JSC)
+if (typeof globalThis.TextEncoder !== 'function') {
+  class BufferTextEncoder {
+    encode(input: string = ''): Uint8Array {
+      return Uint8Array.from(BufferPolyfill.from(String(input), 'utf8'));
+    }
+  }
+
+  (globalThis as any).TextEncoder = BufferTextEncoder;
+}
+
+if (typeof globalThis.TextDecoder !== 'function') {
+  class BufferTextDecoder {
+    decode(
+      input?: ArrayBuffer | ArrayBufferView | null,
+      _options?: { stream?: boolean },
+    ): string {
+      if (input == null) {
+        return '';
+      }
+
+      if (ArrayBuffer.isView(input)) {
+        return BufferPolyfill.from(
+          input.buffer,
+          input.byteOffset,
+          input.byteLength,
+        ).toString('utf8');
+      }
+
+      return BufferPolyfill.from(input).toString('utf8');
+    }
+  }
+
+  (globalThis as any).TextDecoder = BufferTextDecoder;
+}
+
+const hasWorkingDateTimeFormat = (): boolean => {
+  try {
+    return (
+      typeof global.Intl.DateTimeFormat === 'function' &&
+      typeof new global.Intl.DateTimeFormat('en-US', {
+        timeZone: 'UTC',
+      }).format(new Date()) === 'string'
+    );
+  } catch {
+    return false;
+  }
+};
+
+// 4. Intl polyfills. Hermes generally provides these; load FormatJS only when
+// the runtime is missing support so startup does not pay this cost on every boot.
 if (!global.Intl) {
   global.Intl = {};
 }
@@ -41,13 +92,17 @@ if (typeof global.Intl.getCanonicalLocales !== 'function') {
 if (typeof global.Intl.Locale !== 'function') {
   require('@formatjs/intl-locale/polyfill.js');
 }
-require('@formatjs/intl-pluralrules/polyfill.js');
-require('@formatjs/intl-pluralrules/locale-data/en.js');
-require('@formatjs/intl-pluralrules/locale-data/pt.js');
-require('@formatjs/intl-datetimeformat/polyfill.js');
-require('@formatjs/intl-datetimeformat/locale-data/en.js');
-require('@formatjs/intl-datetimeformat/locale-data/pt.js');
-require('@formatjs/intl-datetimeformat/add-golden-tz.js');
+if (typeof global.Intl.PluralRules !== 'function') {
+  require('@formatjs/intl-pluralrules/polyfill.js');
+  require('@formatjs/intl-pluralrules/locale-data/en.js');
+  require('@formatjs/intl-pluralrules/locale-data/pt.js');
+}
+if (!hasWorkingDateTimeFormat()) {
+  require('@formatjs/intl-datetimeformat/polyfill.js');
+  require('@formatjs/intl-datetimeformat/locale-data/en.js');
+  require('@formatjs/intl-datetimeformat/locale-data/pt.js');
+  require('@formatjs/intl-datetimeformat/add-golden-tz.js');
+}
 
 // Environment config
 if (global.process) {

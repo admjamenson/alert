@@ -2,7 +2,16 @@ import React from 'react';
 import { BackHandler, I18nManager, Platform } from 'react-native';
 import renderer, { act } from 'react-test-renderer';
 
-import SettingScreen from '../src/screens/SettingScreen';
+jest.mock('react-native-localize', () => ({
+  __esModule: true,
+  getCountry: () => 'BR',
+  getCurrencies: () => ['BRL'],
+  getLocales: () => [{ languageTag: 'pt-BR', languageCode: 'pt', countryCode: 'BR' }],
+  getNumberFormatSettings: () => ({ decimalSeparator: ',', groupingSeparator: '.' }),
+  getTimeZone: () => 'America/Fortaleza',
+  uses24HourClock: () => true,
+  usesMetricSystem: () => true,
+}));
 
 const mockReset = jest.fn((payload: unknown) => ({
   type: 'RESET',
@@ -77,6 +86,16 @@ jest.mock('../src/services/EntitlementService', () => ({
   },
 }));
 
+jest.mock('../src/services/KyberNetworkService', () => ({
+  KyberNetworkService: {
+    getCapabilityStatus: jest.fn(() => ({
+      secureDispatch: true,
+      offlineQueue: true,
+      integrityProtection: true,
+    })),
+  },
+}));
+
 jest.mock('../src/ads/ConsentManager', () => ({
   ConsentManager: {
     openPrivacyOptions: jest.fn(async () => true),
@@ -93,6 +112,10 @@ jest.mock('../src/components/ui/AppText', () => ({
   },
 }));
 jest.mock('../src/assets/logo.png', () => 1);
+
+const SettingScreen = require('../src/screens/SettingScreen').default;
+
+jest.setTimeout(20000);
 
 type NavigationMock = {
   canGoBack: jest.Mock<boolean, []>;

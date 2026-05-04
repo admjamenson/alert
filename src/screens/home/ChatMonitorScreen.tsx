@@ -10,10 +10,8 @@ import {
   Image,
   KeyboardAvoidingView,
   Platform,
-  Modal,
   Pressable,
   Share,
-  ActionSheetIOS,
   Linking,
   PanResponder,
   useColorScheme,
@@ -36,9 +34,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getLocales } from 'react-native-localize';
 import { ProfileService } from '../../services/ProfileService';
 import { ProximityAudioService } from '../../services/ProximityAudioService';
-import { useTranslation } from 'react-i18next';
+import i18n from '../../i18n';
 import { ThemeTokens } from '../../constants/ThemeTokens';
+import BasePopup from '../../components/ui/BasePopup';
 import ReactNativeHapticFeedback from 'react-native-haptic-feedback';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   OSM_STYLE_NORMAL,
   OSM_STYLE_PANIC,
@@ -60,7 +60,7 @@ import {
   isFiniteCoordinatePair,
 } from '../../utils/locationQuality';
 import { NotificationService } from '../../services/NotificationService';
-import i18n from '../../i18n';
+import type { RootStackParamList } from '../../navigation/types';
 
 interface ChatParams {
   conversationId?: string;
@@ -89,6 +89,9 @@ type ChatMessage = {
   timestamp: string;
   isSelf: boolean;
 };
+
+type ChatMonitorScreenProps = NativeStackScreenProps<RootStackParamList, 'ChatMonitor'>;
+type ChatMonitorNavigation = ChatMonitorScreenProps['navigation'];
 
 type AudioPlaybackEvent = {
   duration?: number;
@@ -263,12 +266,17 @@ const chatThemeTokens = {
   radius: ThemeTokens?.radius ?? {
     pill: 999,
   },
+  spacing: ThemeTokens?.spacing ?? {
+    sm: 8,
+    xl: 32,
+  },
 };
 
 const FONT_FAMILY =
   Platform.OS === 'ios'
     ? chatThemeTokens.typography.families.ios
     : chatThemeTokens.typography.families.android;
+const ROUTE_ESTIMATED_COLOR = chatThemeTokens.colors.light.riskMedium;
 
 type Guardian = {
   id: string;
@@ -289,42 +297,64 @@ type GuardianMapMarker = {
   updatedAtMs: number;
 };
 
-const normalizeGuardianLocation = (value: any): [number, number] | undefined => {
-  if (!value) return undefined;
+type ChatMapRegion = {
+  latitude: number;
+  longitude: number;
+  latitudeDelta: number;
+  longitudeDelta: number;
+};
+
+type ShapeSourceShape = React.ComponentProps<typeof MapLibreGL.ShapeSource>['shape'];
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const readRecord = (
+  source: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> | undefined => {
+  const value = source[key];
+  return isRecord(value) ? value : undefined;
+};
+
+const normalizeGuardianLocation = (value: unknown): [number, number] | undefined => {
+  if (!isRecord(value)) return undefined;
+  const location = readRecord(value, 'location');
   const lat = Number(
-    value?.latitude ??
-      value?.lat ??
-      value?.location?.latitude ??
-      value?.location?.lat,
+    value.latitude ??
+      value.lat ??
+      location?.latitude ??
+      location?.lat,
   );
   const lon = Number(
-    value?.longitude ??
-      value?.lon ??
-      value?.lng ??
-      value?.location?.longitude ??
-      value?.location?.lon ??
-      value?.location?.lng,
+    value.longitude ??
+      value.lon ??
+      value.lng ??
+      location?.longitude ??
+      location?.lon ??
+      location?.lng,
   );
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return undefined;
   return [lon, lat];
 };
 
-const normalizeGuardianRecord = (value: any): Guardian | null => {
+const normalizeGuardianRecord = (value: unknown): Guardian | null => {
+  if (!isRecord(value)) return null;
   const id = String(
-    value?.id ?? value?.recordID ?? value?.remoteId ?? value?.phone ?? '',
+    value.id ?? value.recordID ?? value.remoteId ?? value.phone ?? '',
   ).trim();
   if (!id) return null;
 
   const remoteId =
-    typeof value?.remoteId === 'string' && value.remoteId.trim().length > 0
+    typeof value.remoteId === 'string' && value.remoteId.trim().length > 0
       ? value.remoteId.trim()
       : undefined;
   const name =
     String(
-      value?.name ??
-        value?.displayName ??
-        value?.fromName ??
-        value?.title ??
+      value.name ??
+        value.displayName ??
+        value.fromName ??
+        value.title ??
         '',
     ).trim() ||
     i18n.t('guardian_label', {
@@ -335,21 +365,21 @@ const normalizeGuardianRecord = (value: any): Guardian | null => {
     id,
     name,
     phone:
-      typeof value?.phone === 'string'
+      typeof value.phone === 'string'
         ? value.phone
-        : typeof value?.phoneNumber === 'string'
+        : typeof value.phoneNumber === 'string'
           ? value.phoneNumber
           : undefined,
     remoteId,
     avatarUri:
-      typeof value?.avatarUri === 'string' && value.avatarUri.trim().length > 0
+      typeof value.avatarUri === 'string' && value.avatarUri.trim().length > 0
         ? value.avatarUri.trim()
         : undefined,
     lastLocation: normalizeGuardianLocation(value),
     lastUpdatedAt:
-      typeof value?.lastUpdatedAt === 'string'
+      typeof value.lastUpdatedAt === 'string'
         ? value.lastUpdatedAt
-        : typeof value?.updatedAt === 'string'
+        : typeof value.updatedAt === 'string'
           ? value.updatedAt
           : undefined,
   };
@@ -396,20 +426,29 @@ const extractSharedLocation = (
   };
 };
 
-const getCenterFromPayload = (payload: any): [number, number] | null => {
-  const coords = payload?.geometry?.coordinates;
+const readCoordinatePair = (value: unknown): [number, number] | null => {
+  if (!Array.isArray(value) || value.length < 2) return null;
+  const lon = Number(value[0]);
+  const lat = Number(value[1]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  return [lon, lat];
+};
+
+const getCenterFromPayload = (payload: unknown): [number, number] | null => {
+  if (!isRecord(payload)) return null;
+  const geometry = readRecord(payload, 'geometry');
+  const properties = readRecord(payload, 'properties');
+  const coords = geometry?.coordinates;
   if (Array.isArray(coords) && coords.length >= 2) {
-    return [coords[0], coords[1]];
+    return readCoordinatePair(coords);
   }
-  const center = payload?.properties?.center;
+  const center = properties?.center;
   if (Array.isArray(center) && center.length >= 2) {
-    return [center[0], center[1]];
+    return readCoordinatePair(center);
   }
-  if (
-    Array.isArray(payload?.centerCoordinate) &&
-    payload.centerCoordinate.length >= 2
-  ) {
-    return [payload.centerCoordinate[0], payload.centerCoordinate[1]];
+  const centerCoordinate = payload.centerCoordinate;
+  if (Array.isArray(centerCoordinate) && centerCoordinate.length >= 2) {
+    return readCoordinatePair(centerCoordinate);
   }
   return null;
 };
@@ -459,13 +498,13 @@ const LegacyChatMonitorScreen = ({
   navigation,
   params,
 }: {
-  navigation: any;
+  navigation: ChatMonitorNavigation;
   params: ChatParams;
 }) => {
   const systemColorScheme = useColorScheme();
   const isDark = systemColorScheme === 'dark';
   const colors = isDark ? chatThemeTokens.colors.dark : chatThemeTokens.colors.light;
-  const { t } = useTranslation();
+  const t = i18n.t.bind(i18n);
   const deepLinkTarget =
     params.lat !== undefined && params.lon !== undefined
       ? {
@@ -473,15 +512,15 @@ const LegacyChatMonitorScreen = ({
           longitude: Number(params.lon),
         }
       : undefined;
-  const guardiansConversationId =
-    params.conversationId || GUARDIANS_CONVERSATION_ID;
+  const guardiansConversationId = params.conversationId || GUARDIANS_CONVERSATION_ID;
   const isGuardiansMode =
     params.mode === 'GUARDIANS_GROUP' ||
-    isGuardiansConversation(guardiansConversationId);
+    String(params.conversationId || '').trim().toLowerCase() ===
+      GUARDIANS_CONVERSATION_ID;
   const resolvedSenderName =
     params.senderName ||
     (params.user ? decodeURIComponent(params.user) : undefined);
-  const [currentRegion, setCurrentRegion] = useState<any>(null);
+  const [currentRegion, setCurrentRegion] = useState<ChatMapRegion | null>(null);
   const [routeLine, setRouteLine] = useState<Array<[number, number]>>([]);
   const [routeMeta, setRouteMeta] = useState<RouteDetails | null>(null);
   const [input, setInput] = useState('');
@@ -669,7 +708,7 @@ const LegacyChatMonitorScreen = ({
     if (!hasSecurityLocation) return;
     const nextLat = Number(securityLat);
     const nextLon = Number(securityLon);
-    setCurrentRegion((prev: any) => {
+    setCurrentRegion(prev => {
       if (
         prev &&
         Math.abs(prev.latitude - nextLat) < 0.00001 &&
@@ -875,14 +914,61 @@ const LegacyChatMonitorScreen = ({
 
   const routeLabel = useMemo(() => {
     if (!routeMeta) return null;
+    if (routeMeta.routeMode === 'unavailable') {
+      return {
+        text: t('chat_route_unavailable_label'),
+        degraded: true,
+        icon: 'map-marker-off-outline',
+      };
+    }
     if (
       typeof routeMeta.distanceKm !== 'number' ||
       typeof routeMeta.durationMin !== 'number'
     ) {
       return null;
     }
-    return `${routeMeta.distanceKm} km - ${routeMeta.durationMin} min`;
-  }, [routeMeta]);
+    if (routeMeta.routeMode === 'estimated_straight_line') {
+      return {
+        text: t('chat_route_estimated_label', {
+          distance: routeMeta.distanceKm,
+          minutes: routeMeta.durationMin,
+          defaultValue: `~${routeMeta.distanceKm} km - ${routeMeta.durationMin} min`,
+        }),
+        degraded: true,
+        icon: 'alert-outline',
+      };
+    }
+    return {
+      text: `${routeMeta.distanceKm} km - ${routeMeta.durationMin} min`,
+      degraded: false,
+      icon: 'car',
+    };
+  }, [routeMeta, t]);
+  const routeLineStyle = useMemo(
+    () =>
+      routeMeta?.routeMode === 'estimated_straight_line'
+        ? {
+            lineColor: ROUTE_ESTIMATED_COLOR,
+            lineWidth: 3,
+            lineOpacity: 0.76,
+            lineDasharray: [2, 2],
+          }
+        : {
+            lineColor: colors.alert,
+            lineWidth: 4,
+            lineOpacity: 0.85,
+          },
+    [colors.alert, routeMeta?.routeMode],
+  );
+  const routeLineShape = useMemo<ShapeSourceShape>(
+    () =>
+      ({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: routeLine },
+        properties: {},
+      }) as unknown as ShapeSourceShape,
+    [routeLine],
+  );
 
   const guardiansSubtitle = useMemo(() => {
     if (!isGuardiansMode) return null;
@@ -968,17 +1054,19 @@ const LegacyChatMonitorScreen = ({
         activeUser.id,
         guardiansRoster,
       );
+      const regionForShare = currentRegion;
       const canAttachLocation =
-        Number.isFinite(Number(currentRegion?.latitude)) &&
-        Number.isFinite(Number(currentRegion?.longitude));
+        regionForShare !== null &&
+        Number.isFinite(Number(regionForShare.latitude)) &&
+        Number.isFinite(Number(regionForShare.longitude));
       const sharedMeta =
         shareLocation &&
         canAttachLocation
           ? {
               ...(payload.meta || {}),
               location: {
-                latitude: Number(currentRegion.latitude),
-                longitude: Number(currentRegion.longitude),
+                latitude: Number(regionForShare.latitude),
+                longitude: Number(regionForShare.longitude),
                 label:
                   typeof securityState.locationName === 'string' &&
                   securityState.locationName.trim().length > 0
@@ -1475,7 +1563,7 @@ const LegacyChatMonitorScreen = ({
     }
   };
 
-  const handleRegionDidChange = (payload: any) => {
+  const handleRegionDidChange = (payload: unknown) => {
     if (!currentRegion?.latitude || !currentRegion?.longitude) return;
     const center = getCenterFromPayload(payload);
     if (!center) return;
@@ -1652,28 +1740,6 @@ const LegacyChatMonitorScreen = ({
       }
       setMessages(prev => prev.filter(msg => msg.id !== item.id));
     };
-
-    if (Platform.OS === 'ios') {
-      const options = [
-        t('chat_action_copy'),
-        t('chat_action_share'),
-        t('chat_action_delete'),
-        t('chat_action_cancel'),
-      ];
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          options,
-          cancelButtonIndex: 3,
-          destructiveButtonIndex: 2,
-        },
-        buttonIndex => {
-          if (buttonIndex === 0) doCopy();
-          if (buttonIndex === 1) void doShare();
-          if (buttonIndex === 2) doDelete();
-        },
-      );
-      return;
-    }
 
     Alert.alert(t('chat_action_title'), undefined, [
       { text: t('chat_action_copy'), onPress: doCopy },
@@ -1877,23 +1943,14 @@ const LegacyChatMonitorScreen = ({
               </MapLibreGL.PointAnnotation>
             ))}
 
-            {routeLine.length > 1 && (
+            {routeLine.length > 1 && routeMeta?.routeMode !== 'unavailable' && (
               <MapLibreGL.ShapeSource
                 id="route"
-                shape={
-                  {
-                    type: 'Feature',
-                    geometry: { type: 'LineString', coordinates: routeLine },
-                  } as any
-                }
+                shape={routeLineShape}
               >
                 <MapLibreGL.LineLayer
                   id="routeLine"
-                  style={{
-                    lineColor: colors.alert,
-                    lineWidth: 4,
-                    lineOpacity: 0.85,
-                  }}
+                  style={routeLineStyle}
                 />
               </MapLibreGL.ShapeSource>
             )}
@@ -1931,9 +1988,31 @@ const LegacyChatMonitorScreen = ({
         />
 
         {routeLabel && (
-          <View style={styles.routeSummary}>
-            <Icon name="car" size={14} color="#FFF" />
-            <Text style={styles.routeText}>{routeLabel}</Text>
+          <View
+            style={[
+              styles.routeSummary,
+              routeLabel.degraded && {
+                backgroundColor: 'rgba(255, 204, 0, 0.18)',
+                borderColor: ROUTE_ESTIMATED_COLOR,
+              },
+            ]}
+            accessible
+            accessibilityRole="text"
+            accessibilityLabel={routeLabel.text}
+          >
+            <Icon
+              name={routeLabel.icon}
+              size={14}
+              color={routeLabel.degraded ? ROUTE_ESTIMATED_COLOR : '#FFF'}
+            />
+            <Text
+              style={[
+                styles.routeText,
+                routeLabel.degraded && { color: ROUTE_ESTIMATED_COLOR },
+              ]}
+            >
+              {routeLabel.text}
+            </Text>
           </View>
         )}
 
@@ -2519,20 +2598,18 @@ const LegacyChatMonitorScreen = ({
         </View>
       </KeyboardAvoidingView>
 
-      <Modal
+      <BasePopup
+        accessibilityLabel={t('chat_menu_title')}
+        contentStyle={[
+          styles.menuCard,
+          { backgroundColor: colors.card, borderColor: colors.border },
+        ]}
+        maxWidth={560}
+        onClose={closeMenu}
+        placement="bottom"
+        showHandle
         visible={menuVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={closeMenu}
       >
-        <Pressable style={styles.menuOverlay} onPress={closeMenu}>
-          <Pressable
-            style={[
-              styles.menuCard,
-              { backgroundColor: colors.card, borderColor: colors.border },
-            ]}
-            onPress={() => {}}
-          >
             <Text style={[styles.menuTitle, { color: colors.text }]}>
               {t('chat_menu_title')}
             </Text>
@@ -2662,20 +2739,18 @@ const LegacyChatMonitorScreen = ({
                 {t('chat_menu_delete')}
               </Text>
             </TouchableOpacity>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      </BasePopup>
     </View>
   );
 };
 
-export const ChatMonitorScreen = ({ navigation, route }: any) => {
+export const ChatMonitorScreen = ({ navigation, route }: ChatMonitorScreenProps) => {
   const params = (route?.params || {}) as ChatParams;
-  const guardiansConversationId =
-    params.conversationId || GUARDIANS_CONVERSATION_ID;
+  const guardiansConversationId = params.conversationId;
   const isGuardiansMode =
     params.mode === 'GUARDIANS_GROUP' ||
-    isGuardiansConversation(guardiansConversationId);
+    String(guardiansConversationId || '').trim().toLowerCase() ===
+      GUARDIANS_CONVERSATION_ID;
 
   if (isGuardiansMode) {
     return (
@@ -2685,6 +2760,8 @@ export const ChatMonitorScreen = ({ navigation, route }: any) => {
 
   return <LegacyChatMonitorScreen navigation={navigation} params={params} />;
 };
+
+export default ChatMonitorScreen;
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
@@ -2797,6 +2874,8 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 10,
     borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'transparent',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
@@ -3157,15 +3236,14 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderWidth: 1,
   },
-  menuOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
   menuCard: {
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 18,
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    borderBottomLeftRadius: 22,
+    borderBottomRightRadius: 22,
+    paddingHorizontal: chatThemeTokens.spacing.xl,
+    paddingTop: chatThemeTokens.spacing.sm,
+    paddingBottom: chatThemeTokens.spacing.xl,
     borderWidth: 1,
   },
   menuTitle: {

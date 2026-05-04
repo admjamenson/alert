@@ -887,12 +887,7 @@ const CheckoutScreen: React.FC<{ navigation: CheckoutNavigationProp }> = ({
         >
           <View style={styles.heroTopRow}>
             <View style={styles.heroIdentity}>
-              <View
-                style={[
-                  styles.logoWrap,
-                  { backgroundColor: colors.background },
-                ]}
-              >
+              <View style={styles.logoWrap}>
                 <Image
                   source={AlertLogo}
                   style={styles.logoImage}
@@ -1453,10 +1448,14 @@ const styles = StyleSheet.create({
     borderRadius: ThemeTokens.radius.lg,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'transparent',
+    overflow: 'hidden',
   },
   logoImage: {
     width: 38,
     height: 38,
+    backgroundColor: 'transparent',
+    overflow: 'hidden',
   },
   heroTextWrap: {
     flex: 1,

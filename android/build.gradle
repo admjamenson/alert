@@ -4,7 +4,7 @@ buildscript {
         minSdkVersion = 24
         compileSdkVersion = 36
         targetSdkVersion = 36
-        ndkVersion = "26.1.10909125"
+        ndkVersion = "27.1.12297006"
         kotlinVersion = "2.0.21"
     }
     repositories {
@@ -15,11 +15,70 @@ buildscript {
         classpath("com.android.tools.build:gradle:8.9.1")
         classpath("com.facebook.react:react-native-gradle-plugin")
         classpath("com.google.gms:google-services:4.4.2")
+        classpath("com.google.firebase:firebase-crashlytics-gradle:3.0.3")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion")
     }
 }
 
 apply plugin: "com.facebook.react.rootproject"
+
+def findAlertNmakePath = {
+    def configuredPath = rootProject.findProperty("alertCmakeMakeProgram")
+    if (configuredPath) {
+        return configuredPath.toString()
+    }
+
+    def wrapper = new File(rootDir.parentFile, "tools/nmake_wrapper.cmd")
+    if (wrapper.exists()) {
+        return wrapper.absolutePath
+    }
+
+    def programFilesX86 = System.getenv("ProgramFiles(x86)") ?: "C:/Program Files (x86)"
+    def msvcRoot = new File(programFilesX86, "Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC")
+    def versions = msvcRoot.exists() ? msvcRoot.listFiles()?.findAll { it.directory }?.sort { a, b -> b.name <=> a.name } : []
+    def nmake = versions?.collect { new File(it, "bin/Hostx86/x64/nmake.exe") }?.find { it.exists() }
+
+    return (nmake ?: new File("nmake.exe")).absolutePath
+}
+
+def findAlertUnixMakePath = {
+    def configuredPath = rootProject.findProperty("alertCmakeMakeProgram")
+    if (configuredPath) {
+        return configuredPath.toString()
+    }
+
+    return "${rootDir.parentFile.absolutePath.replace('\\', '/')}/android/ndk/${rootProject.ext.ndkVersion}/prebuilt/windows-x86_64/bin/make.exe"
+}
+
+def configureAlertCmakeArguments = { cmake ->
+    def generator = (rootProject.findProperty("alertCmakeGenerator") ?: "NMake Makefiles").toString()
+    def makeProgram = generator == "NMake Makefiles"
+        ? findAlertNmakePath()
+        : generator == "Unix Makefiles"
+            ? findAlertUnixMakePath()
+            : "${rootDir.parentFile.absolutePath.replace('\\', '/')}/android-sdk/cmake/3.22.1/bin/ninja.exe"
+    cmake.arguments.removeAll {
+        it == "-GNMake Makefiles" || it == "-GNinja" || it.startsWith("-DCMAKE_MAKE_PROGRAM=")
+    }
+    if (!cmake.arguments.contains("-G${generator}")) {
+        cmake.arguments "-G${generator}"
+    }
+    if (!cmake.arguments.contains("-DCMAKE_MAKE_PROGRAM=${makeProgram}")) {
+        cmake.arguments "-DCMAKE_MAKE_PROGRAM=${makeProgram}"
+    }
+}
+
+def findAlertExternalNativeCmake = { androidExtension ->
+    return androidExtension?.defaultConfig?.externalNativeBuild?.cmake
+}
+
+def configureAlertNativeCmake = { subproject ->
+    def androidExtension = subproject.extensions.findByName("android")
+    def cmake = findAlertExternalNativeCmake(androidExtension)
+    if (cmake != null) {
+        configureAlertCmakeArguments(cmake)
+    }
+}
 
 subprojects {
     tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
@@ -30,6 +89,25 @@ subprojects {
     plugins.withType(com.android.build.gradle.BasePlugin).configureEach {
         android {
             buildToolsVersion rootProject.ext.buildToolsVersion
+        }
+    }
+
+    plugins.withId("com.android.library") {
+        if (extensions.findByName("androidComponents") != null && findAlertExternalNativeCmake(extensions.findByName("android")) != null) {
+            androidComponents.finalizeDsl { androidExtension ->
+                def cmake = findAlertExternalNativeCmake(androidExtension)
+                if (cmake != null) {
+                    configureAlertCmakeArguments(cmake)
+                }
+            }
+        }
+    }
+
+    if (state.executed) {
+        configureAlertNativeCmake(project)
+    } else {
+        afterEvaluate { subproject ->
+            configureAlertNativeCmake(subproject)
         }
     }
 }

@@ -124,12 +124,12 @@ test('localhost billing host remains allowed for local development', () => {
 
 test('render billing host remains allowed for current deploy origin', () => {
   const env = baseEnv();
-  env.APP_URL = 'https://alert-vmpj.onrender.com';
-  assert.equal(normalizeAppUrl(env), 'https://alert-vmpj.onrender.com');
+  env.APP_URL = 'https://preview-alert.onrender.com';
+  assert.equal(normalizeAppUrl(env), 'https://preview-alert.onrender.com');
 });
 
 test('render billing host requires https', () => {
   const env = baseEnv();
-  env.APP_URL = 'http://alert-vmpj.onrender.com';
+  env.APP_URL = 'http://preview-alert.onrender.com';
   assert.throws(() => resolveBillingRuntimeConfig({}, env), /invalid_env_app_url/);
 });

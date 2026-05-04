@@ -148,11 +148,11 @@ const buildCompactCommuteMetric = (minutes: number) => {
 };
 
 const getLabelForConfidence = (confidence: WidgetConfidence) =>
-  i18n.t(`widget_confidence_${confidence}`, {
+  i18n.t(`widget_confidence_${confidence.toLowerCase()}`, {
     defaultValue:
-      confidence === 'high'
+      confidence === 'HIGH'
         ? 'High'
-        : confidence === 'medium'
+        : confidence === 'MEDIUM'
           ? 'Medium'
           : 'Low',
   });
@@ -315,9 +315,9 @@ const getCurrentLocation = async () => {
 };
 
 const pickConfidenceFromEventCount = (count: number): WidgetConfidence => {
-  if (count >= 4) return 'high';
-  if (count >= 1) return 'medium';
-  return 'low';
+  if (count >= 4) return 'HIGH';
+  if (count >= 1) return 'MEDIUM';
+  return 'LOW';
 };
 
 const pickTierFromLevel = (level: number): WidgetMeterTier => {
@@ -327,9 +327,9 @@ const pickTierFromLevel = (level: number): WidgetMeterTier => {
 };
 
 const confidenceFromOperational = (confidence: number): WidgetConfidence => {
-  if (confidence >= 0.8) return 'high';
-  if (confidence >= 0.58) return 'medium';
-  return 'low';
+  if (confidence >= 0.8) return 'HIGH';
+  if (confidence >= 0.58) return 'MEDIUM';
+  return 'LOW';
 };
 
 const trustBadgeLabel = (snapshot: OperationalSnapshot): string => {
@@ -726,7 +726,7 @@ const buildFallbackSnapshot = (
   },
 ): WidgetSnapshot => {
   const updatedAt = new Date().toISOString();
-  const confidence: WidgetConfidence = 'low';
+  const confidence: WidgetConfidence = 'LOW';
   const level = 32;
   return {
     preset,
@@ -988,7 +988,7 @@ export class WidgetDataComposer implements IWidgetDataSourcesAdapter {
           defaultValue: `Sources: ${sourceCount}`,
         }),
       ],
-      sourceKind: confidence === 'high' ? 'OFFICIAL' : 'VERIFIED',
+      sourceKind: confidence === 'HIGH' ? 'OFFICIAL' : 'VERIFIED',
       sourceName: i18n.t('widget_source_mixed', { defaultValue: 'Official + verified' }),
       readModelState: 'stale',
       statusBadge: overrideBadge,
@@ -1044,19 +1044,29 @@ export class WidgetDataComposer implements IWidgetDataSourcesAdapter {
     ]);
 
     const updatedAt = new Date().toISOString();
-    const baseMin = Math.max(1, Number(route?.durationMin || 0) || 0);
-    const routeCorridorSignals = await buildRouteCorridorSignals(route?.line || []).catch(() => null);
+    const hasVerifiedRoute =
+      route?.routeMode === 'provider' &&
+      route.precision === 'high' &&
+      !route.degraded &&
+      route.providerAvailable &&
+      Array.isArray(route.line) &&
+      route.line.length > 1;
+    const isEstimatedRoute = route?.routeMode === 'estimated_straight_line';
+    const baseMin =
+      typeof route?.durationMin === 'number' && Number.isFinite(route.durationMin)
+        ? Math.max(1, Number(route.durationMin))
+        : 0;
+    const routeCorridorSignals = hasVerifiedRoute
+      ? await buildRouteCorridorSignals(route.line).catch(() => null)
+      : null;
     const fallbackActiveCount = monitoring?.activeIds?.size || 0;
     const corridorLevel =
       routeCorridorSignals?.level || ensureLevel(28 + fallbackActiveCount * 10);
-    const corridorEventCount = routeCorridorSignals?.eventCount || fallbackActiveCount;
-    const routeRiskLevel =
-      corridorLevel >= 70 ? 'high' : corridorLevel >= 42 ? 'medium' : 'low';
-    const confidence: WidgetConfidence = baseMin > 0 ? 'high' : 'medium';
+    const confidence: WidgetConfidence = hasVerifiedRoute ? 'HIGH' : isEstimatedRoute ? 'LOW' : 'LOW';
     const destinationLabel = destination.label || i18n.t('widget_destination_default', { defaultValue: 'Work' });
     const statusBadge = buildStatusBadge({
       level: corridorLevel,
-      readModelState: 'fresh',
+      readModelState: hasVerifiedRoute ? 'fresh' : 'stale',
     });
     const overrideBadge = buildOverrideBadge({
       base: statusBadge,
@@ -1074,15 +1084,32 @@ export class WidgetDataComposer implements IWidgetDataSourcesAdapter {
         defaultValue: destinationLabel,
       }),
       metric:
-        baseMin > 0
+        hasVerifiedRoute && baseMin > 0
           ? buildCompactCommuteMetric(baseMin)
+          : isEstimatedRoute && baseMin > 0
+            ? i18n.t('widget_route_chip_estimated', {
+                value: buildCompactCommuteMetric(baseMin),
+                defaultValue: `~${buildCompactCommuteMetric(baseMin)}`,
+              })
           : '--',
       confidence,
       updatedAt,
       deeplink: 'alertapp://route-settings',
-      chips: [getLabelForConfidence(confidence), buildUpdatedLabel(updatedAt)],
-      sourceKind: 'VERIFIED',
-      sourceName: i18n.t('widget_source_routes', { defaultValue: 'Route model' }),
+      chips: [
+        isEstimatedRoute
+          ? i18n.t('widget_route_chip_estimated', {
+              value: getLabelForConfidence(confidence),
+              defaultValue: `~${getLabelForConfidence(confidence)}`,
+            })
+          : getLabelForConfidence(confidence),
+        buildUpdatedLabel(updatedAt),
+      ],
+      sourceKind: hasVerifiedRoute ? 'VERIFIED' : 'REFERENCE',
+      sourceName: hasVerifiedRoute
+        ? i18n.t('widget_source_routes', { defaultValue: 'Route model' })
+        : i18n.t('widget_source_routes_estimated', {
+            defaultValue: 'Estimated route reference',
+          }),
       statusBadge: overrideBadge,
       visual: {
         level: corridorLevel,
@@ -1185,7 +1212,7 @@ export class WidgetDataComposer implements IWidgetDataSourcesAdapter {
       ],
       sourceKind: operationalSignals
         ? operationalSignals.sourceKind
-        : confidence === 'high'
+        : confidence === 'HIGH'
           ? 'OFFICIAL'
           : 'VERIFIED',
       sourceName: operationalSignals
@@ -1241,7 +1268,7 @@ export class WidgetDataComposer implements IWidgetDataSourcesAdapter {
     const confidence: WidgetConfidence =
       operationalSignals?.confidence ||
       riskReference?.confidence ||
-      (notifications.length > 0 ? 'medium' : riskReports.length > 0 ? 'medium' : 'low');
+      (notifications.length > 0 ? 'MEDIUM' : riskReports.length > 0 ? 'MEDIUM' : 'LOW');
     const level =
       operationalSignals?.level ??
       referenceLevel ??

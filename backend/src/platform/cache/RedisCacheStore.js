@@ -10,7 +10,10 @@ const loadRedis = () => {
 
 const createRedisCacheStore = ({
   name = 'redis',
-  url = process.env.ALERT_REDIS_URL,
+  url = process.env.ALERT_CACHE_REDIS_URL || process.env.ALERT_REDIS_URL,
+  urlSource = process.env.ALERT_CACHE_REDIS_URL
+    ? 'ALERT_CACHE_REDIS_URL'
+    : 'ALERT_REDIS_URL',
   prefix = process.env.ALERT_CACHE_KEY_PREFIX || 'alert',
   client,
   createClient,
@@ -99,6 +102,7 @@ const createRedisCacheStore = ({
     ...metrics,
     external: true,
     prefix,
+    urlSource,
     connected: Boolean(redisClient.isOpen || redisClient.connected),
   });
 

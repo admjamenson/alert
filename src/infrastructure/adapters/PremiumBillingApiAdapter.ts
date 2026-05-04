@@ -7,6 +7,7 @@ import {
   PremiumPaymentConfirmation,
 } from '../../domain/billing/PremiumBillingConfig';
 import { UserIdentityService } from '../../services/UserIdentityService';
+import { toUrlEncodedString } from '../../utils/urlEncoding';
 
 const CANONICAL_BILLING_API_ORIGIN = getAlertApiBaseUrl();
 const LEGACY_BILLING_API_HOSTS = new Set(['api.alertpremium.com']);
@@ -443,18 +444,7 @@ const buildBillingRequestPayload = async (
 };
 
 const buildFormEncodedBody = (payload: Record<string, unknown>) => {
-  const form = new URLSearchParams();
-  for (const [key, value] of Object.entries(payload)) {
-    if (typeof value === 'undefined' || value === null) {
-      continue;
-    }
-    const normalized = String(value).trim();
-    if (!normalized) {
-      continue;
-    }
-    form.append(key, normalized);
-  }
-  return form.toString();
+  return toUrlEncodedString(payload);
 };
 
 const postBillingEndpoint = async (
@@ -787,17 +777,11 @@ export const getCheckoutFallbackUrl = async (): Promise<string | null> => {
   let url = `${baseUrl.replace(/\/+$/, '')}${path}`;
   try {
     const context = await getLocaleContext();
-    const params = new URLSearchParams();
-    if (context.userId) {
-      params.set('user_id', context.userId);
-    }
-    if (context.locale) {
-      params.set('user_locale', context.locale);
-    }
-    if (context.countryCode) {
-      params.set('country_code', context.countryCode);
-    }
-    const query = params.toString();
+    const query = toUrlEncodedString({
+      user_id: context.userId || undefined,
+      user_locale: context.locale || undefined,
+      country_code: context.countryCode || undefined,
+    });
     if (query) {
       url += `?${query}`;
     }
@@ -819,17 +803,11 @@ export const getPortalFallbackUrl = async (): Promise<string | null> => {
   let url = `${baseUrl.replace(/\/+$/, '')}${path}`;
   try {
     const context = await getLocaleContext();
-    const params = new URLSearchParams();
-    if (context.userId) {
-      params.set('user_id', context.userId);
-    }
-    if (context.locale) {
-      params.set('user_locale', context.locale);
-    }
-    if (context.countryCode) {
-      params.set('country_code', context.countryCode);
-    }
-    const query = params.toString();
+    const query = toUrlEncodedString({
+      user_id: context.userId || undefined,
+      user_locale: context.locale || undefined,
+      country_code: context.countryCode || undefined,
+    });
     if (query) {
       url += `?${query}`;
     }

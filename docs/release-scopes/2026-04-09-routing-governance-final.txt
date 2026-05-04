@@ -1,0 +1,12 @@
+# Files intentionally touched in the 2026-04-09 routing/governance final hardening round
+backend/src/services/RouteOptionsService.test.js
+docs/release-scopes/2026-04-09-routing-governance-final.txt
+package.json
+scripts/review-scope.ps1
+src/i18n/index.ts
+src/screens/home/ChatMonitorScreen.tsx
+src/screens/home/RouteSettingsScreen.tsx
+src/services/RouteService.ts
+src/services/maps/OfflineCacheService.ts
+src/services/maps/RoutingService.ts
+src/widgets/infra/WidgetDataComposer.ts

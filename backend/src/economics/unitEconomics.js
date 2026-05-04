@@ -7,11 +7,91 @@ const numberOr = (value, fallback) => {
 };
 
 const clampRatio = value => Math.max(0, Math.min(1, numberOr(value, 0)));
+const nonNegative = value => Math.max(0, numberOr(value, 0));
+
+const firstFinite = (...values) => {
+  for (const value of values) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+};
 
 const ratioCapForTier = tier =>
   tier === 'premium'
     ? DEFAULT_PREMIUM_COST_RATIO_CAP
     : DEFAULT_FREEMIUM_COST_RATIO_CAP;
+
+const evaluatePerUserCostPolicy = ({
+  tier = 'free',
+  revenueAmount = null,
+  totalCostAmount = null,
+  targetCostCapPercent,
+} = {}) => {
+  const normalizedTier = tier === 'premium' ? 'premium' : 'free';
+  const revenue = Number(revenueAmount);
+  const totalCost = Number(totalCostAmount);
+  const capRatio = Number.isFinite(Number(targetCostCapPercent))
+    ? clampRatio(targetCostCapPercent)
+    : ratioCapForTier(normalizedTier);
+
+  if (!Number.isFinite(revenue) || revenue <= 0) {
+    return {
+      tier: normalizedTier,
+      targetCostCapPercent: capRatio,
+      actualCostRatio: null,
+      maxCostAmount: null,
+      remainingBudgetAmount: null,
+      overBudgetAmount: null,
+      withinGuardrail: false,
+      decision: 'insufficient_data',
+      requiresCheaperPath: false,
+      blockOrDegrade: false,
+    };
+  }
+
+  if (!Number.isFinite(totalCost) || totalCost < 0) {
+    return {
+      tier: normalizedTier,
+      targetCostCapPercent: capRatio,
+      actualCostRatio: null,
+      maxCostAmount: revenue * capRatio,
+      remainingBudgetAmount: null,
+      overBudgetAmount: null,
+      withinGuardrail: false,
+      decision: 'insufficient_data',
+      requiresCheaperPath: false,
+      blockOrDegrade: false,
+    };
+  }
+
+  const actualCostRatio = totalCost / revenue;
+  const maxCostAmount = revenue * capRatio;
+  const remainingBudgetAmount = maxCostAmount - totalCost;
+  const overBudgetAmount = Math.max(0, -remainingBudgetAmount);
+  const withinGuardrail = totalCost <= maxCostAmount;
+  const requiresCheaperPath =
+    !withinGuardrail &&
+    (maxCostAmount <= 0 || actualCostRatio >= capRatio * 3);
+  const blockOrDegrade = !withinGuardrail && !requiresCheaperPath;
+
+  return {
+    tier: normalizedTier,
+    targetCostCapPercent: capRatio,
+    actualCostRatio,
+    maxCostAmount,
+    remainingBudgetAmount,
+    overBudgetAmount,
+    withinGuardrail,
+    decision: withinGuardrail
+      ? 'allow'
+      : requiresCheaperPath
+        ? 'requires_cheaper_path'
+        : 'block_or_degrade',
+    requiresCheaperPath,
+    blockOrDegrade,
+  };
+};
 
 const evaluateUnitEconomics = ({
   tier = 'free',
@@ -38,18 +118,27 @@ const evaluateUnitEconomics = ({
 };
 
 const estimateMonthlyVariableCost = ({
+  costAllocationUsers = 1,
+  queueRedisMonthlyUsd = 0,
+  cacheRedisMonthlyUsd = 0,
+  workerComputeMonthlyUsd = 0,
   feedRefreshesPerDay = 0,
   providerMissRate = 0.08,
   feedServingCostUsd = 0.000002,
   providerMissCostUsd = 0.0012,
   weatherRefreshesPerDay = 0,
   weatherProviderMissRate = providerMissRate,
+  weatherMissCostUsd,
   weatherProviderMissCostUsd = 0.0009,
   mapSessionsPerMonth = 0,
   mapSessionCostUsd = 0.00003,
+  routingRequestsPerMonth = 0,
+  routeRequestsPerMonth,
+  routingCostUsd = 0.00004,
   sosPerMonth = 0,
   sosRelayCostUsd = 0.0002,
   pushPerMonth = 0,
+  pushFanoutCostUsd,
   pushCostUsd = 0.00001,
   queueJobsPerMonth = 0,
   queueJobCostUsd = 0.000002,
@@ -58,96 +147,178 @@ const estimateMonthlyVariableCost = ({
   telemetryEventsPerMonth = 50,
   telemetryCostUsd = 0.000001,
   storageMbMonth = 0,
+  storageGbMonth,
+  storageCostUsd,
   storageGbMonthCostUsd = 0.026,
   backendRequestsPerMonth = 0,
+  webRequestsPerMonth,
+  webServingCostUsd,
   backendRequestCostUsd = 0.000004,
+  backgroundWorkerExecutionsPerMonth,
+  backgroundWorkerExecutionCostUsd = 0.000003,
   paymentTransactionsPerMonth = 0,
   paymentGrossRevenueUsd = 0,
   paymentProcessorPercent = 0.029,
+  paymentProcessorFixedFeeUsd,
   paymentProcessorFixedUsd = 0.3,
   appStoreFeePercent = 0.15,
+  playStoreFeePercent = 0.15,
+  storeFeePercent,
 }) => {
+  const allocationUsers = Math.max(1, nonNegative(costAllocationUsers));
+  const queueRedis = nonNegative(queueRedisMonthlyUsd) / allocationUsers;
+  const cacheRedis = nonNegative(cacheRedisMonthlyUsd) / allocationUsers;
+  const workerCompute = nonNegative(workerComputeMonthlyUsd) / allocationUsers;
   const monthlyFeedRefreshes = Math.max(0, numberOr(feedRefreshesPerDay, 0)) * 30;
   const monthlyWeatherRefreshes =
     Math.max(0, numberOr(weatherRefreshesPerDay, 0)) * 30;
-  const feedServing = monthlyFeedRefreshes * Math.max(0, feedServingCostUsd);
+  const weatherMissUnitCost = nonNegative(
+    firstFinite(weatherMissCostUsd, weatherProviderMissCostUsd, 0.0009),
+  );
+  const pushFanoutUnitCost = nonNegative(
+    firstFinite(pushFanoutCostUsd, pushCostUsd, 0.00001),
+  );
+  const storageUnitCost = nonNegative(
+    firstFinite(storageCostUsd, storageGbMonthCostUsd, 0.026),
+  );
+  const webServingUnitCost = nonNegative(
+    firstFinite(webServingCostUsd, backendRequestCostUsd, 0.000004),
+  );
+  const paymentFixedFee = nonNegative(
+    firstFinite(paymentProcessorFixedFeeUsd, paymentProcessorFixedUsd, 0.3),
+  );
+  const effectiveStoreFeePercent = clampRatio(
+    firstFinite(storeFeePercent, Math.max(nonNegative(appStoreFeePercent), nonNegative(playStoreFeePercent))),
+  );
+  const monthlyRoutingRequests = nonNegative(
+    firstFinite(routingRequestsPerMonth, routeRequestsPerMonth, 0),
+  );
+  const monthlyStorageGb = nonNegative(
+    firstFinite(storageGbMonth, storageMbMonth / 1024, 0),
+  );
+  const monthlyWebRequests = nonNegative(
+    firstFinite(webRequestsPerMonth, backendRequestsPerMonth, 0),
+  );
+  const workerExecutions = nonNegative(
+    firstFinite(backgroundWorkerExecutionsPerMonth, queueJobsPerMonth, 0),
+  );
+  const feedServing = monthlyFeedRefreshes * nonNegative(feedServingCostUsd);
   const providerMisses =
     monthlyFeedRefreshes *
     clampRatio(providerMissRate) *
-    Math.max(0, providerMissCostUsd);
+    nonNegative(providerMissCostUsd);
   const weatherProviderMisses =
     monthlyWeatherRefreshes *
     clampRatio(weatherProviderMissRate) *
-    Math.max(0, weatherProviderMissCostUsd);
-  const maps = Math.max(0, numberOr(mapSessionsPerMonth, 0)) * Math.max(0, mapSessionCostUsd);
-  const sosRelay = Math.max(0, numberOr(sosPerMonth, 0)) * Math.max(0, sosRelayCostUsd);
-  const push = Math.max(0, numberOr(pushPerMonth, 0)) * Math.max(0, pushCostUsd);
+    weatherMissUnitCost;
+  const maps = nonNegative(mapSessionsPerMonth) * nonNegative(mapSessionCostUsd);
+  const routing = monthlyRoutingRequests * nonNegative(routingCostUsd);
+  const sosRelay = nonNegative(sosPerMonth) * nonNegative(sosRelayCostUsd);
+  const pushFanout = nonNegative(pushPerMonth) * pushFanoutUnitCost;
   const queueJobs =
-    Math.max(0, numberOr(queueJobsPerMonth, 0)) * Math.max(0, queueJobCostUsd);
+    nonNegative(queueJobsPerMonth) * nonNegative(queueJobCostUsd);
   const cache =
-    Math.max(0, numberOr(cacheOperationsPerMonth, 0)) *
-    Math.max(0, cacheOperationCostUsd);
+    nonNegative(cacheOperationsPerMonth) *
+    nonNegative(cacheOperationCostUsd);
   const telemetry =
-    Math.max(0, numberOr(telemetryEventsPerMonth, 0)) * Math.max(0, telemetryCostUsd);
-  const storage =
-    (Math.max(0, numberOr(storageMbMonth, 0)) / 1024) *
-    Math.max(0, storageGbMonthCostUsd);
-  const backendServing =
-    Math.max(0, numberOr(backendRequestsPerMonth, 0)) *
-    Math.max(0, backendRequestCostUsd);
+    nonNegative(telemetryEventsPerMonth) * nonNegative(telemetryCostUsd);
+  const storage = monthlyStorageGb * storageUnitCost;
+  const webServing = monthlyWebRequests * webServingUnitCost;
+  const backgroundWorkerExecution =
+    workerExecutions * nonNegative(backgroundWorkerExecutionCostUsd);
   const paymentFees =
-    Math.max(0, numberOr(paymentGrossRevenueUsd, 0)) *
-      (clampRatio(paymentProcessorPercent) + clampRatio(appStoreFeePercent)) +
-    Math.max(0, numberOr(paymentTransactionsPerMonth, 0)) *
-      Math.max(0, paymentProcessorFixedUsd);
+    nonNegative(paymentGrossRevenueUsd) *
+      (clampRatio(paymentProcessorPercent) + effectiveStoreFeePercent) +
+    nonNegative(paymentTransactionsPerMonth) * paymentFixedFee;
 
   return {
     totalUsd:
+      queueRedis +
+      cacheRedis +
+      workerCompute +
       feedServing +
       providerMisses +
       weatherProviderMisses +
       maps +
+      routing +
       sosRelay +
-      push +
+      pushFanout +
       queueJobs +
       cache +
       telemetry +
       storage +
-      backendServing +
+      webServing +
+      backgroundWorkerExecution +
       paymentFees,
     components: {
+      queueRedis,
+      cacheRedis,
+      workerCompute,
       feedServing,
       providerMisses,
       weatherProviderMisses,
       maps,
+      routing,
       sosRelay,
-      push,
+      pushFanout,
       queueJobs,
       cache,
       telemetry,
       storage,
-      backendServing,
+      webServing,
+      backgroundWorkerExecution,
       paymentFees,
     },
     assumptions: {
+      costAllocationUsers: allocationUsers,
+      queueRedisMonthlyUsd,
+      cacheRedisMonthlyUsd,
+      workerComputeMonthlyUsd,
       providerMissRate,
       feedServingCostUsd,
       providerMissCostUsd,
       weatherProviderMissRate,
-      weatherProviderMissCostUsd,
+      weatherMissCostUsd: weatherMissUnitCost,
       mapSessionCostUsd,
+      routingCostUsd,
       sosRelayCostUsd,
-      pushCostUsd,
+      pushFanoutCostUsd: pushFanoutUnitCost,
       queueJobCostUsd,
       cacheOperationCostUsd,
       telemetryCostUsd,
-      storageGbMonthCostUsd,
-      backendRequestCostUsd,
+      storageCostUsd: storageUnitCost,
+      webServingCostUsd: webServingUnitCost,
+      backgroundWorkerExecutionCostUsd,
       paymentProcessorPercent,
-      paymentProcessorFixedUsd,
+      paymentProcessorFixedFeeUsd: paymentFixedFee,
       appStoreFeePercent,
+      playStoreFeePercent,
+      effectiveStoreFeePercent,
     },
   };
+};
+
+const allocateMonthlyCostPerUnit = ({
+  totalMonthlyUsd = null,
+  units = 0,
+} = {}) => {
+  const total = Number(totalMonthlyUsd);
+  const normalizedUnits = Math.max(0, Number(units));
+
+  if (!Number.isFinite(total) || total < 0) return null;
+  if (!Number.isFinite(normalizedUnits) || normalizedUnits <= 0) return null;
+
+  return total / normalizedUnits;
+};
+
+const allocateMonthlyInfrastructureCostPerUser = ({
+  totalMonthlyInfrastructureUsd = null,
+  activeUsers = 0,
+} = {}) => {
+  return allocateMonthlyCostPerUnit({
+    totalMonthlyUsd: totalMonthlyInfrastructureUsd,
+    units: activeUsers,
+  });
 };
 
 const assertWithinUnitEconomics = params => {
@@ -182,6 +353,17 @@ const recommendedActionsFor = largestComponentName => {
       ...common,
     ];
   }
+  if (largestComponentName === 'routing') {
+    return ['cache_harder', 'materialize', 'cheaper_provider', 'reduce_frequency', ...common];
+  }
+  if (
+    largestComponentName === 'queueJobs' ||
+    largestComponentName === 'queueRedis' ||
+    largestComponentName === 'workerCompute' ||
+    largestComponentName === 'backgroundWorkerExecution'
+  ) {
+    return ['queue_only_for_critical_path', 'reduce_noncritical_jobs', 'batch_jobs', ...common];
+  }
   if (largestComponentName === 'paymentFees') {
     return [
       'verify_net_revenue_inputs',
@@ -189,7 +371,7 @@ const recommendedActionsFor = largestComponentName => {
       ...common,
     ];
   }
-  if (largestComponentName === 'backendServing' || largestComponentName === 'cache') {
+  if (largestComponentName === 'webServing' || largestComponentName === 'cache' || largestComponentName === 'cacheRedis') {
     return ['materialize_hot_path', 'edge_cache', 'reduce_frequency', ...common];
   }
   return ['degrade_noncritical_path', 'reduce_frequency', ...common];
@@ -241,7 +423,10 @@ const evaluateFlowBudget = ({
 };
 
 module.exports = {
+  allocateMonthlyCostPerUnit,
+  allocateMonthlyInfrastructureCostPerUser,
   assertWithinUnitEconomics,
+  evaluatePerUserCostPolicy,
   evaluateUnitEconomics,
   evaluateFlowBudget,
   estimateMonthlyVariableCost,

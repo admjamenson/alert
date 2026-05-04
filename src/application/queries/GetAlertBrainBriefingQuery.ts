@@ -45,9 +45,11 @@ const getRecommendedCategory = (signals: AlertSignal[]): string | undefined => {
   const sorted = [...signals].sort((left, right) => {
     const severityDiff = severityRank[right.severity] - severityRank[left.severity];
     if (severityDiff !== 0) return severityDiff;
-    const freshnessDiff = Date.parse(right.timestamp) - Date.parse(left.timestamp);
+    const freshnessDiff =
+      Date.parse(String(right.timestamp || '')) -
+      Date.parse(String(left.timestamp || ''));
     if (freshnessDiff !== 0) return freshnessDiff;
-    return right.confidence - left.confidence;
+    return Number(right.confidence || 0) - Number(left.confidence || 0);
   });
   return sorted[0]?.category;
 };
@@ -73,30 +75,43 @@ const buildFallbackReadModel = (
   };
 };
 
+export const createOperationalFallbackBriefing = (
+  operational: OperationalSnapshotReadModel,
+  errorCode?: string,
+): AlertBrainBriefingReadModel =>
+  buildFallbackReadModel(operational, errorCode);
+
 export const GetAlertBrainBriefingQuery = {
   async execute(params: ExecuteParams): Promise<AlertBrainBriefingReadModel> {
-    const operational =
-      params.operational ||
-      (await GetOperationalSnapshotQuery.execute({
-        latitude: params.latitude,
-        longitude: params.longitude,
-        force: params.force,
-      }));
+    const operationalPromise = params.operational
+      ? Promise.resolve(params.operational)
+      : GetOperationalSnapshotQuery.execute({
+          latitude: params.latitude,
+          longitude: params.longitude,
+          force: params.force,
+        });
 
     if (!isFiniteCoord(params.latitude) || !isFiniteCoord(params.longitude)) {
-      return buildFallbackReadModel(operational, operational.errorCode || 'location_unavailable');
+      const operational = await operationalPromise;
+      return buildFallbackReadModel(
+        operational,
+        operational.errorCode || 'location_unavailable',
+      );
     }
 
     try {
-      const signals = await AlertIntelligenceService.fetchRealtimeSignals({
-        latitude: params.latitude,
-        longitude: params.longitude,
-        locale: params.locale,
-        timeZone: params.timeZone || 'UTC',
-        category: params.category,
-        scope: params.scope || 'CITY',
-        force: params.force,
-      });
+      const [operational, signals] = await Promise.all([
+        operationalPromise,
+        AlertIntelligenceService.fetchRealtimeSignals({
+          latitude: params.latitude,
+          longitude: params.longitude,
+          locale: params.locale,
+          timeZone: params.timeZone || 'UTC',
+          category: params.category,
+          scope: params.scope || 'CITY',
+          force: params.force,
+        }),
+      ]);
 
       const normalizedSignals = Array.isArray(signals) ? signals : [];
       const aiSummary = AlertIntelligenceService.summarizeForUser(
@@ -104,11 +119,11 @@ export const GetAlertBrainBriefingQuery = {
         params.locale,
       );
       const trustBundle = AlertIntelligenceService.getTrustBundle(normalizedSignals);
+      const bullets = Array.isArray(aiSummary.bullets) ? aiSummary.bullets : [];
       const severeSignalCount = normalizedSignals.filter(
         signal => signal.severity === 'high' || signal.severity === 'critical',
       ).length;
-      const summary =
-        aiSummary.bullets[0] || aiSummary.action || aiSummary.headline || '';
+      const summary = bullets[0] || aiSummary.action || aiSummary.headline || '';
       const stale =
         operational.stale ||
         operational.state === 'stale' ||
@@ -129,7 +144,7 @@ export const GetAlertBrainBriefingQuery = {
         headline: aiSummary.headline || '',
         summary,
         action: aiSummary.action || '',
-        bullets: Array.isArray(aiSummary.bullets) ? aiSummary.bullets : [],
+        bullets,
         signalCount: normalizedSignals.length,
         severeSignalCount,
         sourceCount: sources.length,
@@ -149,6 +164,7 @@ export const GetAlertBrainBriefingQuery = {
         errorCode: operational.errorCode,
       };
     } catch (error) {
+      const operational = await operationalPromise;
       return buildFallbackReadModel(
         operational,
         typeof (error as any)?.message === 'string'

@@ -10,21 +10,14 @@ import {
   View,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getLocales } from 'react-native-localize';
 import { useTranslation } from 'react-i18next';
 
 import { useTheme } from '../../context/ThemeContext';
 import { useSecurity } from '../../context/SecurityContext';
 import { ThemeTokens } from '../../constants/ThemeTokens';
-import { FEATURED_EVENTS_KEY } from '../../constants/MonitoringEvents';
-import { AdminContextService } from '../../services/AdminContextService';
+import { GetOfficialSourcesSnapshotQuery } from '../../application/queries/GetOfficialSourcesSnapshotQuery';
 import {
-  OfficialSourcesResolver,
-  resolveDomainsFromEventIds,
-} from '../../services/OfficialSourcesResolver';
-import {
-  MonitoringDomain,
   OfficialSource,
   ResolvedSourcesByLevel,
   ResolvedSourcesLevel,
@@ -34,22 +27,6 @@ const FONT_FAMILY =
   Platform.OS === 'ios'
     ? ThemeTokens.typography.families.ios
     : ThemeTokens.typography.families.android;
-
-const DEFAULT_DOMAINS: MonitoringDomain[] = [
-  'HEALTH',
-  'WEATHER',
-  'DISASTER',
-  'INFRA',
-  'SECURITY',
-];
-
-const normalizeFeaturedEvents = (value: unknown): string[] => {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((item): item is string => typeof item === 'string')
-    .map(item => item.trim())
-    .filter(Boolean);
-};
 
 const levelTranslationKey = (level: ResolvedSourcesLevel['level']) => {
   if (level === 'MUNICIPAL') return 'official_sources_level_municipal';
@@ -123,45 +100,27 @@ export const OfficialSourcesScreen = ({ navigation }: any) => {
     [localeTag, t],
   );
 
-  const loadMonitoringDomains = useCallback(async () => {
-    try {
-      const raw = await AsyncStorage.getItem(FEATURED_EVENTS_KEY);
-      const parsed = raw ? JSON.parse(raw) : null;
-      const eventIds = normalizeFeaturedEvents(parsed);
-      const domains = resolveDomainsFromEventIds(eventIds);
-      return domains.length > 0 ? domains : DEFAULT_DOMAINS;
-    } catch {
-      return DEFAULT_DOMAINS;
-    }
-  }, []);
-
   const load = useCallback(
     async (forceRefresh = false) => {
-      const lat = securityState.location?.latitude;
-      const lon = securityState.location?.longitude;
       setError(null);
-      try {
-        const [domains, context] = await Promise.all([
-          loadMonitoringDomains(),
-          typeof lat === 'number' && typeof lon === 'number'
-            ? AdminContextService.resolveFromLocation(lat, lon, { forceRefresh })
-            : AdminContextService.getCachedContext(),
-        ]);
-
-        if (!context) {
-          setResolved(null);
-          setError(t('official_sources_context_unavailable'));
-          return;
-        }
-
-        const result = await OfficialSourcesResolver.resolveOfficialSources(context, domains);
-        setResolved(result);
-      } catch {
+      const snapshot = await GetOfficialSourcesSnapshotQuery.execute({
+        latitude: securityState.location?.latitude,
+        longitude: securityState.location?.longitude,
+        locale: localeTag,
+        forceRefresh,
+      });
+      if (!snapshot.resolved) {
         setResolved(null);
-        setError(t('official_sources_load_error'));
+        setError(
+          snapshot.errorCode
+            ? t(snapshot.errorCode)
+            : t('official_sources_load_error'),
+        );
+        return;
       }
+      setResolved(snapshot.resolved);
     },
-    [loadMonitoringDomains, securityState.location?.latitude, securityState.location?.longitude, t],
+    [localeTag, securityState.location?.latitude, securityState.location?.longitude, t],
   );
 
   useEffect(() => {

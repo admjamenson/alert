@@ -87,7 +87,7 @@ const sortSignals = (a: AlertSignal, b: AlertSignal) => {
   if (severityDiff !== 0) return severityDiff;
   const freshnessDiff = parseMs(b.timestamp) - parseMs(a.timestamp);
   if (freshnessDiff !== 0) return freshnessDiff;
-  return b.confidence - a.confidence;
+  return Number(b.confidence || 0) - Number(a.confidence || 0);
 };
 
 const normalizeSignal = (signal: AlertSignal): AlertSignal | null => {
@@ -169,7 +169,10 @@ const supportsCategory = (connector: AlertSignalsConnector, category?: string) =
   return connector.supportsCategory(category);
 };
 
-const isUrlAllowedByPolicy = (url: string | undefined, policy?: SourcePolicy): boolean => {
+const isUrlAllowedByPolicy = (
+  url: string | null | undefined,
+  policy?: SourcePolicy,
+): boolean => {
   if (!policy) return true;
   if (!url) return true;
 
@@ -177,9 +180,12 @@ const isUrlAllowedByPolicy = (url: string | undefined, policy?: SourcePolicy): b
     const parsed = new URL(url);
     const protocol = parsed.protocol.toLowerCase();
     if (!policy.allowHttp && protocol !== 'https:') return false;
-    if (policy.allowedDomains.length === 0) return true;
+    const allowedDomains = Array.isArray(policy.allowedDomains)
+      ? policy.allowedDomains
+      : [];
+    if (allowedDomains.length === 0) return true;
     const host = parsed.hostname.toLowerCase();
-    return policy.allowedDomains.some(domain => {
+    return allowedDomains.some(domain => {
       const normalizedDomain = domain.toLowerCase();
       return host === normalizedDomain || host.endsWith(`.${normalizedDomain}`);
     });
@@ -282,7 +288,7 @@ const summarizeSignals = (signals: AlertSignal[], locale: string): AlertAiSummar
   };
 };
 
-const parseHost = (url?: string): string => {
+const parseHost = (url?: string | null): string => {
   try {
     return new URL(String(url || '')).hostname.toLowerCase();
   } catch {
@@ -292,7 +298,7 @@ const parseHost = (url?: string): string => {
 
 const resolveSourceClass = (
   officiality: AlertSignal['officiality'],
-  sourceUrl?: string,
+  sourceUrl?: string | null,
 ): NonNullable<AlertSignalSource['sourceClass']> => {
   if (officiality === 'OFFICIAL') return 'OFFICIAL';
   const host = parseHost(sourceUrl);

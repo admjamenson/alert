@@ -8,7 +8,12 @@ import { getLocales } from 'react-native-localize';
 import { useTheme } from '../../context/ThemeContext';
 import { useSecurity } from '../../context/SecurityContext';
 import { ThemeTokens } from '../../constants/ThemeTokens';
-import { EpidemicService, EpidemicSnapshot, EpidemicWindow, EpidemicMode } from '../../services/EpidemicService';
+import { GetEpidemicMapSnapshotQuery } from '../../application/queries/GetEpidemicMapSnapshotQuery';
+import type {
+  EpidemicMode,
+  EpidemicSnapshot,
+  EpidemicWindow,
+} from '../../services/EpidemicService';
 import { TelemetryService } from '../../services/TelemetryService';
 import {
   formatUpdatedAtDisplay,
@@ -88,7 +93,18 @@ export const EpidemicMapScreen = ({ navigation, route }: any) => {
       setLoading(true);
       setError(null);
       try {
-        const res = await EpidemicService.getSnapshot(safeLat, safeLon, mode, window, { force });
+        const res = await GetEpidemicMapSnapshotQuery.execute({
+          latitude: safeLat,
+          longitude: safeLon,
+          mode,
+          window,
+          force,
+        });
+        if (!res) {
+          setSnapshot(null);
+          setError(t('common_try_again'));
+          return;
+        }
         const completedAt = normalizeToIsoDateTime(new Date()) || new Date().toISOString();
         setSnapshot(res);
         setSyncCompletedAt(completedAt);

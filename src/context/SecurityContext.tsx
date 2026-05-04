@@ -20,9 +20,9 @@
  * SOS FLOW:
  * 1. User presses SOS button
  * 2. triggerSecureSOS() called
- * 3. Kyber encryption applied to location
+ * 3. Crystals-Kybes relay/integrity protection applied to SOS payload
  * 4. In-app SOS sent to guardians with precise location
- * 5. Return success status
+ * 5. Return accepted/delivery status
  *
  * PERFORMANCE:
  * - Location updates: <500ms per cycle
@@ -44,7 +44,7 @@ import React, {
   useCallback,
   useRef,
 } from 'react';
-import { Alert, InteractionManager } from 'react-native';
+import {Alert, InteractionManager} from 'react-native';
 import {
   LocationPrecision,
   LOCATION_PRECISION_THRESHOLD_M,
@@ -52,6 +52,12 @@ import {
   isFiniteCoordinatePair,
   isPreciseLocation,
 } from '../utils/locationQuality';
+import type {SosDispatchResult} from '../services/SosDispatchService';
+import {describeAlertApiConfig} from '../core/config';
+import {
+  logSosDiagnostic,
+  summarizeError,
+} from '../observability/SosDiagnostics';
 
 const LAST_LOCATION_KEY = '@Alert:LastLocation';
 const LAST_LOCATION_NAME_KEY = '@Alert:LastLocationName';
@@ -69,17 +75,27 @@ type GeoPositionLike = {
   timestamp?: number | string | Date;
 };
 
+type GeoErrorLike = {
+  code?: number;
+  message?: string;
+};
+
 const getAsyncStorage = () =>
   require('@react-native-async-storage/async-storage').default;
-const getGeolocation = () => require('react-native-geolocation-service').default;
-const getPermissionManager = () => require('../utils/permissions').PermissionManager;
-const getSosDispatchService = () => require('../services/SosDispatchService').SosDispatchService;
-const getProfileService = () => require('../services/ProfileService').ProfileService;
+const getGeolocation = () =>
+  require('react-native-geolocation-service').default;
+const getPermissionManager = () =>
+  require('../utils/permissions').PermissionManager;
+const getSosDispatchService = () =>
+  require('../services/SosDispatchService').SosDispatchService;
+const getProfileService = () =>
+  require('../services/ProfileService').ProfileService;
 const getKyberNetworkService = () =>
   require('../services/KyberNetworkService').KyberNetworkService;
 const getReverseGeocodeService = () =>
   require('../services/ReverseGeocodeService').ReverseGeocodeService;
-const getTelemetryService = () => require('../services/TelemetryService').TelemetryService;
+const getTelemetryService = () =>
+  require('../services/TelemetryService').TelemetryService;
 const getNormalizeToIsoDateTime = () =>
   require('../utils/dateTimeFormat').normalizeToIsoDateTime;
 const getI18n = () => require('../i18n').default;
@@ -88,10 +104,7 @@ const toCityOnlyLabel = (raw?: string | null) => {
   if (!raw) return '';
   const normalized = String(raw).trim();
   if (!normalized) return '';
-  return normalized
-    .split(',')[0]
-    .replace(/\s+/g, ' ')
-    .trim();
+  return normalized.split(',')[0].replace(/\s+/g, ' ').trim();
 };
 
 type RiskLevel = 'low' | 'medium' | 'high';
@@ -109,6 +122,7 @@ interface SecurityState {
   isActive: boolean;
   location: LocationData | null;
   locationName: string;
+  locationCountryCode: string | null;
   riskLevel: RiskLevel;
   isMoving: boolean;
   panicHold: boolean;
@@ -120,7 +134,7 @@ interface SecurityState {
 
 interface SecurityContextData {
   securityState: SecurityState;
-  triggerSecureSOS: () => Promise<boolean>;
+  triggerSecureSOS: () => Promise<SosDispatchResult>;
   updateRiskLevel: (level: RiskLevel) => void;
   setPanicHold: (active: boolean) => void;
   requestPreciseFixNow: () => Promise<LocationPrecision>;
@@ -130,13 +144,14 @@ export const SecurityContext = createContext<SecurityContextData>(
   {} as SecurityContextData,
 );
 
-export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({
+export const SecurityProvider: React.FC<{children: React.ReactNode}> = ({
   children,
 }) => {
   const [securityState, setSecurityState] = useState<SecurityState>({
     isActive: true,
     location: null,
     locationName: '',
+    locationCountryCode: null,
     riskLevel: 'low',
     isMoving: false,
     panicHold: false,
@@ -145,7 +160,9 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({
     locationPrecision: 'none',
     locationProvider: 'unknown',
   });
-  const lastGeocodeRef = useRef<{ ts: number; lat: number; lon: number } | null>(null);
+  const lastGeocodeRef = useRef<{ts: number; lat: number; lon: number} | null>(
+    null,
+  );
   const lastPreciseLocationRef = useRef<LocationData | null>(null);
   const lastLocationNameRef = useRef<string>('');
   const impreciseAttemptRef = useRef<{
@@ -158,18 +175,24 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({
     lastPromptTs: 0,
   });
 
-  const distanceKm = useCallback((a: { lat: number; lon: number }, b: { lat: number; lon: number }) => {
-    const toRad = (v: number) => (v * Math.PI) / 180;
-    const R = 6371;
-    const dLat = toRad(b.lat - a.lat);
-    const dLon = toRad(b.lon - a.lon);
-    const lat1 = toRad(a.lat);
-    const lat2 = toRad(b.lat);
-    const h =
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    return 2 * R * Math.asin(Math.sqrt(h));
-  }, []);
+  const distanceKm = useCallback(
+    (a: {lat: number; lon: number}, b: {lat: number; lon: number}) => {
+      const toRad = (v: number) => (v * Math.PI) / 180;
+      const R = 6371;
+      const dLat = toRad(b.lat - a.lat);
+      const dLon = toRad(b.lon - a.lon);
+      const lat1 = toRad(a.lat);
+      const lat2 = toRad(b.lat);
+      const h =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1) *
+          Math.cos(lat2) *
+          Math.sin(dLon / 2) *
+          Math.sin(dLon / 2);
+      return 2 * R * Math.asin(Math.sqrt(h));
+    },
+    [],
+  );
 
   const updateLocationName = useCallback(
     async (lat: number, lon: number) => {
@@ -182,24 +205,41 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({
       const minMoveForRefreshKm = 0.12;
       if (last) {
         const elapsed = now - last.ts;
-        const movedKm = distanceKm({ lat, lon }, { lat: last.lat, lon: last.lon });
+        const movedKm = distanceKm({lat, lon}, {lat: last.lat, lon: last.lon});
         if (elapsed < minGeocodeIntervalMs && movedKm < minMoveForRefreshKm) {
           return;
         }
       }
-      lastGeocodeRef.current = { ts: now, lat, lon };
+      lastGeocodeRef.current = {ts: now, lat, lon};
 
       const geo = await ReverseGeocodeService.reverse(lat, lon);
       if (!geo) return;
       const cityOnly = toCityOnlyLabel(geo.cityName);
-      if (!cityOnly) return;
-      lastLocationNameRef.current = cityOnly;
+      const countryCode =
+        typeof geo.countryCode === 'string' &&
+        geo.countryCode.trim().length === 2
+          ? geo.countryCode.trim().toUpperCase()
+          : null;
+
+      if (!cityOnly && !countryCode) return;
+      if (cityOnly) {
+        lastLocationNameRef.current = cityOnly;
+      }
       setSecurityState(prev =>
-        prev.locationName === cityOnly ? prev : { ...prev, locationName: cityOnly },
+        prev.locationName === cityOnly &&
+        prev.locationCountryCode === countryCode
+          ? prev
+          : {
+              ...prev,
+              locationName: cityOnly || prev.locationName,
+              locationCountryCode: countryCode,
+            },
       );
-      AsyncStorage.setItem(LAST_LOCATION_NAME_KEY, cityOnly).catch(() => {
-        // ignore storage errors
-      });
+      if (cityOnly) {
+        AsyncStorage.setItem(LAST_LOCATION_NAME_KEY, cityOnly).catch(() => {
+          // ignore storage errors
+        });
+      }
     },
     [distanceKm],
   );
@@ -222,14 +262,18 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({
     const now = Date.now();
     const attempt = impreciseAttemptRef.current;
 
-    if (!attempt.firstTs || now - attempt.firstTs > IMPRECISE_ATTEMPT_WINDOW_MS) {
+    if (
+      !attempt.firstTs ||
+      now - attempt.firstTs > IMPRECISE_ATTEMPT_WINDOW_MS
+    ) {
       attempt.firstTs = now;
       attempt.count = 1;
     } else {
       attempt.count += 1;
     }
 
-    const canPromptAgain = now - attempt.lastPromptTs >= IMPRECISE_PROMPT_COOLDOWN_MS;
+    const canPromptAgain =
+      now - attempt.lastPromptTs >= IMPRECISE_PROMPT_COOLDOWN_MS;
     if (attempt.count < 2 || !canPromptAgain) return;
 
     attempt.lastPromptTs = now;
@@ -244,11 +288,13 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({
       }),
       [
         {
-          text: i18n.t('common_cancel', { defaultValue: 'Cancel' }),
+          text: i18n.t('common_cancel', {defaultValue: 'Cancel'}),
           style: 'cancel',
         },
         {
-          text: i18n.t('location_open_settings', { defaultValue: 'Open Settings' }),
+          text: i18n.t('location_open_settings', {
+            defaultValue: 'Open Settings',
+          }),
           onPress: () => {
             TelemetryService.trackEvent('location_settings_opened_from_prompt');
             PermissionManager.openSettings();
@@ -259,7 +305,10 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({
   }, []);
 
   const handlePositionUpdate = useCallback(
-    (position: GeoPositionLike, source: 'watch' | 'manual' | 'cache' = 'watch'): LocationPrecision => {
+    (
+      position: GeoPositionLike,
+      source: 'watch' | 'manual' | 'cache' = 'watch',
+    ): LocationPrecision => {
       const TelemetryService = getTelemetryService();
       const AsyncStorage = getAsyncStorage();
       const normalizeToIsoDateTime = getNormalizeToIsoDateTime();
@@ -268,16 +317,20 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({
       if (!isFiniteCoordinatePair(latitude, longitude)) return 'none';
 
       const speedMs =
-        typeof position?.coords?.speed === 'number' && Number.isFinite(position.coords.speed)
+        typeof position?.coords?.speed === 'number' &&
+        Number.isFinite(position.coords.speed)
           ? position.coords.speed
           : 0;
       const speedKmh = Math.max(0, speedMs * 3.6);
       const accuracy =
-        typeof position?.coords?.accuracy === 'number' && Number.isFinite(position.coords.accuracy)
+        typeof position?.coords?.accuracy === 'number' &&
+        Number.isFinite(position.coords.accuracy)
           ? Math.max(0, Number(position.coords.accuracy))
           : null;
       const locationTimestamp =
-        normalizeToIsoDateTime(position?.timestamp) || normalizeToIsoDateTime(new Date()) || new Date().toISOString();
+        normalizeToIsoDateTime(position?.timestamp) ||
+        normalizeToIsoDateTime(new Date()) ||
+        new Date().toISOString();
       const provider: LocationProvider = 'unknown';
 
       const snapshot = {
@@ -288,16 +341,25 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({
         timestamp: locationTimestamp,
       };
 
-      const precise = isPreciseLocation(accuracy, LOCATION_PRECISION_THRESHOLD_M);
+      const precise = isPreciseLocation(
+        accuracy,
+        LOCATION_PRECISION_THRESHOLD_M,
+      );
       if (!precise) {
         setSecurityState(prev => ({
           ...prev,
+          location: snapshot,
           isMoving: speedKmh > 15,
           locationPrecision: 'imprecise',
           locationAccuracyMeters: accuracy,
           locationTimestamp,
           locationProvider: provider,
         }));
+        AsyncStorage.setItem(LAST_LOCATION_KEY, JSON.stringify(snapshot)).catch(
+          () => {
+            // ignore storage errors
+          },
+        );
         TelemetryService.trackEvent('location_fix_rejected_imprecise', {
           accuracyMeters: accuracy,
           thresholdMeters: LOCATION_PRECISION_THRESHOLD_M,
@@ -338,42 +400,44 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({
     [maybePromptForPreciseLocation, updateLocationName],
   );
 
-  const requestPreciseFixNow = useCallback(async (): Promise<LocationPrecision> => {
-    const Geolocation = getGeolocation();
-    const hasPermission = await requestLocationPermission();
-    if (!hasPermission) {
-      return 'none';
-    }
+  const requestPreciseFixNow =
+    useCallback(async (): Promise<LocationPrecision> => {
+      const Geolocation = getGeolocation();
+      const hasPermission = await requestLocationPermission();
+      if (!hasPermission) {
+        return 'none';
+      }
 
-    return new Promise(resolve => {
-      Geolocation.getCurrentPosition(
-        position => {
-          const precision = handlePositionUpdate(position, 'manual');
-          resolve(precision);
-        },
-        () => {
-          if (lastPreciseLocationRef.current) {
-            resolve('precise');
-            return;
-          }
-          setSecurityState(prev => ({
-            ...prev,
-            locationPrecision: prev.locationPrecision === 'precise' ? 'precise' : 'none',
-          }));
-          resolve('none');
-        },
-        {
-          enableHighAccuracy: true,
-          timeout: 15000,
-          maximumAge: 0,
-          forceRequestLocation: true,
-          showLocationDialog: true,
-          forceLocationManager: false,
-          accuracy: { android: 'high', ios: 'bestForNavigation' },
-        },
-      );
-    });
-  }, [handlePositionUpdate, requestLocationPermission]);
+      return new Promise(resolve => {
+        Geolocation.getCurrentPosition(
+          (position: GeoPositionLike) => {
+            const precision = handlePositionUpdate(position, 'manual');
+            resolve(precision);
+          },
+          () => {
+            if (lastPreciseLocationRef.current) {
+              resolve('precise');
+              return;
+            }
+            setSecurityState(prev => ({
+              ...prev,
+              locationPrecision:
+                prev.locationPrecision === 'precise' ? 'precise' : 'none',
+            }));
+            resolve('none');
+          },
+          {
+            enableHighAccuracy: true,
+            timeout: 15000,
+            maximumAge: 0,
+            forceRequestLocation: true,
+            showLocationDialog: true,
+            forceLocationManager: false,
+            accuracy: {android: 'high', ios: 'bestForNavigation'},
+          },
+        );
+      });
+    }, [handlePositionUpdate, requestLocationPermission]);
 
   useEffect(() => {
     const Geolocation = getGeolocation();
@@ -393,31 +457,38 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({
           normalizedCachedName !== i18n.t('monitoring_title') &&
           normalizedCachedName !== i18n.t('gps_off') &&
           normalizedCachedName !== '...';
-        if (isValidCachedName) lastLocationNameRef.current = normalizedCachedName;
+        if (isValidCachedName)
+          lastLocationNameRef.current = normalizedCachedName;
         setSecurityState(prev => ({
           ...prev,
           location: prev.location,
-          locationName: isValidCachedName ? normalizedCachedName : prev.locationName,
+          locationName: isValidCachedName
+            ? normalizedCachedName
+            : prev.locationName,
         }));
 
         const cachedLatitude = Number(parsed?.latitude);
         const cachedLongitude = Number(parsed?.longitude);
         const cachedAccuracy =
-          typeof parsed?.accuracy === 'number' && Number.isFinite(parsed.accuracy)
+          typeof parsed?.accuracy === 'number' &&
+          Number.isFinite(parsed.accuracy)
             ? Number(parsed.accuracy)
             : null;
         const cachedTimestamp = normalizeToIsoDateTime(parsed?.timestamp);
         const ageMs =
-          cachedTimestamp && Number.isFinite(new Date(cachedTimestamp).getTime())
+          cachedTimestamp &&
+          Number.isFinite(new Date(cachedTimestamp).getTime())
             ? Date.now() - new Date(cachedTimestamp).getTime()
             : Number.POSITIVE_INFINITY;
         const cacheIsFresh = ageMs >= 0 && ageMs <= LOCATION_CACHE_MAX_AGE_MS;
-        const cacheIsPrecise =
+        const cacheHasUsableCoords =
           isFiniteCoordinatePair(cachedLatitude, cachedLongitude) &&
-          cacheIsFresh &&
+          cacheIsFresh;
+        const cacheIsPrecise =
+          cacheHasUsableCoords &&
           isPreciseLocation(cachedAccuracy, LOCATION_PRECISION_THRESHOLD_M);
 
-        if (cacheIsPrecise) {
+        if (cacheHasUsableCoords) {
           const cachedLocation: LocationData = {
             latitude: cachedLatitude,
             longitude: cachedLongitude,
@@ -428,11 +499,13 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({
             accuracy: cachedAccuracy,
             timestamp: cachedTimestamp || undefined,
           };
-          lastPreciseLocationRef.current = cachedLocation;
+          if (cacheIsPrecise) {
+            lastPreciseLocationRef.current = cachedLocation;
+          }
           setSecurityState(prev => ({
             ...prev,
             location: cachedLocation,
-            locationPrecision: 'precise',
+            locationPrecision: cacheIsPrecise ? 'precise' : 'imprecise',
             locationAccuracyMeters: cachedAccuracy,
             locationTimestamp: cachedTimestamp || undefined,
             locationProvider: 'unknown',
@@ -459,28 +532,29 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({
     const initGPS = async () => {
       const PermissionManager = getPermissionManager();
       await hydrateFromCache();
-      const locationPermission = await PermissionManager.checkLocationPermission();
+      const locationPermission =
+        await PermissionManager.checkLocationPermission();
       if (locationPermission === 'granted') {
         await requestPreciseFixNow();
 
         watchId = Geolocation.watchPosition(
-          position => {
+          (position: GeoPositionLike) => {
             void handlePositionUpdate(position, 'watch');
           },
-          error => {
+          (error: GeoErrorLike) => {
             if (__DEV__) {
               console.log('[GPS Sync]:', error.message);
             }
           },
           {
             enableHighAccuracy: true,
-            distanceFilter: 0,
-            interval: 1000,
-            fastestInterval: 1000,
+            distanceFilter: 10,
+            interval: 5000,
+            fastestInterval: 3000,
             forceRequestLocation: true,
             showLocationDialog: true,
             forceLocationManager: false,
-            accuracy: { android: 'high', ios: 'bestForNavigation' },
+            accuracy: {android: 'high', ios: 'bestForNavigation'},
           },
         );
       }
@@ -497,23 +571,43 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [requestPreciseFixNow, handlePositionUpdate, updateLocationName]);
 
   useEffect(() => {
-    const KyberNetworkService = getKyberNetworkService();
-    KyberNetworkService.startAutoFlush();
-    void KyberNetworkService.flushPending();
+    let cancelled = false;
+    let delayId: ReturnType<typeof setTimeout> | null = null;
+    const task = InteractionManager.runAfterInteractions(() => {
+      delayId = setTimeout(() => {
+        if (cancelled) return;
+        const KyberNetworkService = getKyberNetworkService();
+        KyberNetworkService.startAutoFlush();
+        void KyberNetworkService.flushPending();
+      }, 1500);
+    });
     return () => {
-      KyberNetworkService.stopAutoFlush();
+      cancelled = true;
+      if (typeof (task as any)?.cancel === 'function') {
+        (task as any).cancel();
+      }
+      if (delayId) {
+        clearTimeout(delayId);
+      }
+      try {
+        getKyberNetworkService().stopAutoFlush();
+      } catch {
+        // ignore cleanup failures
+      }
     };
   }, []);
 
   const updateRiskLevel = (level: RiskLevel) => {
-    setSecurityState(prev => ({ ...prev, riskLevel: level }));
+    setSecurityState(prev => ({...prev, riskLevel: level}));
   };
 
   const setPanicHold = (active: boolean) => {
-    setSecurityState(prev => (prev.panicHold === active ? prev : { ...prev, panicHold: active }));
+    setSecurityState(prev =>
+      prev.panicHold === active ? prev : {...prev, panicHold: active},
+    );
   };
 
-  const triggerSecureSOS = async (): Promise<boolean> => {
+  const triggerSecureSOS = async (): Promise<SosDispatchResult> => {
     try {
       const AsyncStorage = getAsyncStorage();
       const ProfileService = getProfileService();
@@ -523,32 +617,63 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({
       const guardians = guardiansRaw
         ? JSON.parse(guardiansRaw)
             .map((item: any) => ({
+              id:
+                typeof item?.id === 'string' && item.id.trim().length > 0
+                  ? item.id.trim()
+                  : undefined,
               remoteId:
-                typeof item?.remoteId === 'string' ? item.remoteId.trim() : undefined,
+                typeof item?.remoteId === 'string'
+                  ? item.remoteId.trim()
+                  : undefined,
+              phone:
+                typeof item?.phone === 'string' && item.phone.trim().length > 0
+                  ? item.phone.trim()
+                  : undefined,
               name:
                 typeof item?.name === 'string' && item.name.trim().length > 0
                   ? item.name.trim()
-                  : i18n.t('guardian_label', { defaultValue: 'Guardian' }),
+                  : i18n.t('guardian_label', {defaultValue: 'Guardian'}),
             }))
-            .filter((item: { remoteId?: string; name: string }) => Boolean(item.remoteId))
+            .filter(
+              (item: {
+                id?: string;
+                remoteId?: string;
+                phone?: string;
+                name: string;
+              }) => item.name.length > 0,
+            )
         : [];
+      const deliverableGuardianCount = guardians.filter(
+        (item: {
+          id?: string;
+          remoteId?: string;
+          phone?: string;
+          name: string;
+        }) => Boolean(item.remoteId) || Boolean(item.phone) || Boolean(item.id),
+      ).length;
+      logSosDiagnostic('triggerSecureSOS:start', {
+        guardianCount: guardians.length,
+        deliverableGuardianCount,
+        hasCurrentLocation: Boolean(securityState.location),
+        hasLocationName: Boolean(
+          securityState.locationName || lastLocationNameRef.current,
+        ),
+        api: describeAlertApiConfig(),
+      });
       if (guardians.length === 0) {
-        Alert.alert(
-          i18n.t('sos_guardians_required_title', {
-            defaultValue: 'Guardians required',
-          }),
-          i18n.t('sos_guardians_required_body', {
-            defaultValue:
-              'Add at least one guardian in Alert so your SOS can be delivered in-app.',
-          }),
-        );
-        return false;
+        logSosDiagnostic('triggerSecureSOS:proceeding_without_guardians', {
+          reason: 'no_guardians',
+        });
       }
       const profile = await ProfileService.getProfile();
       let dispatchLocation = securityState.location;
       if (!canUseLocationForRiskMaps(securityState) || !dispatchLocation) {
         const precision = await requestPreciseFixNow();
         if (precision !== 'precise' || !lastPreciseLocationRef.current) {
+          logSosDiagnostic('triggerSecureSOS:blocked', {
+            reason: 'precise_location_required',
+            precision,
+          });
           Alert.alert(
             i18n.t('location_precision_required_title', {
               defaultValue: 'Precise location required',
@@ -558,31 +683,53 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({
                 'We need precise GPS to send SOS with your exact location.',
             }),
           );
-          return false;
+          return {
+            accepted: false,
+            delivered: false,
+            queued: false,
+            viaKyber: false,
+            viaGuardians: false,
+            viaConversation: false,
+            integrityProtected: false,
+          };
         }
         dispatchLocation = lastPreciseLocationRef.current;
       }
-      const sent = await SosDispatchService.dispatchFromApp({
+      const result = await SosDispatchService.dispatchFromApp({
         location: dispatchLocation,
         locationName: securityState.locationName || lastLocationNameRef.current,
         senderName: profile.name,
         guardians,
       });
-      if (!sent) {
-        Alert.alert(
-          i18n.t('sos_failed_title'),
-          i18n.t('sos_failed_body'),
-        );
+      logSosDiagnostic('triggerSecureSOS:result', {
+        accepted: result.accepted,
+        delivered: result.delivered,
+        queued: result.queued,
+        viaKyber: result.viaKyber,
+        viaGuardians: result.viaGuardians,
+        viaConversation: result.viaConversation,
+        integrityProtected: result.integrityProtected,
+      });
+      if (!result.accepted) {
+        Alert.alert(i18n.t('sos_failed_title'), i18n.t('sos_failed_body'));
       }
-      return sent;
+      return result;
     } catch (error) {
       console.error('[SecurityContext] SOS error:', error);
+      logSosDiagnostic('triggerSecureSOS:error', {
+        error: summarizeError(error),
+      });
       const i18n = getI18n();
-      Alert.alert(
-        i18n.t('sos_failed_title'),
-        i18n.t('sos_failed_body'),
-      );
-      return false;
+      Alert.alert(i18n.t('sos_failed_title'), i18n.t('sos_failed_body'));
+      return {
+        accepted: false,
+        delivered: false,
+        queued: false,
+        viaKyber: false,
+        viaGuardians: false,
+        viaConversation: false,
+        integrityProtected: false,
+      };
     }
   };
 

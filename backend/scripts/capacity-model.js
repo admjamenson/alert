@@ -5,6 +5,7 @@ const {
 const {
   applyPriceBookToUsage,
   loadOperationalPriceBook,
+  readEconomicPolicyConfig,
 } = require('../src/economics/priceBook');
 
 const TIERS = [
@@ -105,9 +106,71 @@ const round = value => Math.round(value * 100) / 100;
 const freemiumRevenue = Number(process.env.ALERT_FREEMIUM_NET_AD_ARPU_USD || 0.6);
 const premiumRevenue = Number(process.env.ALERT_PREMIUM_NET_SUBSCRIPTION_ARPU_USD || 5.0);
 const priceBook = loadOperationalPriceBook();
+const economicPolicyConfig = readEconomicPolicyConfig(priceBook);
 const premiumGrossRevenue = Number(
   process.env.ALERT_PREMIUM_GROSS_BILLING_ARPU_USD || premiumRevenue,
 );
+
+const applyScenarioBillingRoute = ({ usage, billingRoute }) => {
+  const normalizedRoute = String(billingRoute || '').trim().toLowerCase();
+  if (normalizedRoute === 'stripe') {
+    return {
+      ...usage,
+      appStoreFeePercent: 0,
+      playStoreFeePercent: 0,
+    };
+  }
+  if (normalizedRoute === 'app_store') {
+    return {
+      ...usage,
+      paymentProcessorPercent: 0,
+      paymentProcessorFixedFeeUsd: 0,
+      playStoreFeePercent: 0,
+    };
+  }
+  if (normalizedRoute === 'play_store') {
+    return {
+      ...usage,
+      paymentProcessorPercent: 0,
+      paymentProcessorFixedFeeUsd: 0,
+      appStoreFeePercent: 0,
+    };
+  }
+  return usage;
+};
+
+const buildModeledUsage = ({ usage, billingRoute }) =>
+  applyScenarioBillingRoute({
+    usage: applyPriceBookToUsage(usage, priceBook, {
+      useModeledDefaultsForAbsentCosts: true,
+    }),
+    billingRoute,
+  });
+
+const buildPolicySummary = ({ budget, usage }) => ({
+  targetCostCapPercent: budget.guardrail.capRatio,
+  actualCostRatio: budget.guardrail.costRatio,
+  withinTargetCostCap: budget.guardrail.withinGuardrail,
+  requiresCheaperPath: budget.decision === 'requires_cheaper_path',
+  blockOrDegrade: budget.decision === 'block_or_degrade',
+  sampleWindow: economicPolicyConfig.sampleWindow,
+  sampleVolume: {
+    costAllocationUsers: usage.costAllocationUsers ?? null,
+    feedRefreshesPerDay: usage.feedRefreshesPerDay ?? null,
+    weatherRefreshesPerDay: usage.weatherRefreshesPerDay ?? null,
+    mapSessionsPerMonth: usage.mapSessionsPerMonth ?? null,
+    routingRequestsPerMonth: usage.routingRequestsPerMonth ?? null,
+    backendRequestsPerMonth: usage.backendRequestsPerMonth ?? null,
+  },
+  rateioFormula: {
+    platformAllocation:
+      economicPolicyConfig.sharedPlatformAllocation.rateioFormula,
+    routingUnitCost:
+      economicPolicyConfig.requestMarginalCostFallback.rateioFormula,
+    weatherUnitCost:
+      economicPolicyConfig.requestMarginalCostFallback.rateioFormula,
+  },
+});
 
 const modelTier = tier => {
   const dau = tier.mau * tier.dauRatio;
@@ -149,14 +212,18 @@ const modelTier = tier => {
     };
   });
   const freeUsage = {
+    costAllocationUsers: tier.mau,
     feedRefreshesPerDay: tier.feedRefreshesPerDauPerDay,
     providerMissRate,
     weatherRefreshesPerDay: Math.max(1, Math.round(tier.feedRefreshesPerDauPerDay * 0.35)),
     weatherProviderMissRate: tier.mau >= 100_000_000 ? 0.03 : 0.05,
     mapSessionsPerMonth: tier.mau >= 10_000_000 ? 8 : 12,
+    routingRequestsPerMonth: tier.mau >= 10_000_000 ? 3 : 5,
     sosPerMonth: tier.sosPerDauPerDay * 30,
     pushPerMonth: tier.sosPerDauPerDay * 30 * tier.pushFanoutPerSos,
     queueJobsPerMonth: tier.sosPerDauPerDay * 30 * (1 + tier.pushFanoutPerSos),
+    backgroundWorkerExecutionsPerMonth:
+      tier.sosPerDauPerDay * 30 * (1 + tier.pushFanoutPerSos),
     cacheOperationsPerMonth: tier.feedRefreshesPerDauPerDay * 30 * 1.25,
     backendRequestsPerMonth:
       tier.feedRefreshesPerDauPerDay * 30 +
@@ -165,14 +232,18 @@ const modelTier = tier => {
     telemetryEventsPerMonth: tier.mau >= 100_000_000 ? 30 : 50,
   };
   const premiumUsage = {
+    costAllocationUsers: tier.mau,
     feedRefreshesPerDay: tier.feedRefreshesPerDauPerDay * 1.6,
     providerMissRate: tier.mau >= 100_000_000 ? 0.04 : 0.08,
     weatherRefreshesPerDay: Math.max(2, Math.round(tier.feedRefreshesPerDauPerDay * 0.75)),
     weatherProviderMissRate: tier.mau >= 100_000_000 ? 0.04 : 0.08,
     mapSessionsPerMonth: tier.mau >= 10_000_000 ? 35 : 55,
+    routingRequestsPerMonth: tier.mau >= 10_000_000 ? 16 : 24,
     sosPerMonth: tier.sosPerDauPerDay * 30 * 2,
     pushPerMonth: tier.sosPerDauPerDay * 30 * tier.pushFanoutPerSos * 2,
     queueJobsPerMonth: tier.sosPerDauPerDay * 30 * tier.pushFanoutPerSos * 2,
+    backgroundWorkerExecutionsPerMonth:
+      tier.sosPerDauPerDay * 30 * tier.pushFanoutPerSos * 2,
     cacheOperationsPerMonth: tier.feedRefreshesPerDauPerDay * 30 * 2.2,
     backendRequestsPerMonth:
       tier.feedRefreshesPerDauPerDay * 1.6 * 30 +
@@ -183,18 +254,26 @@ const modelTier = tier => {
     paymentTransactionsPerMonth: 1,
     paymentGrossRevenueUsd: premiumGrossRevenue,
   };
+  const modeledFreeUsage = buildModeledUsage({
+    usage: freeUsage,
+    billingRoute: 'ads',
+  });
+  const modeledPremiumUsage = buildModeledUsage({
+    usage: premiumUsage,
+    billingRoute: 'stripe',
+  });
   const freeBudget = evaluateFlowBudget({
     tier: 'free',
     monthlyNetRevenueUsd: freemiumRevenue,
-    usage: applyPriceBookToUsage(freeUsage, priceBook),
+    usage: modeledFreeUsage,
   });
   const premiumBudget = evaluateFlowBudget({
     tier: 'premium',
     monthlyNetRevenueUsd: premiumRevenue,
-    usage: applyPriceBookToUsage(premiumUsage, priceBook),
+    usage: modeledPremiumUsage,
   });
-  const freeCost = estimateMonthlyVariableCost(applyPriceBookToUsage(freeUsage, priceBook));
-  const premiumCost = estimateMonthlyVariableCost(applyPriceBookToUsage(premiumUsage, priceBook));
+  const freeCost = estimateMonthlyVariableCost(modeledFreeUsage);
+  const premiumCost = estimateMonthlyVariableCost(modeledPremiumUsage);
 
   return {
     label: tier.label,
@@ -215,6 +294,16 @@ const modelTier = tier => {
         free: freeBudget.decision,
         premium: premiumBudget.decision,
       },
+      economicPolicy: {
+        free: buildPolicySummary({
+          budget: freeBudget,
+          usage: modeledFreeUsage,
+        }),
+        premium: buildPolicySummary({
+          budget: premiumBudget,
+          usage: modeledPremiumUsage,
+        }),
+      },
       estimates: {
         freeMonthlyVariableCostUsd: round(freeCost.totalUsd),
         premiumMonthlyVariableCostUsd: round(premiumCost.totalUsd),
@@ -226,7 +315,9 @@ const modelTier = tier => {
     proofClassifications: {
       localLoadHarness: 'proven',
       externalCacheQueue:
-        process.env.ALERT_REDIS_URL && process.env.ALERT_JOB_QUEUE_DRIVER === 'bullmq'
+        (process.env.ALERT_QUEUE_REDIS_URL || process.env.ALERT_REDIS_URL) &&
+        (process.env.ALERT_CACHE_REDIS_URL || process.env.ALERT_REDIS_URL) &&
+        process.env.ALERT_JOB_QUEUE_DRIVER === 'bullmq'
           ? 'implemented_not_proven_here'
           : 'modeled_requires_external_infra',
       multiInstanceServing:

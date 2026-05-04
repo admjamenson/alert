@@ -1,7 +1,6 @@
-﻿import { APP_CONFIG } from '../../core/config';
 import OfflineCacheService from './OfflineCacheService';
-import ProviderRouter from './ProviderRouter';
 import { PlaceSuggestion } from './types';
+import { AlertMapsApiAdapter } from '../../infrastructure/adapters/AlertMapsApiAdapter';
 
 type SearchInput = {
   query: string;
@@ -31,25 +30,12 @@ const distanceMeters = (a: [number, number], b: [number, number]) => {
   return 2 * R * Math.asin(Math.sqrt(h));
 };
 
-const getApiBaseUrl = () => {
-  const globalOverride = (globalThis as any)?.ALERT_API_URL || (globalThis as any)?.__ALERT_API_URL__;
-  const envOverride = typeof process !== 'undefined' ? (process as any)?.env?.ALERT_API_URL : undefined;
-  return (globalOverride || envOverride || APP_CONFIG.API_BASE_URL || '').trim();
-};
-
-const toLanguageCode = (locale: string) => {
-  const safe = (locale || 'en').toLowerCase();
-  const [lang] = safe.split('-');
-  return lang || 'en';
-};
-
-const titleCase = (value: string) => {
-  return value
+const titleCase = (value: string) =>
+  value
     .split(' ')
     .filter(Boolean)
     .map(item => item[0].toUpperCase() + item.slice(1))
     .join(' ');
-};
 
 const normalizeSearchValue = (value: string) =>
   String(value || '')
@@ -80,10 +66,9 @@ const withNearDistance = (
   near?: [number, number],
 ): PlaceSuggestion => {
   if (!near) return item;
-  const nextDistance = Math.round(distanceMeters(near, item.coordinate));
   return {
     ...item,
-    distanceMeters: nextDistance,
+    distanceMeters: Math.round(distanceMeters(near, item.coordinate)),
   };
 };
 
@@ -156,14 +141,8 @@ const scorePlaceSuggestion = (
   }
 
   switch (item.trust?.providerId) {
-    case 'backend':
+    case 'alert_backend':
       score += 80;
-      break;
-    case 'open-meteo':
-      score += 40;
-      break;
-    case 'photon':
-      score += 25;
       break;
     case 'recent-local':
       score += 120;
@@ -177,7 +156,6 @@ const scorePlaceSuggestion = (
 
 const dedupePlaces = (items: PlaceSuggestion[]) => {
   const unique = new Map<string, PlaceSuggestion>();
-
   items.forEach(item => {
     const key = [
       normalizeSearchValue(item.name),
@@ -185,20 +163,18 @@ const dedupePlaces = (items: PlaceSuggestion[]) => {
       item.coordinate[0].toFixed(4),
       item.coordinate[1].toFixed(4),
     ].join('|');
-
     if (!unique.has(key)) {
       unique.set(key, item);
     }
   });
-
   return Array.from(unique.values());
 };
 
 const sortPlacesBySearchContext = (
   items: PlaceSuggestion[],
   input: SearchInput,
-) => {
-  return [...items]
+) =>
+  [...items]
     .map(item => withNearDistance(item, input.near))
     .sort((left, right) => {
       const scoreDelta =
@@ -220,7 +196,6 @@ const sortPlacesBySearchContext = (
         sensitivity: 'base',
       });
     });
-};
 
 const toPlace = (params: {
   id: string;
@@ -232,313 +207,126 @@ const toPlace = (params: {
   providerId: string;
   connectionStatus: 'online' | 'degraded';
   near?: [number, number];
-  worldview?: string;
-}): PlaceSuggestion => {
-  const nearDistance = params.near
+}): PlaceSuggestion => ({
+  id: params.id,
+  name: params.name,
+  address: params.address,
+  coordinate: params.coordinate,
+  countryCode: params.countryCode,
+  distanceMeters: params.near
     ? Math.round(distanceMeters(params.near, params.coordinate))
-    : undefined;
-
-  return {
-    id: params.id,
-    name: params.name,
-    address: params.address,
-    coordinate: params.coordinate,
-    countryCode: params.countryCode,
-    distanceMeters: nearDistance,
-    trust: {
-      sourceName: params.sourceName,
-      updatedAt: new Date().toISOString(),
-      connectionStatus: params.connectionStatus,
-      providerId: params.providerId,
-      worldview: params.worldview,
-    },
-  };
-};
-
-const backendSearch = async (input: SearchInput): Promise<PlaceSuggestion[] | null> => {
-  const base = getApiBaseUrl();
-  if (!base) return null;
-
-  const trimmed = base.endsWith('/') ? base.slice(0, -1) : base;
-  const query = [
-    `q=${encodeURIComponent(input.query)}`,
-    `locale=${encodeURIComponent(input.locale)}`,
-    input.countryCode ? `country=${encodeURIComponent(input.countryCode)}` : null,
-    input.worldview ? `worldview=${encodeURIComponent(input.worldview)}` : null,
-    input.near ? `lat=${encodeURIComponent(String(input.near[1]))}` : null,
-    input.near ? `lon=${encodeURIComponent(String(input.near[0]))}` : null,
-  ]
-    .filter(Boolean)
-    .join('&');
-
-  const url = `${trimmed}/v1/maps/geocode/autocomplete?${query}`;
-
-  const res = await fetch(url);
-  if (!res.ok) return null;
-
-  const json = (await res.json()) as any;
-  const items: any[] = Array.isArray(json?.results)
-    ? json.results
-    : Array.isArray(json?.features)
-      ? json.features
-      : [];
-
-  if (items.length === 0) return null;
-
-  return items
-    .map(item => {
-      const lon = Number(item?.lon ?? item?.longitude ?? item?.center?.[0] ?? item?.geometry?.coordinates?.[0]);
-      const lat = Number(item?.lat ?? item?.latitude ?? item?.center?.[1] ?? item?.geometry?.coordinates?.[1]);
-      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-
-      const name =
-        String(item?.name ?? item?.title ?? item?.properties?.name ?? item?.text ?? '').trim() ||
-        titleCase(input.query);
-
-      const address =
-        String(item?.address ?? item?.full_address ?? item?.place_name ?? item?.properties?.label ?? '').trim() ||
-        name;
-
-      return toPlace({
-        id: String(item?.id ?? `${lat},${lon}`),
-        name,
-        address,
-        coordinate: [lon, lat],
-        countryCode: item?.countryCode ?? item?.country_code,
-        sourceName: 'Alert Maps',
-        providerId: 'backend',
-        connectionStatus: 'online',
-        near: input.near,
-        worldview: input.worldview,
-      });
-    })
-    .filter((item): item is PlaceSuggestion => Boolean(item));
-};
-
-const openMeteoSearch = async (input: SearchInput): Promise<PlaceSuggestion[] | null> => {
-  const lang = toLanguageCode(input.locale);
-  const params = [
-    `name=${encodeURIComponent(input.query)}`,
-    'count=8',
-    `language=${encodeURIComponent(lang)}`,
-    'format=json',
-  ];
-  if (input.countryCode) params.push(`countryCode=${encodeURIComponent(input.countryCode.toUpperCase())}`);
-
-  const url = `https://geocoding-api.open-meteo.com/v1/search?${params.join('&')}`;
-  const res = await fetch(url);
-  if (!res.ok) return null;
-
-  const json = (await res.json()) as any;
-  const rows: any[] = Array.isArray(json?.results) ? json.results : [];
-  if (rows.length === 0) return null;
-
-  return rows
-    .map((row, index) => {
-      const lat = Number(row?.latitude);
-      const lon = Number(row?.longitude);
-      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-
-      const name = String(row?.name || '').trim();
-      const parts = [row?.admin1, row?.country]
-        .map(part => String(part || '').trim())
-        .filter(Boolean);
-      const address = parts.length > 0 ? `${name}, ${parts.join(', ')}` : name;
-
-      return toPlace({
-        id: `meteo-${row?.id ?? `${lat}:${lon}:${index}`}`,
-        name,
-        address,
-        coordinate: [lon, lat],
-        countryCode: row?.country_code,
-        sourceName: 'Open-Meteo',
-        providerId: 'open-meteo',
-        connectionStatus: 'online',
-        near: input.near,
-        worldview: input.worldview,
-      });
-    })
-    .filter((item): item is PlaceSuggestion => Boolean(item));
-};
-
-const photonSearch = async (input: SearchInput): Promise<PlaceSuggestion[] | null> => {
-  const lang = toLanguageCode(input.locale);
-  const params = [
-    `q=${encodeURIComponent(input.query)}`,
-    'limit=8',
-    `lang=${encodeURIComponent(lang)}`,
-  ];
-
-  if (input.near) {
-    params.push(`lon=${encodeURIComponent(String(input.near[0]))}`);
-    params.push(`lat=${encodeURIComponent(String(input.near[1]))}`);
-  }
-
-  const url = `https://photon.komoot.io/api/?${params.join('&')}`;
-  const res = await fetch(url);
-  if (!res.ok) return null;
-
-  const json = (await res.json()) as any;
-  const features: any[] = Array.isArray(json?.features) ? json.features : [];
-  if (features.length === 0) return null;
-
-  return features
-    .map((feature, index) => {
-      const lon = Number(feature?.geometry?.coordinates?.[0]);
-      const lat = Number(feature?.geometry?.coordinates?.[1]);
-      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-
-      const props = feature?.properties || {};
-      const name = String(props?.name || '').trim() || titleCase(input.query);
-      const address = [props?.street, props?.housenumber, props?.city, props?.country]
-        .map(part => String(part || '').trim())
-        .filter(Boolean)
-        .join(', ');
-
-      return toPlace({
-        id: `photon-${props?.osm_id ?? `${lat}:${lon}:${index}`}`,
-        name,
-        address: address || name,
-        coordinate: [lon, lat],
-        countryCode: props?.countrycode,
-        sourceName: 'Photon',
-        providerId: 'photon',
-        connectionStatus: 'online',
-        near: input.near,
-        worldview: input.worldview,
-      });
-    })
-    .filter((item): item is PlaceSuggestion => Boolean(item));
-};
-
-const openMeteoReverse = async (input: ReverseInput): Promise<PlaceSuggestion | null> => {
-  const lang = toLanguageCode(input.locale);
-  const [lon, lat] = input.coordinate;
-  const url =
-    `https://geocoding-api.open-meteo.com/v1/reverse?latitude=${encodeURIComponent(String(lat))}` +
-    `&longitude=${encodeURIComponent(String(lon))}&language=${encodeURIComponent(lang)}&count=1`;
-
-  const res = await fetch(url);
-  if (!res.ok) return null;
-
-  const json = (await res.json()) as any;
-  const row = Array.isArray(json?.results) ? json.results[0] : null;
-  if (!row) return null;
-
-  const name = String(row?.name || '').trim() || 'Selected location';
-  const parts = [row?.admin1, row?.country]
-    .map(part => String(part || '').trim())
-    .filter(Boolean);
-
-  return toPlace({
-    id: `reverse-${lat}:${lon}`,
-    name,
-    address: parts.length > 0 ? `${name}, ${parts.join(', ')}` : name,
-    coordinate: [lon, lat],
-    countryCode: row?.country_code,
-    sourceName: 'Open-Meteo',
-    providerId: 'open-meteo-reverse',
-    connectionStatus: 'online',
-    worldview: input.worldview,
-  });
-};
+    : undefined,
+  trust: {
+    sourceName: params.sourceName,
+    updatedAt: new Date().toISOString(),
+    connectionStatus: params.connectionStatus,
+    providerId: params.providerId,
+  },
+});
 
 export const GeocodingService = {
   async search(input: SearchInput): Promise<PlaceSuggestion[]> {
     const query = input.query.trim();
     const cached = await OfflineCacheService.getRecentPlaces();
     const normalizedQuery = query.toLowerCase();
-    const cachedRecent = cached
-      .map(item => ({
-        ...withNearDistance(item, input.near),
-        trust: {
-          ...item.trust,
-          providerId: 'recent-local',
-          sourceName: item.trust?.sourceName || 'Alert recent',
-          connectionStatus: item.trust?.connectionStatus || 'online',
-        },
-      }));
-    const cachedMatch = cachedRecent
-      .filter(item => {
-        if (!normalizedQuery) return true;
-        const hay = `${item.name} ${item.address}`.toLowerCase();
-        return hay.includes(normalizedQuery);
-      });
+    const cachedRecent = cached.map(item => ({
+      ...withNearDistance(item, input.near),
+      trust: {
+        ...item.trust,
+        providerId: 'recent-local',
+        sourceName: item.trust?.sourceName || 'Alert recent',
+        connectionStatus: item.trust?.connectionStatus || 'online',
+      },
+    }));
+    const cachedMatch = cachedRecent.filter(item => {
+      if (!normalizedQuery) return true;
+      const haystack = `${item.name} ${item.address}`.toLowerCase();
+      return haystack.includes(normalizedQuery);
+    });
     const contextualRecent = dedupePlaces([...cachedMatch, ...cachedRecent]);
 
     if (query.length === 0) {
       return sortPlacesBySearchContext(contextualRecent, input).slice(0, 8);
     }
 
-    const providerResult = await ProviderRouter.execute(
-      [
-        {
-          id: 'backend-geocoding',
-          timeoutMs: 1300,
-          cooldownMs: 45_000,
-          execute: backendSearch,
-        },
-        {
-          id: 'open-meteo-geocoding',
-          timeoutMs: 1200,
-          cooldownMs: 20_000,
-          execute: openMeteoSearch,
-        },
-        {
-          id: 'photon-geocoding',
-          timeoutMs: 1200,
-          cooldownMs: 20_000,
-          execute: photonSearch,
-        },
-      ],
-      input,
-      { maxRetriesPerProvider: 1 },
-    );
+    try {
+      const results = await AlertMapsApiAdapter.searchPlaces({
+        query,
+        locale: input.locale,
+        countryCode: input.countryCode,
+        near: input.near,
+      });
+      const providerPlaces = results
+        .map(item => {
+          const longitude = Number(item?.longitude);
+          const latitude = Number(item?.latitude);
+          if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+            return null;
+          }
+          const name = String(item?.name || '').trim() || titleCase(query);
+          const address = String(item?.address || '').trim() || name;
+          return toPlace({
+            id: String(item?.id || `${latitude},${longitude}`),
+            name,
+            address,
+            coordinate: [longitude, latitude],
+            countryCode: item?.countryCode || undefined,
+            sourceName: String(item?.sourceName || 'Alert Maps'),
+            providerId: 'alert_backend',
+            connectionStatus:
+              item?.connectionStatus === 'degraded' ? 'degraded' : 'online',
+            near: input.near,
+          });
+        })
+        .filter((item): item is PlaceSuggestion => Boolean(item));
 
-    if (!providerResult?.data || providerResult.data.length === 0) {
+      if (providerPlaces.length === 0) {
+        return sortPlacesBySearchContext(contextualRecent, input).slice(0, 8);
+      }
+
+      const merged = dedupePlaces([
+        ...providerPlaces,
+        ...(query.length < 2 ? contextualRecent : cachedMatch),
+      ]);
+      return sortPlacesBySearchContext(merged, input).slice(0, 8);
+    } catch {
       return sortPlacesBySearchContext(contextualRecent, input).slice(0, 8);
     }
-
-    const providerPlaces = providerResult.data.map(item => ({
-        ...item,
-        trust: {
-          ...item.trust,
-          connectionStatus: providerResult.connectionStatus,
-          providerId: providerResult.providerId,
-        },
-    }));
-
-    const merged = dedupePlaces([
-      ...providerPlaces,
-      ...(query.length < 2 ? contextualRecent : cachedMatch),
-    ]);
-    return sortPlacesBySearchContext(merged, input).slice(0, 8);
   },
 
   async reverse(input: ReverseInput): Promise<PlaceSuggestion | null> {
-    const providerResult = await ProviderRouter.execute(
-      [
-        {
-          id: 'open-meteo-reverse',
-          timeoutMs: 1200,
-          cooldownMs: 20_000,
-          execute: openMeteoReverse,
-        },
-      ],
-      input,
-      { maxRetriesPerProvider: 0 },
-    );
+    try {
+      const payload = await AlertMapsApiAdapter.reversePlace({
+        latitude: input.coordinate[1],
+        longitude: input.coordinate[0],
+        locale: input.locale,
+      });
+      const place = payload?.place;
+      if (!place) return null;
 
-    if (!providerResult?.data) return null;
+      const longitude = Number(place.longitude);
+      const latitude = Number(place.latitude);
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+        return null;
+      }
 
-    return {
-      ...providerResult.data,
-      trust: {
-        ...providerResult.data.trust,
-        connectionStatus: providerResult.connectionStatus,
-        providerId: providerResult.providerId,
-      },
-    };
+      return toPlace({
+        id: String(place.id || `reverse-${latitude}:${longitude}`),
+        name: String(place.name || '').trim() || 'Selected location',
+        address:
+          String(place.address || '').trim() ||
+          String(place.name || '').trim() ||
+          'Selected location',
+        coordinate: [longitude, latitude],
+        countryCode: place.countryCode || undefined,
+        sourceName: String(place.sourceName || 'Alert Maps'),
+        providerId: 'alert_backend',
+        connectionStatus:
+          place.connectionStatus === 'degraded' ? 'degraded' : 'online',
+      });
+    } catch {
+      return null;
+    }
   },
 };
 

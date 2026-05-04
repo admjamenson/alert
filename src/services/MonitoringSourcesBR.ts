@@ -1,88 +1,67 @@
 export type SourceHint = {
   label: string;
-  url?: string;
   requiresAccess?: boolean;
 };
 
+const WEATHER_OFFICIAL_LABEL = 'Fontes oficiais monitoradas pelo Alert';
+const SEISMIC_OFFICIAL_LABEL = 'Fontes oficiais de risco geofisico monitoradas pelo Alert';
+const HEALTH_OFFICIAL_LABEL = 'Fontes oficiais de saude monitoradas pelo Alert';
+const INFRA_OFFICIAL_LABEL = 'Fontes oficiais de infraestrutura monitoradas pelo Alert';
+
 export const MonitoringSourcesBR: Record<string, SourceHint> = {
-  // Infrastructure / official open data (BR)
   energy_outage: {
-    label: 'Fonte oficial: ANEEL (Dados Abertos)',
-    url: 'https://dadosabertos.aneel.gov.br/',
+    label: INFRA_OFFICIAL_LABEL,
   },
   water_outage: {
-    label: 'Fonte oficial: ANA (HidroWebService)',
-    url: 'https://www.ana.gov.br/hidrowebservice/swagger-ui/index.html',
+    label: INFRA_OFFICIAL_LABEL,
     requiresAccess: true,
   },
-
-  // Hazards (official / institutional sources used by the app today)
-  // NOAA (US National Weather Service) - alerts API
   storm: {
-    label: 'Fonte oficial: NOAA / NWS (Weather Alerts)',
-    url: 'https://api.weather.gov/',
+    label: WEATHER_OFFICIAL_LABEL,
   },
   flood: {
-    label: 'Fonte oficial: NOAA / NWS (Weather Alerts)',
-    url: 'https://api.weather.gov/',
+    label: WEATHER_OFFICIAL_LABEL,
   },
   lightning: {
-    label: 'Fonte oficial: NOAA / NWS (Weather Alerts)',
-    url: 'https://api.weather.gov/',
+    label: WEATHER_OFFICIAL_LABEL,
   },
   tornado: {
-    label: 'Fonte oficial: NOAA / NWS (Weather Alerts)',
-    url: 'https://api.weather.gov/',
+    label: WEATHER_OFFICIAL_LABEL,
   },
   hurricane: {
-    label: 'Fonte oficial: NOAA / NWS (Weather Alerts)',
-    url: 'https://api.weather.gov/',
+    label: WEATHER_OFFICIAL_LABEL,
   },
   landslide: {
-    label: 'Fonte oficial: NOAA / NWS (Weather Alerts)',
-    url: 'https://api.weather.gov/',
+    label: WEATHER_OFFICIAL_LABEL,
   },
   hail: {
-    label: 'Fonte oficial: NOAA / NWS (Weather Alerts)',
-    url: 'https://api.weather.gov/',
+    label: WEATHER_OFFICIAL_LABEL,
   },
   heatwave: {
-    label: 'Fonte oficial: NOAA / NWS (Weather Alerts)',
-    url: 'https://api.weather.gov/',
+    label: WEATHER_OFFICIAL_LABEL,
   },
   fog: {
-    label: 'Fonte oficial: NOAA / NWS (Weather Alerts)',
-    url: 'https://api.weather.gov/',
+    label: WEATHER_OFFICIAL_LABEL,
   },
   wildfire: {
-    label: 'Fonte oficial: NOAA / NWS (Weather Alerts)',
-    url: 'https://api.weather.gov/',
+    label: WEATHER_OFFICIAL_LABEL,
   },
   tsunami: {
-    label: 'Fonte oficial: NOAA / NWS (Weather Alerts)',
-    url: 'https://api.weather.gov/',
+    label: WEATHER_OFFICIAL_LABEL,
   },
   snowstorm: {
-    label: 'Fonte oficial: NOAA / NWS (Weather Alerts)',
-    url: 'https://api.weather.gov/',
+    label: WEATHER_OFFICIAL_LABEL,
   },
   gale: {
-    label: 'Fonte oficial: NOAA / NWS (Weather Alerts)',
-    url: 'https://api.weather.gov/',
+    label: WEATHER_OFFICIAL_LABEL,
   },
-
-  // USGS - earthquakes API
   earthquake: {
-    label: 'Fonte oficial: USGS (Earthquake Hazards Program)',
-    url: 'https://earthquake.usgs.gov/',
+    label: SEISMIC_OFFICIAL_LABEL,
   },
-
-  // Pandemic / public health
   pandemic: {
-    label: 'Fonte oficial: OMS e autoridades nacionais de saúde',
-    url: 'https://data.who.int/dashboards/covid19/data',
+    label: HEALTH_OFFICIAL_LABEL,
   },
   epidemic: {
-    label: 'Fonte oficial: secretarias estaduais/municipais de saúde',
+    label: HEALTH_OFFICIAL_LABEL,
   },
 };

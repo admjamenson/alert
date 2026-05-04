@@ -7,6 +7,10 @@ const {
 } = require('../eventHub/adapters/routingOsrmAdapter');
 const { buildRouteRuntimeDiagnostics } = require('../config/runtime');
 const { getRouteOptionsSnapshot } = require('../services/RouteOptionsService');
+const { resolveRequestIdentity } = require('../http/identity');
+const {
+  recordRoutingUsage,
+} = require('../billing/billingUsageRepository');
 
 const parseFiniteQueryNumber = value => {
   const parsed = Number(value);
@@ -116,11 +120,13 @@ const normalizeSearchResults = results =>
 
 const registerMapsRoutes = (app, deps = {}) => {
   const {
+    db,
     config,
     logger = console,
     searchPlacesFn = searchPlaces,
     reverseGeocodeFn = reverseGeocode,
     routeOptionsSnapshot = getRouteOptionsSnapshot,
+    recordRoutingUsageFn = recordRoutingUsage,
   } = deps;
 
   const handleSearch = async (req, res) => {
@@ -253,6 +259,17 @@ const registerMapsRoutes = (app, deps = {}) => {
               routeParams,
             ),
           );
+      }
+
+      if (payload?.available && Array.isArray(payload?.routes) && payload.routes.length > 0) {
+        await recordRoutingUsageFn({
+          db,
+          identity: resolveRequestIdentity(req),
+        }).catch(error => {
+          logger.warn('[maps/routes] usage_tracking_failed', {
+            error: error?.message || 'unknown',
+          });
+        });
       }
 
       return res.json(

@@ -10,12 +10,12 @@ import { name as appName } from './app.json';
 
 enableScreens(true);
 
-const BILLING_API_BASE_URL = 'https://alert-vmpj.onrender.com';
 const JS_ENTRY_TS = Date.now();
-
-globalThis.ALERT_API_URL = BILLING_API_BASE_URL;
-globalThis.__ALERT_API_URL__ = BILLING_API_BASE_URL;
 globalThis.__ALERT_JS_ENTRY_TS__ = JS_ENTRY_TS;
+globalThis.__ALERT_STARTUP_MARKS__ = {
+  APP_START_BEGIN: JS_ENTRY_TS,
+};
+console.info('[ALERT-STARTUP] APP_START_BEGIN +0ms');
 
 const normalizeBootError = (stage, error) => {
   const message =
@@ -43,14 +43,27 @@ try {
 }
 
 const BootErrorScreen = () => (
-  <View style={styles.screen}>
-    <Text style={styles.title}>Alert bootstrap error</Text>
-    <Text style={styles.body}>
-      {fatalBootError?.message || 'unknown_boot_error'}
-    </Text>
-    <Text style={styles.caption}>{BILLING_API_BASE_URL}</Text>
-  </View>
+  <BootErrorView errorMessage={fatalBootError?.message || 'unknown_boot_error'} />
 );
+
+const BootErrorView = ({ errorMessage }) => {
+  let hasApiBaseUrl = true;
+  try {
+    hasApiBaseUrl = require('./src/core/config').hasAlertApiBaseUrl();
+  } catch {
+    hasApiBaseUrl = false;
+  }
+
+  return (
+    <View style={styles.screen}>
+      <Text style={styles.title}>Alert bootstrap error</Text>
+      <Text style={styles.body}>{errorMessage}</Text>
+      {!hasApiBaseUrl ? (
+        <Text style={styles.caption}>ALERT_API_URL missing</Text>
+      ) : null}
+    </View>
+  );
+};
 
 if (__DEV__) {
   LogBox.ignoreLogs([

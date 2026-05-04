@@ -1,0 +1,160 @@
+﻿diff --git a/backend/index.js b/backend/index.js
+index 2ae3a9e..2801bb6 100644
+--- a/backend/index.js
++++ b/backend/index.js
+@@ -27,6 +27,11 @@ const {
+   buildSosPushMessage,
+   createSosFanoutDispatcher,
+ } = require('./src/services/SosFanoutDispatcher');
++const {
++  buildRelaySosRequestId,
++  logRelaySosEvent,
++  sanitizeErrorCode,
++} = require('./src/observability/relaySosOperationalLogger');
+ const {
+   createExternalSosFanoutQueue,
+ } = require('./src/services/createSosFanoutQueue');
+@@ -991,9 +996,38 @@ app.post('/api/relay/sos', relayAuthMiddleware, async (req, res) => {
+   const userId = req.relay.userId;
+   const deviceId = req.relay.deviceId;
+   const rateKey = `relay:sos:${userId}:${deviceId}`;
++  const requestId = buildRelaySosRequestId(
++    req.headers['x-alert-request-id'] ||
++      req.headers['x-request-id'] ||
++      req.body?.requestId,
++  );
++  const route = '/api/relay/sos';
++  const method = 'POST';
++  res.setHeader('X-Alert-Request-Id', requestId);
++
++  logRelaySosEvent(console, 'relay_sos_request_started', {
++    requestId,
++    route,
++    method,
++    accepted: false,
++    queued: false,
++    fallbackUsed: false,
++  });
+ 
+   if (enforceRelayRateLimit(rateKey, 20)) {
+-    markRelayMetric('sos', false, Date.now() - startedAt);
++    const durationMs = Date.now() - startedAt;
++    markRelayMetric('sos', false, durationMs);
++    logRelaySosEvent(console, 'relay_sos_request_failed', {
++      requestId,
++      route,
++      method,
++      statusCode: 429,
++      accepted: false,
++      queued: false,
++      fallbackUsed: false,
++      errorCode: 'rate_limited',
++      durationMs,
++    });
+     return res.status(429).json({ error: 'rate_limited' });
+   }
+ 
+@@ -1011,7 +1045,19 @@ app.post('/api/relay/sos', relayAuthMiddleware, async (req, res) => {
+       typeof payload.location.latitude !== 'number' ||
+       typeof payload.location.longitude !== 'number'
+     ) {
+-      markRelayMetric('sos', false, Date.now() - startedAt);
++      const durationMs = Date.now() - startedAt;
++      markRelayMetric('sos', false, durationMs);
++      logRelaySosEvent(console, 'relay_sos_request_failed', {
++        requestId,
++        route,
++        method,
++        statusCode: 400,
++        accepted: false,
++        queued: false,
++        fallbackUsed: false,
++        errorCode: 'invalid_payload',
++        durationMs,
++      });
+       return res.status(400).json({ error: 'invalid_payload' });
+     }
+ 
+@@ -1021,12 +1067,36 @@ app.post('/api/relay/sos', relayAuthMiddleware, async (req, res) => {
+       const version = Number(integrity.version || 0);
+       const digest = String(integrity.digest || '').trim().toLowerCase();
+       if (alg !== 'sha256' || version !== 1 || !digest) {
+-        markRelayMetric('sos', false, Date.now() - startedAt);
++        const durationMs = Date.now() - startedAt;
++        markRelayMetric('sos', false, durationMs);
++        logRelaySosEvent(console, 'relay_sos_request_failed', {
++          requestId,
++          route,
++          method,
++          statusCode: 400,
++          accepted: false,
++          queued: false,
++          fallbackUsed: false,
++          errorCode: 'invalid_integrity',
++          durationMs,
++        });
+         return res.status(400).json({ error: 'invalid_integrity' });
+       }
+       const expectedDigest = computeRelaySosIntegrityDigest(payload);
+       if (digest !== expectedDigest) {
+-        markRelayMetric('sos', false, Date.now() - startedAt);
++        const durationMs = Date.now() - startedAt;
++        markRelayMetric('sos', false, durationMs);
++        logRelaySosEvent(console, 'relay_sos_request_failed', {
++          requestId,
++          route,
++          method,
++          statusCode: 400,
++          accepted: false,
++          queued: false,
++          fallbackUsed: false,
++          errorCode: 'integrity_mismatch',
++          durationMs,
++        });
+         return res.status(400).json({ error: 'integrity_mismatch' });
+       }
+       integrityRecord = {
+@@ -1063,16 +1133,41 @@ app.post('/api/relay/sos', relayAuthMiddleware, async (req, res) => {
+       },
+     });
+ 
+-    markRelayMetric('sos', true, Date.now() - startedAt);
++    const durationMs = Date.now() - startedAt;
++    markRelayMetric('sos', true, durationMs);
++    logRelaySosEvent(console, 'relay_sos_request_accepted', {
++      requestId,
++      relayId: docRef.id,
++      route,
++      method,
++      statusCode: 200,
++      accepted: true,
++      queued: false,
++      fallbackUsed: false,
++      durationMs,
++    });
+ 
+     return res.json({
+       ok: true,
++      requestId,
+       relayId: docRef.id,
+       acceptedAt: nowIso(),
+     });
+   } catch (error) {
++    const durationMs = Date.now() - startedAt;
+     console.error('[relay/sos]', error);
+-    markRelayMetric('sos', false, Date.now() - startedAt);
++    markRelayMetric('sos', false, durationMs);
++    logRelaySosEvent(console, 'relay_sos_request_failed', {
++      requestId,
++      route,
++      method,
++      statusCode: 500,
++      accepted: false,
++      queued: false,
++      fallbackUsed: false,
++      errorCode: sanitizeErrorCode(error?.code || error?.message || 'internal'),
++      durationMs,
++    });
+     return res.status(500).json({ error: 'internal' });
+   }
+ });

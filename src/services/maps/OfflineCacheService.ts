@@ -35,6 +35,16 @@ const routeCacheKey = (from: [number, number], to: [number, number]) => {
   return `${RECENT_ROUTES_PREFIX}${value}`;
 };
 
+const isCacheableRoute = (route: RouteOption | null | undefined): route is RouteOption => {
+  if (!route) return false;
+  if (route.routeMode !== 'provider') return false;
+  if (route.precision !== 'high') return false;
+  if (route.degraded) return false;
+  if (!route.providerAvailable) return false;
+  if (!Array.isArray(route.geometry) || route.geometry.length < 2) return false;
+  return true;
+};
+
 export const OfflineCacheService = {
   async getRecentPlaces(): Promise<PlaceSuggestion[]> {
     const parsed = safeParse<PlaceSuggestion[]>(await AsyncStorage.getItem(RECENT_PLACES_KEY));
@@ -84,6 +94,8 @@ export const OfflineCacheService = {
   },
 
   async saveRoute(from: [number, number], to: [number, number], routes: RouteOption[]): Promise<void> {
+    if (!Array.isArray(routes) || routes.length === 0) return;
+    if (!routes.every(route => isCacheableRoute(route))) return;
     const key = routeCacheKey(from, to);
     await AsyncStorage.setItem(
       key,
@@ -96,7 +108,8 @@ export const OfflineCacheService = {
     const parsed = safeParse<{ ts: number; routes: RouteOption[] }>(await AsyncStorage.getItem(key));
     if (!parsed || !Array.isArray(parsed.routes)) return null;
     if (Date.now() - Number(parsed.ts) > ROUTE_TTL_MS) return null;
-    return parsed.routes;
+    const cacheableRoutes = parsed.routes.filter(route => isCacheableRoute(route));
+    return cacheableRoutes.length > 0 ? cacheableRoutes : null;
   },
 
   async getGuardians(): Promise<GuardianSuggestion[]> {
@@ -106,6 +119,8 @@ export const OfflineCacheService = {
     const mapped: Array<GuardianSuggestion | null> = parsed.map(item => {
         const id = String(item?.id ?? item?.recordID ?? item?.remoteId ?? item?.phone ?? '').trim();
         if (!id) return null;
+        const coordinate = normalizeGuardianLocation(item);
+        if (!coordinate) return null;
 
         const name =
           String(item?.name ?? item?.displayName ?? item?.fromName ?? item?.title ?? '').trim() ||
@@ -114,9 +129,10 @@ export const OfflineCacheService = {
         return {
           id,
           name,
+          coordinate,
           phone: item?.phone || item?.phoneNumber || undefined,
           avatarUri: item?.avatarUri || undefined,
-          lastLocation: normalizeGuardianLocation(item),
+          lastLocation: coordinate,
           lastUpdatedAt:
             typeof item?.lastUpdatedAt === 'string'
               ? item.lastUpdatedAt

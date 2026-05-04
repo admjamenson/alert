@@ -2,29 +2,23 @@ import React, { useCallback, useRef, useState } from 'react';
 import { View, StyleSheet, ActivityIndicator, Text, TouchableOpacity, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
-import { useRoute, RouteProp } from '@react-navigation/native';
+import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useTheme } from '../context/ThemeContext';
 import { ThemeTokens } from '../constants/ThemeTokens';
-
-type RouteParams = {
-  WebView: {
-    url: string;
-    title?: string;
-    intent?: 'billing_checkout' | 'billing_portal';
-  };
-};
+import { RootStackParamList } from '../navigation/types';
 
 const FONT_FAMILY =
   Platform.OS === 'ios'
     ? ThemeTokens.typography.families.ios
     : ThemeTokens.typography.families.android;
 
-const WebViewScreen = ({ navigation }: any) => {
+type Props = NativeStackScreenProps<RootStackParamList, 'WebView'>;
+
+const WebViewScreen = ({ navigation, route }: Props) => {
   const [isLoading, setIsLoading] = useState(true);
   const { colors } = useTheme();
   const closingRef = useRef(false);
-  const route = useRoute<RouteProp<RouteParams, 'WebView'>>();
   const { url, title, intent } = route.params || { url: 'https://www.google.com' };
 
   const handleLoadEnd = () => {

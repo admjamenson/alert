@@ -52,6 +52,11 @@ const {
 const {buildReleasePolicy} = require('./src/release/releasePolicy');
 const {
   isLoadTestSafeMode,
+  isRemoteOverrideDisabled,
+  buildSafeModeRiskFeedPayload,
+  buildSafeModeEntitlementsPayload,
+  recordSafeModeRiskBypassMetric,
+  recordSafeModeEntitlementBypassMetric,
   getSafeModeMetrics,
 } = require('./src/config/safeMode');
 
@@ -253,6 +258,10 @@ const buildSafeServiceMetrics = (serviceName, error) => ({
   status: 'degraded',
   error: error?.message || `${serviceName}_metrics_unavailable`,
   totalRequests: 0,
+  providerCalls: 0,
+  firestoreCalls: 0,
+  firestoreLookups: 0,
+  billingLookups: 0,
   cacheHits: 0,
   cacheMisses: 0,
   cacheHitRate: 0,
@@ -332,28 +341,51 @@ const handleMetricsEndpoint = (_req, res) => {
       remoteOverrideDisabled: safeModeMetrics.remoteOverrideDisabled,
     };
 
+    const riskFeedStatus = {
+      totalRequests:
+        Number(riskFeedMetrics.totalRequests || 0) +
+        Number(safeModeMetrics.hardBypassRiskFeedCount || 0),
+      safeModeBypass: Number(safeModeMetrics.hardBypassRiskFeedCount || 0),
+      providerCalls: Number(riskFeedMetrics.providerCalls || 0),
+      firestoreCalls: Number(riskFeedMetrics.firestoreCalls || 0),
+      cacheHits: Number(riskFeedMetrics.cacheHits || 0),
+      cacheMisses: Number(riskFeedMetrics.cacheMisses || 0),
+      timeouts: Number(riskFeedMetrics.timeouts || 0),
+      errors: Number(riskFeedMetrics.errors || 0),
+    };
+
+    const entitlementStatus = {
+      totalRequests:
+        Number(entitlementSnapshotMetrics.totalRequests || 0) +
+        Number(safeModeMetrics.hardBypassEntitlementsCount || 0),
+      safeModeBypass: Number(
+        safeModeMetrics.hardBypassEntitlementsCount || 0,
+      ),
+      firestoreLookups: Number(
+        entitlementSnapshotMetrics.firestoreLookups || 0,
+      ),
+      billingLookups: Number(entitlementSnapshotMetrics.billingLookups || 0),
+      cacheHits: Number(entitlementSnapshotMetrics.cacheHits || 0),
+      cacheMisses: Number(entitlementSnapshotMetrics.cacheMisses || 0),
+      timeouts: Number(entitlementSnapshotMetrics.timeouts || 0),
+      errors: Number(entitlementSnapshotMetrics.errors || 0),
+    };
+
     return res.status(200).json({
       ok: true,
       generatedAt: new Date().toISOString(),
+      riskFeed: riskFeedStatus,
+      entitlements: entitlementStatus,
       services: {
         riskFeed: {
-          totalRequests: riskFeedMetrics.totalRequests || 0,
-          cacheHits: riskFeedMetrics.cacheHits || 0,
-          cacheMisses: riskFeedMetrics.cacheMisses || 0,
+          ...riskFeedStatus,
           cacheHitRate: riskFeedMetrics.cacheHitRate || 0,
-          timeouts: riskFeedMetrics.timeouts || 0,
-          errors: riskFeedMetrics.errors || 0,
           coalescedRequests: riskFeedMetrics.coalescedRequests || 0,
           uptimeMs: riskFeedMetrics.uptimeMs || 0,
         },
         entitlements: {
-          totalRequests: entitlementSnapshotMetrics.totalRequests || 0,
-          cacheHits: entitlementSnapshotMetrics.cacheHits || 0,
-          cacheMisses: entitlementSnapshotMetrics.cacheMisses || 0,
+          ...entitlementStatus,
           cacheHitRate: entitlementSnapshotMetrics.cacheHitRate || 0,
-          firestoreLookups: entitlementSnapshotMetrics.firestoreLookups || 0,
-          timeouts: entitlementSnapshotMetrics.timeouts || 0,
-          errors: entitlementSnapshotMetrics.errors || 0,
           coalescedRequests: entitlementSnapshotMetrics.coalescedRequests || 0,
           uptimeMs: entitlementSnapshotMetrics.uptimeMs || 0,
         },
@@ -569,6 +601,28 @@ app.use((req, res, next) => {
   return next();
 });
 
+// Hard bypass dedicado para safe mode antes das rotas reais.
+app.get('/api/v1/risk/feed', (req, res, next) => {
+  if (!isLoadTestSafeMode()) {
+    return next();
+  }
+
+  recordSafeModeRiskBypassMetric();
+  return res.status(200).json(buildSafeModeRiskFeedPayload(req));
+});
+
+// Hard bypass dedicado para safe mode antes das rotas reais.
+app.get('/api/me/entitlements', (req, res, next) => {
+  if (!isLoadTestSafeMode()) {
+    return next();
+  }
+
+  const startedAt = Date.now();
+  recordSafeModeEntitlementBypassMetric();
+  markRequestMetric(entitlementMetrics, true, Date.now() - startedAt);
+  return res.status(200).json(buildSafeModeEntitlementsPayload(req));
+});
+
 registerEntitlementRoutes(app, {
   db,
   config: runtimeConfig,
@@ -666,14 +720,6 @@ const sanitizeReleaseOverride = data => {
     ...data,
     updatedAt: firestoreTimeToIso(data.updatedAt) || data.updatedAt || null,
   };
-};
-
-// Check if remote override should be disabled (safe mode / load test)
-const isRemoteOverrideDisabled = () => {
-  return (
-    process.env.ALERT_DISABLE_REMOTE_RELEASE_OVERRIDE === 'true' ||
-    process.env.ALERT_LOAD_TEST_SAFE_MODE === 'true'
-  );
 };
 
 // Track if we've logged the remote override disabled message

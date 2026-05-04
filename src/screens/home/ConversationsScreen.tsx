@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
+import type {NativeStackScreenProps} from '@react-navigation/native-stack';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import {useTranslation} from 'react-i18next';
@@ -27,6 +28,7 @@ import {
   GUARDIANS_CONVERSATION_ID,
   isGuardiansConversation,
 } from '../../services/chat/guardiansConversation';
+import type {RootStackParamList} from '../../navigation/types';
 
 type Conversation = {
   id: string;
@@ -38,6 +40,7 @@ type Conversation = {
   pinned: boolean;
   guardians: boolean;
 };
+type ConversationsScreenProps = NativeStackScreenProps<RootStackParamList, 'Conversations'>;
 
 const CHAT_LAST_SEEN_KEY = '@Alert:ChatThreadLastSeen';
 
@@ -46,7 +49,7 @@ const FONT_FAMILY =
     ? ThemeTokens.typography.families.ios
     : ThemeTokens.typography.families.android;
 
-export const ConversationsScreen = ({navigation, route}: any) => {
+export const ConversationsScreen = ({navigation, route}: ConversationsScreenProps) => {
   const {colors} = useTheme();
   const {t} = useTranslation();
   const prioritizeGuardians = Boolean(route?.params?.openGuardiansFirst);
@@ -59,6 +62,7 @@ export const ConversationsScreen = ({navigation, route}: any) => {
   const currentUserIdRef = useRef<string | null>(null);
   const refreshInFlightRef = useRef(false);
   const unsubscribeRef = useRef<(() => void) | null>(null);
+  const autoOpenGuardiansRef = useRef(false);
 
   const buildGuardiansFallbackRow = useCallback(
     (): Conversation => ({
@@ -332,10 +336,44 @@ export const ConversationsScreen = ({navigation, route}: any) => {
     return pinned || buildGuardiansFallbackRow();
   }, [buildGuardiansFallbackRow, filteredItems]);
 
+  const openGuardiansThread = useCallback(() => {
+    navigation.navigate('ChatThread', {
+      conversationId: GUARDIANS_CONVERSATION_ID,
+      title: guardiansConversation.title,
+      memberIds: guardiansConversation.members,
+      type: 'group',
+    });
+    TelemetryService.trackEvent('chat_guardians_pin_tap');
+  }, [guardiansConversation, navigation]);
+
   const listWithoutGuardians = useMemo(
     () => filteredItems.filter(item => !item.guardians),
     [filteredItems],
   );
+
+  useEffect(() => {
+    if (!prioritizeGuardians || loading || autoOpenGuardiansRef.current) return;
+    autoOpenGuardiansRef.current = true;
+    const params = {
+      conversationId: guardiansConversation.id,
+      title: guardiansConversation.title,
+      memberIds: guardiansConversation.members,
+      type: 'group' as const,
+    };
+    TelemetryService.trackEvent('chat_guardians_auto_open');
+    if (typeof navigation.replace === 'function') {
+      navigation.replace('ChatThread', params);
+      return;
+    }
+    navigation.navigate('ChatThread', params);
+  }, [
+    guardiansConversation.id,
+    guardiansConversation.members,
+    guardiansConversation.title,
+    loading,
+    navigation,
+    prioritizeGuardians,
+  ]);
 
   const skeletonRows = useMemo(
     () => Array.from({length: 5}, (_, idx) => `sk_${idx}`),
@@ -440,13 +478,7 @@ export const ConversationsScreen = ({navigation, route}: any) => {
           ListHeaderComponent={
             <TouchableOpacity
               activeOpacity={0.9}
-              onPress={() => {
-                navigation.navigate('ChatMonitor', {
-                  conversationId: guardiansConversation.id,
-                  mode: 'GUARDIANS_GROUP',
-                });
-                TelemetryService.trackEvent('chat_guardians_pin_tap');
-              }}
+              onPress={openGuardiansThread}
               style={[
                 styles.row,
                 styles.guardiansRow,

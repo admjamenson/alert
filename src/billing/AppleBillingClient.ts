@@ -39,12 +39,24 @@ const APPLE_PRODUCT_IDS = [
   'alert.premium.lifetime',
 ];
 
+const isAndroidPurchase = (
+  purchase: RNIap.Purchase,
+): purchase is RNIap.PurchaseAndroid =>
+  purchase.platform === 'android';
+
+const getIosPurchase = (
+  purchase: RNIap.Purchase | null,
+): RNIap.PurchaseIOS | null => {
+  if (!purchase || Platform.OS !== 'ios') return null;
+  return purchase as RNIap.PurchaseIOS;
+};
+
 class AppleBillingClient {
   private initialized = false;
   private currentProducts: AppleStoreProduct[] = [];
-  private currentPurchase: RNIap.PurchaseResult | null = null;
-  private purchaseUpdateSubscription: (() => void) | null = null;
-  private purchaseErrorSubscription: (() => void) | null = null;
+  private currentPurchase: RNIap.Purchase | null = null;
+  private purchaseUpdateSubscription: RNIap.EventSubscription | null = null;
+  private purchaseErrorSubscription: RNIap.EventSubscription | null = null;
 
   async initialize(): Promise<void> {
     if (this.initialized) return;
@@ -64,19 +76,19 @@ class AppleBillingClient {
   }
 
   private setupListeners(): void {
-    // Listen for purchase updates
     this.purchaseUpdateSubscription = RNIap.purchaseUpdatedListener(
-      async (purchase: RNIap.PurchaseResult) => {
+      async (purchase: RNIap.Purchase) => {
         console.log(
           '[AppleBillingClient] Purchase updated:',
           purchase.productId,
         );
         this.currentPurchase = purchase;
 
-        // Acknowledge purchase on Android (iOS doesn't require this, but we handle both)
-        if (Platform.OS === 'android' && !purchase.isAcknowledgedAndroid) {
+        if (isAndroidPurchase(purchase) && !purchase.isAcknowledgedAndroid) {
           try {
-            await RNIap.acknowledgePurchaseAndroid(purchase.purchaseToken);
+            await RNIap.acknowledgePurchaseAndroid(
+              String(purchase.purchaseToken || ''),
+            );
           } catch (error) {
             console.error(
               '[AppleBillingClient] Failed to acknowledge purchase:',
@@ -85,10 +97,11 @@ class AppleBillingClient {
           }
         }
 
-        // Consume purchase if needed
-        if (Platform.OS === 'android') {
+        if (isAndroidPurchase(purchase)) {
           try {
-            await RNIap.consumePurchaseAndroid(purchase.purchaseToken);
+            await RNIap.consumePurchaseAndroid(
+              String(purchase.purchaseToken || ''),
+            );
           } catch (error) {
             console.error(
               '[AppleBillingClient] Failed to consume purchase:',
@@ -99,7 +112,6 @@ class AppleBillingClient {
       },
     );
 
-    // Listen for purchase errors
     this.purchaseErrorSubscription = RNIap.purchaseErrorListener(
       (error: RNIap.PurchaseError) => {
         console.error('[AppleBillingClient] Purchase error:', error.message);
@@ -113,17 +125,19 @@ class AppleBillingClient {
     }
 
     try {
-      const result = await RNIap.getSubscriptions({
+      const result = await RNIap.fetchProducts({
         skus: APPLE_PRODUCT_IDS,
+        type: 'subs',
       });
 
-      this.currentProducts = result.map(product => ({
-        productId: product.productId,
+      const products = Array.isArray(result) ? result : [];
+      this.currentProducts = products.map(product => ({
+        productId: product.id,
         title: product.title,
         description: product.description,
-        price: product.price,
+        price: product.displayPrice || String(product.price || ''),
         currency: product.currency || 'USD',
-        localizedPrice: product.localizedPrice || product.price,
+        localizedPrice: product.displayPrice || String(product.price || ''),
         type: 'subscription',
       }));
 
@@ -147,12 +161,15 @@ class AppleBillingClient {
       console.log(`[AppleBillingClient] Requesting purchase for ${productId}`);
       this.currentPurchase = null;
 
-      await RNIap.requestSubscription({
-        sku: productId,
-        andDangerouslyFinishTransactionAutomaticallyIOS: false,
+      await RNIap.requestPurchase({
+        request: {
+          ios: {
+            sku: productId,
+          },
+        },
+        type: 'subs',
       });
 
-      // Wait for purchase result
       return await new Promise<boolean>((resolve, timeout) => {
         const maxWait = 30000; // 30 seconds
         const startTime = Date.now();
@@ -183,15 +200,21 @@ class AppleBillingClient {
 
   getCurrentPurchase(): ApplePurchaseResult | null {
     if (!this.currentPurchase) return null;
+    const iosPurchase = getIosPurchase(this.currentPurchase);
 
     return {
-      transactionId: String(this.currentPurchase.transactionId || ''),
-      originalTransactionId: String(
-        this.currentPurchase.originalTransactionId || '',
+      transactionId: String(
+        this.currentPurchase.transactionId || this.currentPurchase.id || '',
       ),
-      bundleId: String(this.currentPurchase.bundleId || ''),
+      originalTransactionId: String(
+        iosPurchase?.originalTransactionIdentifierIOS ||
+          this.currentPurchase.transactionId ||
+          this.currentPurchase.id ||
+          '',
+      ),
+      bundleId: String(iosPurchase?.appBundleIdIOS || ''),
       productId: this.currentPurchase.productId,
-      purchaseTime: this.currentPurchase.purchaseTime || Date.now(),
+      purchaseTime: this.currentPurchase.transactionDate || Date.now(),
     };
   }
 
@@ -202,24 +225,33 @@ class AppleBillingClient {
 
     try {
       console.log('[AppleBillingClient] Restoring purchases...');
-      const purchases = await RNIap.getPurchaseHistory();
+      const purchases = await RNIap.getAvailablePurchases({
+        onlyIncludeActiveItemsIOS: false,
+      });
 
       const entitlements: AppleEntitlement[] = purchases
         .filter(purchase => APPLE_PRODUCT_IDS.includes(purchase.productId))
-        .map(purchase => ({
-          productId: purchase.productId,
-          expiresDate: purchase.expirationDate
-            ? new Date(parseInt(purchase.expirationDate)).toISOString()
-            : null,
-          originalTransactionId: String(purchase.originalTransactionId || ''),
-          transactionId: String(purchase.transactionId || ''),
-          bundleId: String(purchase.bundleId || ''),
-          isActive:
-            purchase.expirationDate &&
-            parseInt(purchase.expirationDate) > Date.now()
-              ? true
-              : false,
-        }));
+        .map(purchase => {
+          const iosPurchase = getIosPurchase(purchase);
+          return {
+            productId: purchase.productId,
+            expiresDate: iosPurchase?.expirationDateIOS
+              ? new Date(Number(iosPurchase.expirationDateIOS)).toISOString()
+              : null,
+            originalTransactionId: String(
+              iosPurchase?.originalTransactionIdentifierIOS ||
+                purchase.transactionId ||
+                purchase.id ||
+                '',
+            ),
+            transactionId: String(purchase.transactionId || purchase.id || ''),
+            bundleId: String(iosPurchase?.appBundleIdIOS || ''),
+            isActive:
+              typeof iosPurchase?.expirationDateIOS === 'number'
+                ? iosPurchase.expirationDateIOS > Date.now()
+                : true,
+          };
+        });
 
       return entitlements;
     } catch (error) {
@@ -235,9 +267,10 @@ class AppleBillingClient {
 
     try {
       if (this.currentPurchase) {
-        if (Platform.OS === 'ios') {
-          await RNIap.finishTransactionIOS(this.currentPurchase.transactionId);
-        }
+        await RNIap.finishTransaction({
+          purchase: this.currentPurchase,
+          isConsumable: false,
+        });
         this.currentPurchase = null;
       }
     } catch (error) {
@@ -251,10 +284,10 @@ class AppleBillingClient {
   async disconnect(): Promise<void> {
     try {
       if (this.purchaseUpdateSubscription) {
-        this.purchaseUpdateSubscription();
+        this.purchaseUpdateSubscription.remove();
       }
       if (this.purchaseErrorSubscription) {
-        this.purchaseErrorSubscription();
+        this.purchaseErrorSubscription.remove();
       }
       await RNIap.endConnection();
       this.initialized = false;

@@ -1,14 +1,17 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import {
   Animated,
+  BackHandler,
   Dimensions,
   I18nManager,
   PanResponder,
+  Pressable,
   StyleSheet,
   TouchableOpacity,
   View,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { useTranslation } from 'react-i18next';
 
 import { ThemeTokens } from '../../constants/ThemeTokens';
 import {
@@ -66,6 +69,7 @@ type Props = {
 
 const DRAG_THRESHOLD = 72;
 const screenHeight = Dimensions.get('window').height;
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 const confidenceColor = (label: string) => {
   const normalized = String(label || '').toLowerCase();
@@ -111,6 +115,7 @@ export const SecuritySummarySheet: React.FC<Props> = ({
   saveBusy = false,
   scopeItems,
 }) => {
+  const { t } = useTranslation();
   const isRTL = I18nManager.isRTL;
   const expandedHeight = Math.round(screenHeight * ThemeTokens.SecurityMap.expandedHeightRatio);
   const compactHeight = ThemeTokens.SecurityMap.compactHeight;
@@ -130,7 +135,7 @@ export const SecuritySummarySheet: React.FC<Props> = ({
     }).start();
   }, [collapsedY, expanded, translateY]);
 
-  const setExpanded = (next: boolean) => {
+  const setExpanded = React.useCallback((next: boolean) => {
     if (next === expanded) {
       Animated.timing(translateY, {
         toValue: next ? 0 : collapsedY,
@@ -140,7 +145,16 @@ export const SecuritySummarySheet: React.FC<Props> = ({
       return;
     }
     onExpandedChange(next);
-  };
+  }, [collapsedY, expanded, onExpandedChange, translateY]);
+
+  useEffect(() => {
+    if (!expanded) return undefined;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      setExpanded(false);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [expanded, setExpanded]);
 
   const panResponder = useMemo(
     () =>
@@ -171,13 +185,17 @@ export const SecuritySummarySheet: React.FC<Props> = ({
           }).start();
         },
       }),
-    [collapsedY, expanded, translateY],
+    [collapsedY, expanded, setExpanded, translateY],
   );
 
   return (
     <>
-      <Animated.View
-        pointerEvents="none"
+      <AnimatedPressable
+        accessibilityLabel={collapseLabel}
+        accessibilityRole="button"
+        importantForAccessibility={expanded ? 'auto' : 'no-hide-descendants'}
+        onPress={() => setExpanded(false)}
+        pointerEvents={expanded ? 'auto' : 'none'}
         style={[styles.backdrop, { opacity: backdropOpacity }]}
       />
       <Animated.View
@@ -354,6 +372,10 @@ export const SecuritySummarySheet: React.FC<Props> = ({
               shareA11yHint={shareA11yHint}
               saveA11yHint={saveA11yHint}
             />
+
+            <AppText variant="caption2" tone="inverseSecondary" style={styles.sosDisclaimer}>
+              {t('legal_sos_disclaimer')}
+            </AppText>
           </View>
         ) : null}
       </Animated.View>
@@ -365,6 +387,7 @@ const styles = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: '#010309',
+    zIndex: 1,
   },
   sheet: {
     position: 'absolute',
@@ -377,6 +400,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.2)',
     overflow: 'hidden',
     paddingHorizontal: ThemeTokens.SecurityMap.overlayPadding,
+    zIndex: 2,
   },
   dragHandleWrap: {
     height: 26,
@@ -606,6 +630,14 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     flex: 1,
+  },
+  sosDisclaimer: {
+    fontSize: 10,
+    lineHeight: 14,
+    textAlign: 'center',
+    marginTop: 16,
+    paddingHorizontal: 12,
+    opacity: 0.7,
   },
 });
 

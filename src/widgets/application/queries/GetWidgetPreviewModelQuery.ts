@@ -53,9 +53,9 @@ const buildUpdatedLabel = (updatedAt?: string) => {
 };
 
 const confidenceLabel = (confidence: WidgetConfidence) =>
-  i18n.t(`widget_confidence_${confidence}`, {
+  i18n.t(`widget_confidence_${confidence.toLowerCase()}`, {
     defaultValue:
-      confidence === 'high' ? 'High confidence' : confidence === 'medium' ? 'Medium confidence' : 'Low confidence',
+      confidence === 'HIGH' ? 'High confidence' : confidence === 'MEDIUM' ? 'Medium confidence' : 'Low confidence',
   });
 
 const canonicalPresetTitle = (preset: WidgetPreset) =>
@@ -75,7 +75,7 @@ const statusLabelForTone = (tone: WidgetStatusTone) =>
 
 const previewSampleModel = (preset: WidgetPreset): WidgetPreviewModel => {
   const updatedAt = new Date().toISOString();
-  const confidence: WidgetConfidence = 'medium';
+  const confidence: WidgetConfidence = 'MEDIUM';
   const title = canonicalPresetTitle(preset);
 
   if (preset === 'commute') {

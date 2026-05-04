@@ -1,9 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   FlatList,
-  Modal,
-  Platform,
-  Pressable,
   StyleSheet,
   TextInput,
   TouchableOpacity,
@@ -19,6 +16,7 @@ import CountryCatalogService, {
 } from '../../services/CountryCatalogService';
 import AppText from '../ui/AppText';
 import { getTypographyStyle } from '../../theme/typography';
+import BasePopup from '../ui/BasePopup';
 
 const SEARCH_DEBOUNCE_MS = 200;
 
@@ -150,96 +148,82 @@ const GlobalCountryPicker: React.FC<GlobalCountryPickerProps> = ({
   );
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.overlay} onPress={onClose} />
-      <View style={styles.centerWrap} pointerEvents="box-none">
+    <BasePopup
+      accessibilityLabel={t('country_picker_title')}
+      avoidKeyboard
+      contentStyle={[
+        styles.card,
+        {
+          backgroundColor: isDark ? colors.card : '#FFFFFF',
+          borderColor: colors.border,
+        },
+      ]}
+      maxWidth={560}
+      onClose={onClose}
+      placement="center"
+      visible={visible}
+    >
+      <View style={styles.searchWrap}>
         <View
           style={[
-            styles.card,
+            styles.searchInputWrap,
             {
-              backgroundColor: isDark ? colors.card : '#FFFFFF',
+              backgroundColor: isDark ? '#2B2B30' : '#F5F5F7',
               borderColor: colors.border,
             },
           ]}
         >
-          <View style={styles.searchWrap}>
-            <View
-              style={[
-                styles.searchInputWrap,
-                {
-                  backgroundColor: isDark ? '#2B2B30' : '#F5F5F7',
-                  borderColor: colors.border,
-                },
-              ]}
-            >
-              <Icon name="magnify" size={22} color={colors.textSecondary} />
-              <TextInput
-                value={query}
-                onChangeText={setQuery}
-                placeholder={t('country_picker_search')}
-                placeholderTextColor={colors.textSecondary}
-                style={[styles.searchInput, { color: colors.text }]}
-                autoFocus
-                autoCorrect={false}
-                autoCapitalize="none"
-                keyboardType="default"
-              />
-              {query.length > 0 ? (
-                <TouchableOpacity
-                  onPress={() => setQuery('')}
-                  accessibilityLabel={t('chat_clear_search')}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                >
-                  <Icon name="close-circle" size={18} color={colors.textSecondary} />
-                </TouchableOpacity>
-              ) : null}
-            </View>
-          </View>
-
-          <FlatList
-            data={filteredCountries}
-            keyExtractor={item => item.cca2}
-            renderItem={renderItem}
-            getItemLayout={getItemLayout}
-            keyboardShouldPersistTaps="handled"
-            contentContainerStyle={styles.listContent}
-            showsVerticalScrollIndicator={false}
-            initialNumToRender={20}
-            maxToRenderPerBatch={24}
-            windowSize={11}
-            ListEmptyComponent={
-              <AppText variant="subhead" style={[styles.emptyText, { color: colors.textSecondary }]}> 
-                {loading ? t('country_picker_loading') : t('country_picker_no_results')}
-              </AppText>
-            }
+          <Icon name="magnify" size={22} color={colors.textSecondary} />
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder={t('country_picker_search')}
+            placeholderTextColor={colors.textSecondary}
+            style={[styles.searchInput, { color: colors.text }]}
+            autoFocus
+            autoCorrect={false}
+            autoCapitalize="none"
+            keyboardType="default"
           />
+          {query.length > 0 ? (
+            <TouchableOpacity
+              onPress={() => setQuery('')}
+              accessibilityLabel={t('chat_clear_search')}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Icon name="close-circle" size={18} color={colors.textSecondary} />
+            </TouchableOpacity>
+          ) : null}
         </View>
       </View>
-    </Modal>
+
+      <FlatList
+        data={filteredCountries}
+        keyExtractor={item => item.cca2}
+        renderItem={renderItem}
+        getItemLayout={getItemLayout}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
+        initialNumToRender={20}
+        maxToRenderPerBatch={24}
+        windowSize={11}
+        ListEmptyComponent={
+          <AppText variant="subhead" style={[styles.emptyText, { color: colors.textSecondary }]}>
+            {loading ? t('country_picker_loading') : t('country_picker_no_results')}
+          </AppText>
+        }
+      />
+    </BasePopup>
   );
 };
 
 const styles = StyleSheet.create({
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(12,12,18,0.56)',
-  },
-  centerWrap: {
-    flex: 1,
-    justifyContent: 'center',
-    paddingHorizontal: ThemeTokens.spacing.lg,
-    paddingVertical: ThemeTokens.spacing.xl,
-  },
   card: {
-    borderRadius: ThemeTokens.radius.xl,
-    borderWidth: 1,
     overflow: 'hidden',
     minHeight: 440,
     maxHeight: '86%',
-    ...Platform.select({
-      ios: ThemeTokens.shadows.strong.ios,
-      android: ThemeTokens.shadows.strong.android,
-    }),
+    padding: 0,
   },
   searchWrap: {
     paddingHorizontal: ThemeTokens.spacing.lg,

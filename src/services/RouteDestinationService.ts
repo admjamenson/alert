@@ -1,15 +1,15 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type {
+  DefaultRouteDestination,
+  RouteTransportMode,
+} from '../domain/route/RouteModels';
 
 const DESTINATION_KEY = '@Alert:DefaultRouteDestination';
 
-export type RouteTransportMode = 'car' | 'bus' | 'motorcycle' | 'bike' | 'walk';
-
-export type DefaultRouteDestination = {
-  latitude: number;
-  longitude: number;
-  label?: string;
-  transportMode?: RouteTransportMode;
-};
+export type {
+  DefaultRouteDestination,
+  RouteTransportMode,
+} from '../domain/route/RouteModels';
 
 const parseJson = <T,>(raw: string | null): T | null => {
   if (!raw) return null;

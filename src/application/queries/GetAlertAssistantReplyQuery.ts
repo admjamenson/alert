@@ -10,8 +10,8 @@ type ExecuteParams = {
   question: string;
   locale: string;
   timeZone?: string;
-  latitude?: number | null;
-  longitude?: number | null;
+  latitude?: number;
+  longitude?: number;
   force?: boolean;
 };
 
@@ -265,7 +265,7 @@ export const GetAlertAssistantReplyQuery = {
     }
 
     if (intent.type === 'safety') {
-      if (params.latitude == null || params.longitude == null || !briefing.operational.snapshot) {
+      if (params.latitude === undefined || params.longitude === undefined || !briefing.operational.snapshot) {
         return {
           intent: 'safety',
           title: t('assistant_safety_title'),

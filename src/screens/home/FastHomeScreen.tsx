@@ -11,10 +11,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { ThemeTokens } from '../../constants/ThemeTokens';
 import { ensureI18nReady } from '../../i18n/bootstrap';
 import { performance } from '../../utils/performance';
+import { RootStackParamList } from '../../navigation/types';
 
 const { width } = Dimensions.get('window');
 const FONT_FAMILY =
@@ -23,7 +25,9 @@ const FONT_FAMILY =
     : ThemeTokens.typography.families.android;
 const FAST_HOME_BACKGROUND = '#FFFFFF';
 
-const FastHomeScreen: React.FC<any> = ({ navigation }) => {
+type Props = NativeStackScreenProps<RootStackParamList, 'FastHome'>;
+
+const FastHomeScreen: React.FC<Props> = ({ navigation }) => {
   useEffect(() => {
     let cancelled = false;
     let delayId: ReturnType<typeof setTimeout> | null = null;

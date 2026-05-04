@@ -2,9 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Image,
-  Modal,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -20,6 +18,7 @@ import { ProfileService } from '../services/ProfileService';
 import { PermissionManager } from '../utils/permissions';
 import { useTranslation } from 'react-i18next';
 import { ThemeTokens } from '../constants/ThemeTokens';
+import BasePopup from '../components/ui/BasePopup';
 
 const FONT_FAMILY =
   Platform.OS === 'ios'
@@ -203,64 +202,54 @@ const ProfileScreen = ({ navigation }: any) => {
         </TouchableOpacity>
       </ScrollView>
 
-      <Modal
+      <BasePopup
+        accessibilityLabel={t('profile_change_photo')}
+        contentStyle={[
+          styles.sheetCard,
+          { backgroundColor: colors.card, borderColor: colors.border },
+        ]}
+        maxWidth={520}
+        onClose={() => setPhotoSheetVisible(false)}
+        placement="bottom"
+        showHandle
         visible={photoSheetVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setPhotoSheetVisible(false)}
       >
-        <Pressable
-          style={styles.sheetOverlay}
+        <Text style={[styles.sheetTitle, { color: colors.text }]}>
+          {t('profile_change_photo')}
+        </Text>
+        <TouchableOpacity
+          style={[styles.sheetOption, { borderColor: colors.border }]}
+          onPress={handlePickGallery}
+          accessibilityRole="button"
+          accessibilityLabel={t('profile_gallery')}
+        >
+          <Icon name="image-outline" size={22} color={colors.text} />
+          <Text style={[styles.sheetOptionText, { color: colors.text }]}>
+            {t('profile_gallery')}
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.sheetOption, { borderColor: colors.border }]}
+          onPress={handlePickCamera}
+          accessibilityRole="button"
+          accessibilityLabel={t('profile_camera')}
+        >
+          <Icon name="camera-outline" size={22} color={colors.text} />
+          <Text style={[styles.sheetOptionText, { color: colors.text }]}>
+            {t('profile_camera')}
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.sheetCancel, { borderColor: colors.border }]}
           onPress={() => setPhotoSheetVisible(false)}
           accessibilityRole="button"
           accessibilityLabel={t('common_cancel')}
         >
-          <Pressable
-            style={[
-              styles.sheetCard,
-              { backgroundColor: colors.card, borderColor: colors.border },
-            ]}
-            onPress={() => {}}
-          >
-            <View style={styles.sheetHandle} />
-            <Text style={[styles.sheetTitle, { color: colors.text }]}>
-              {t('profile_change_photo')}
-            </Text>
-            <TouchableOpacity
-              style={[styles.sheetOption, { borderColor: colors.border }]}
-              onPress={handlePickGallery}
-              accessibilityRole="button"
-              accessibilityLabel={t('profile_gallery')}
-            >
-              <Icon name="image-outline" size={22} color={colors.text} />
-              <Text style={[styles.sheetOptionText, { color: colors.text }]}>
-                {t('profile_gallery')}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.sheetOption, { borderColor: colors.border }]}
-              onPress={handlePickCamera}
-              accessibilityRole="button"
-              accessibilityLabel={t('profile_camera')}
-            >
-              <Icon name="camera-outline" size={22} color={colors.text} />
-              <Text style={[styles.sheetOptionText, { color: colors.text }]}>
-                {t('profile_camera')}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.sheetCancel, { borderColor: colors.border }]}
-              onPress={() => setPhotoSheetVisible(false)}
-              accessibilityRole="button"
-              accessibilityLabel={t('common_cancel')}
-            >
-              <Text style={[styles.sheetCancelText, { color: colors.text }]}>
-                {t('common_cancel')}
-              </Text>
-            </TouchableOpacity>
-          </Pressable>
-        </Pressable>
-      </Modal>
+          <Text style={[styles.sheetCancelText, { color: colors.text }]}>
+            {t('common_cancel')}
+          </Text>
+        </TouchableOpacity>
+      </BasePopup>
     </SafeAreaView>
   );
 };
@@ -411,30 +400,15 @@ const styles = StyleSheet.create({
     lineHeight: ThemeTokens.typography.lineHeights.body,
     letterSpacing: ThemeTokens.typography.letterSpacing.body,
   },
-  sheetOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(8,8,12,0.45)',
-    justifyContent: 'flex-end',
-  },
   sheetCard: {
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    paddingHorizontal: ThemeTokens.spacing.lg,
-    paddingTop: ThemeTokens.spacing.md,
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    borderBottomLeftRadius: 22,
+    borderBottomRightRadius: 22,
+    paddingHorizontal: ThemeTokens.spacing.xl,
+    paddingTop: ThemeTokens.spacing.sm,
     paddingBottom: ThemeTokens.spacing.xl,
     borderWidth: 1,
-    ...Platform.select({
-      ios: ThemeTokens.shadows.strong.ios,
-      android: ThemeTokens.shadows.strong.android,
-    }),
-  },
-  sheetHandle: {
-    width: 44,
-    height: 5,
-    borderRadius: 3,
-    alignSelf: 'center',
-    backgroundColor: 'rgba(0,0,0,0.18)',
-    marginBottom: ThemeTokens.spacing.md,
   },
   sheetTitle: {
     fontFamily: FONT_FAMILY,
@@ -450,7 +424,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: ThemeTokens.spacing.sm,
     paddingVertical: ThemeTokens.spacing.md,
-    borderRadius: ThemeTokens.radius.lg,
+    borderRadius: 15,
     borderWidth: 1,
     paddingHorizontal: ThemeTokens.spacing.md,
     marginBottom: ThemeTokens.spacing.sm,
@@ -464,7 +438,7 @@ const styles = StyleSheet.create({
   },
   sheetCancel: {
     marginTop: ThemeTokens.spacing.xs,
-    borderRadius: ThemeTokens.radius.lg,
+    borderRadius: 15,
     borderWidth: 1,
     paddingVertical: ThemeTokens.spacing.md,
     alignItems: 'center',

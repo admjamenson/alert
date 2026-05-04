@@ -6,10 +6,8 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { ThemeTokens } from '../../constants/ThemeTokens';
 import { useTheme } from '../../context/ThemeContext';
 import { OSM_STYLE_SATELLITE } from '../../constants/MapStyles';
-import { RiskHeatmap, RiskReportService } from '../../services/RiskReportService';
-import { MonitoringService } from '../../services/MonitoringService';
+import { GetRealtimeMapOverlayQuery } from '../../application/queries/GetRealtimeMapOverlayQuery';
 import { TelemetryService } from '../../services/TelemetryService';
-import { mapAlertToCategory } from '../../services/importantAlertUtils';
 import {
   formatUpdatedAtDisplay,
   isInvalidFormattedDateLike,
@@ -39,6 +37,11 @@ type RealtimeMapOverlayLayerProps = {
   t: (key: string, options?: any) => string;
 };
 
+type OverlayHeatmap = {
+  type: 'FeatureCollection';
+  features: Array<any>;
+};
+
 const FONT_FAMILY =
   Platform.OS === 'ios'
     ? ThemeTokens.typography.families.ios
@@ -56,7 +59,7 @@ const colorForCategory = (categoryId: string, fallback: string) => {
   return fallback;
 };
 
-const buildOverlayShape = (heatmap: RiskHeatmap) => {
+const buildOverlayShape = (heatmap: OverlayHeatmap) => {
   const features = Array.isArray(heatmap?.features)
     ? heatmap.features
         .filter(item => Number(item?.properties?.score || 0) > 0)
@@ -114,7 +117,10 @@ export const RealtimeMapOverlayLayer = memo((props: RealtimeMapOverlayLayerProps
     t,
   } = props;
   const [loading, setLoading] = useState(true);
-  const [heatmap, setHeatmap] = useState<RiskHeatmap>({ type: 'FeatureCollection', features: [] });
+  const [heatmap, setHeatmap] = useState<OverlayHeatmap>({
+    type: 'FeatureCollection',
+    features: [],
+  });
   const [activeIds, setActiveIds] = useState<Set<string>>(new Set());
   const [summaries, setSummaries] = useState<Record<string, string>>({});
   const [sourceLine, setSourceLine] = useState('');
@@ -159,65 +165,37 @@ export const RealtimeMapOverlayLayer = memo((props: RealtimeMapOverlayLayerProps
         return;
       }
 
-      if (contextOnly) {
-        const syncCompletedAt = normalizeToIsoDateTime(new Date()) || new Date().toISOString();
-        if (force) {
-          cameraRef.current?.setCamera({
-            centerCoordinate: [longitude, latitude],
-            zoomLevel: 14,
-            animationDuration: 250,
-            animationMode: 'easeTo',
-          });
-        }
-        if (mountedRef.current) {
-          setHeatmap({ type: 'FeatureCollection', features: [] });
-          setActiveIds(new Set());
-          setSummaries({});
-          setSourceLine('');
-          setUpdatedAt(normalizeToIsoDateTime(updatedAtOverride) || syncCompletedAt);
-          hasLoadedOnceRef.current = true;
-          setLoading(false);
-        }
-        return;
-      }
-
-      const location = { latitude, longitude };
-
       if (mountedRef.current && !hasLoadedOnceRef.current) setLoading(true);
       try {
-        const [heat, monitoring] = await Promise.all([
-          RiskReportService.getHeatmap(location, {
-            radiusMeters: 4000,
-            cellSizeMeters: 220,
-          }),
-          MonitoringService.getActiveEvents(
-            latitude,
-            longitude,
-            0.45,
-          ),
-        ]);
+        const payload = await GetRealtimeMapOverlayQuery.execute({
+          categoryId,
+          latitude,
+          longitude,
+          contextOnly,
+          updatedAtOverride,
+        });
 
         if (!mountedRef.current) return;
-        const syncCompletedAt = normalizeToIsoDateTime(new Date()) || new Date().toISOString();
         const wasFirstLoad = !hasLoadedOnceRef.current;
-        setHeatmap(heat);
-        setActiveIds(new Set(monitoring.activeIds));
-        setSummaries(monitoring.summaries);
-        const categoryAlerts = monitoring.alerts.filter(
-          alert => mapAlertToCategory(alert) === categoryId,
-        );
-        const sources = uniqueSources(categoryAlerts.map(alert => alert.sourceName)).slice(0, 3);
+        const sources = uniqueSources(payload.sourceNames).slice(0, 3);
+        setHeatmap(payload.heatmap);
+        setActiveIds(new Set(payload.activeIds));
+        setSummaries(payload.summaries);
         setSourceLine(
           sources.length > 0
             ? `${t('epidemic_map_source_prefix', { source: sources.join(' | ') })}`
-            : t('official_sources_load_error', {
-                defaultValue: 'Fonte oficial indisponivel.',
-              }),
+            : contextOnly
+              ? ''
+              : t('official_sources_load_error', {
+                  defaultValue: 'Fonte oficial indisponivel.',
+                }),
         );
-        setUpdatedAt(syncCompletedAt);
+        setUpdatedAt(
+          normalizeToIsoDateTime(payload.updatedAt) || payload.updatedAt || null,
+        );
         hasLoadedOnceRef.current = true;
 
-        if (force && wasFirstLoad && isFollowing) {
+        if (force && (contextOnly || wasFirstLoad) && isFollowing) {
           cameraRef.current?.setCamera({
             centerCoordinate: [longitude, latitude],
             zoomLevel: 14,
