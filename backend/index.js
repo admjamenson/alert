@@ -3,24 +3,26 @@ const cors = require('cors');
 const admin = require('firebase-admin');
 const crypto = require('crypto');
 const zlib = require('zlib');
-const { decode: decodeMsgpack } = require('@msgpack/msgpack');
-const { validateRuntimeConfig } = require('./src/config/runtime');
-const { createFirebaseState } = require('./src/bootstrap/firebaseAdmin');
-const { resolveRequestIdentity } = require('./src/http/identity');
+const {decode: decodeMsgpack} = require('@msgpack/msgpack');
+const {validateRuntimeConfig} = require('./src/config/runtime');
+const {createFirebaseState} = require('./src/bootstrap/firebaseAdmin');
+const {resolveRequestIdentity} = require('./src/http/identity');
 const registerEntitlementRoutes = require('./src/routes/registerEntitlementRoutes');
 const registerFeedRoutes = require('./src/routes/registerFeedRoutes');
 const registerMapsRoutes = require('./src/routes/registerMapsRoutes');
-const { EventHubService } = require('./src/eventHub/EventHubService');
-const { getProviderFetchMetrics } = require('./src/eventHub/fetcher');
+const {EventHubService} = require('./src/eventHub/EventHubService');
+const {getProviderFetchMetrics} = require('./src/eventHub/fetcher');
+const {getRiskFeedMetrics} = require('./src/services/RiskFeedService');
+const {
+  getEntitlementMetrics,
+} = require('./src/services/EntitlementSnapshotService');
 const {
   bboxFromPoint,
   haversineKm,
   riskLevelFromCap,
   toMillis: toEventMillis,
 } = require('./src/eventHub/utils');
-const {
-  registerStripeBilling,
-} = require('./src/billing/registerStripeBilling');
+const {registerStripeBilling} = require('./src/billing/registerStripeBilling');
 const registerAppleBilling = require('./src/billing/registerAppleBilling');
 const registerAppStoreNotifications = require('./src/billing/registerAppStoreNotifications');
 const {
@@ -33,11 +35,21 @@ const {
   sanitizeErrorCode,
 } = require('./src/observability/relaySosOperationalLogger');
 const {
+  buildGuardianSosRequestId,
+  logGuardianSosEvent,
+} = require('./src/observability/guardianSosOperationalLogger');
+const {
+  createRequestMetricTracker,
+  markRequestMetric,
+  summarizeRequestMetric,
+} = require('./src/observability/requestMetricTracker');
+const {
   createExternalSosFanoutQueue,
 } = require('./src/services/createSosFanoutQueue');
 const {
   createSosFanoutDeliveryProofRunner,
 } = require('./src/services/SosFanoutDeliveryProof');
+const {buildReleasePolicy} = require('./src/release/releasePolicy');
 
 const runtimeConfig = (() => {
   try {
@@ -55,20 +67,22 @@ app.use((req, res, next) => {
     req.originalUrl === '/webhook' ||
     req.originalUrl === '/webhooks/stripe'
   ) {
-    return express.raw({ type: 'application/json', limit: '2mb' })(
+    return express.raw({type: 'application/json', limit: '2mb'})(
       req,
       res,
       next,
     );
   }
-  return express.urlencoded({ extended: true, limit: '2mb' })(req, res, () =>
-    express.json({ limit: '2mb' })(req, res, next),
+  return express.urlencoded({extended: true, limit: '2mb'})(req, res, () =>
+    express.json({limit: '2mb'})(req, res, next),
   );
 });
 
 const FIREBASE_OPTIONAL_ROUTE_PATTERNS = [
   /^\/$/,
   /^\/healthz$/,
+  /^\/metrics$/,
+  /^\/v1\/ops\/metrics$/,
   /^\/api\/me\/entitlements$/,
   /^\/api\/v1\/meta\/countries$/,
   /^\/api\/v1\/weather\/feed$/,
@@ -89,8 +103,18 @@ const FIREBASE_OPTIONAL_ROUTE_PATTERNS = [
   /^\/v1\/health\/top$/,
   /^\/v1\/providers\/status$/,
   /^\/v1\/ops\/summary$/,
+  /^\/v1\/release\/status$/,
   /^\/favicon\.ico$/,
 ];
+
+const relayMetrics = {
+  sos: createRequestMetricTracker(),
+  alertsPull: createRequestMetricTracker(),
+  chatSend: createRequestMetricTracker(),
+  chatMessages: createRequestMetricTracker(),
+};
+const guardianSosMetrics = createRequestMetricTracker();
+const entitlementMetrics = createRequestMetricTracker();
 
 const STRIPE_BILLING_ROUTE_PATTERNS = [
   /^\/billing\/auth-token$/,
@@ -115,12 +139,13 @@ const APPLE_BILLING_ROUTE_PATTERNS = [
 
 const APPLE_NOTIFICATIONS_ROUTE_PATTERNS = [/^\/app-store-notifications$/];
 
-const readPathname = req => String(req.path || req.originalUrl || '').split('?')[0];
+const readPathname = req =>
+  String(req.path || req.originalUrl || '').split('?')[0];
 
 const matchesAnyPattern = (pathname, patterns) =>
   patterns.some(pattern => pattern.test(pathname));
 
-const buildServiceUnavailablePayload = ({ code, message, reason }) => ({
+const buildServiceUnavailablePayload = ({code, message, reason}) => ({
   error: code,
   message,
   meta: {
@@ -130,7 +155,7 @@ const buildServiceUnavailablePayload = ({ code, message, reason }) => ({
   },
 });
 
-const firebaseState = createFirebaseState({ admin });
+const firebaseState = createFirebaseState({admin});
 const db = firebaseState.db;
 
 const serviceAvailability = {
@@ -143,18 +168,22 @@ const serviceAvailability = {
   sosFanoutQueueReason: null,
 };
 
-const registerServiceModule = (label, registerFn, availabilityKey, unavailableReason) => {
+const registerServiceModule = (
+  label,
+  registerFn,
+  availabilityKey,
+  unavailableReason,
+) => {
   try {
     registerFn();
     serviceAvailability[availabilityKey] = true;
     console.log(`[bootstrap/${label}] registered`);
   } catch (error) {
     serviceAvailability[availabilityKey] = false;
-    console.error(
-      `[bootstrap/${label}] unavailable: ${error.message}`,
-    );
+    console.error(`[bootstrap/${label}] unavailable: ${error.message}`);
     if (!firebaseState.reason) {
-      firebaseState.reason = unavailableReason || `${label}_registration_failed`;
+      firebaseState.reason =
+        unavailableReason || `${label}_registration_failed`;
     }
   }
 };
@@ -162,7 +191,7 @@ const registerServiceModule = (label, registerFn, availabilityKey, unavailableRe
 if (db) {
   registerServiceModule(
     'stripe-billing',
-    () => registerStripeBilling(app, { db }),
+    () => registerStripeBilling(app, {db}),
     'stripeBilling',
     'stripe_billing_registration_failed',
   );
@@ -195,6 +224,7 @@ app.get('/', (_req, res) => {
 });
 
 app.get('/healthz', (_req, res) => {
+  const releasePolicy = buildCachedReleaseSnapshot();
   return res.status(200).json({
     ok: true,
     service: 'alert-backend',
@@ -208,9 +238,267 @@ app.get('/healthz', (_req, res) => {
       sosFanoutQueueDriver: serviceAvailability.sosFanoutQueueDriver,
       sosFanoutQueueReason: serviceAvailability.sosFanoutQueueReason,
     },
+    release: summarizeReleasePolicy(releasePolicy),
     reason: firebaseState.reason,
     generatedAt: new Date().toISOString(),
   });
+});
+
+// Helper para construir métricas de serviço seguras (fallback)
+const buildSafeServiceMetrics = (serviceName, error) => ({
+  status: 'degraded',
+  error: error?.message || `${serviceName}_metrics_unavailable`,
+  totalRequests: 0,
+  cacheHits: 0,
+  cacheMisses: 0,
+  cacheHitRate: 0,
+  timeouts: 0,
+  errors: 0,
+  coalescedRequests: 0,
+  uptimeMs: 0,
+});
+
+// Helper para construir métricas de request seguras
+const buildSafeRequestMetrics = () => ({
+  total: 0,
+  success: 0,
+  error: 0,
+  successRate: 0,
+  errorRate: 0,
+  p50LatencyMs: null,
+  p95LatencyMs: null,
+  p99LatencyMs: null,
+  avgLatencyMs: null,
+});
+
+// Endpoint de métricas para observabilidade
+const handleMetricsEndpoint = (_req, res) => {
+  try {
+    // Coletar métricas com tratamento de erro
+    let riskFeedMetrics;
+    try {
+      riskFeedMetrics = getRiskFeedMetrics();
+    } catch (error) {
+      console.error('[metrics] failed to get riskFeed metrics', error);
+      riskFeedMetrics = buildSafeServiceMetrics('riskFeed', error);
+    }
+
+    let entitlementSnapshotMetrics;
+    try {
+      entitlementSnapshotMetrics = getEntitlementMetrics();
+    } catch (error) {
+      console.error('[metrics] failed to get entitlement metrics', error);
+      entitlementSnapshotMetrics = buildSafeServiceMetrics(
+        'entitlements',
+        error,
+      );
+    }
+
+    let providerMetrics;
+    try {
+      providerMetrics = getProviderFetchMetrics();
+    } catch (error) {
+      console.error('[metrics] failed to get provider metrics', error);
+      providerMetrics = [];
+    }
+
+    // Coletar métricas de request (sempre seguras, usam trackers internos)
+    const requestMetrics = {
+      sos: summarizeRequestMetric(relayMetrics.sos),
+      alertsPull: summarizeRequestMetric(relayMetrics.alertsPull),
+      chatSend: summarizeRequestMetric(relayMetrics.chatSend),
+      chatMessages: summarizeRequestMetric(relayMetrics.chatMessages),
+      guardianSos: summarizeRequestMetric(guardianSosMetrics),
+      entitlements: summarizeRequestMetric(entitlementMetrics),
+    };
+
+    // Status do cache e safe mode
+    const cacheStatus = {
+      riskFeedCacheEnabled: riskFeedMetrics.cacheHits !== undefined,
+      entitlementCacheEnabled:
+        entitlementSnapshotMetrics.cacheHits !== undefined,
+    };
+
+    const safeModeStatus = {
+      isActive: process.env.ALERT_LOAD_TEST_SAFE_MODE === 'true',
+      remoteOverrideDisabled:
+        process.env.ALERT_DISABLE_REMOTE_RELEASE_OVERRIDE === 'true',
+    };
+
+    return res.status(200).json({
+      ok: true,
+      generatedAt: new Date().toISOString(),
+      services: {
+        riskFeed: {
+          totalRequests: riskFeedMetrics.totalRequests || 0,
+          cacheHits: riskFeedMetrics.cacheHits || 0,
+          cacheMisses: riskFeedMetrics.cacheMisses || 0,
+          cacheHitRate: riskFeedMetrics.cacheHitRate || 0,
+          timeouts: riskFeedMetrics.timeouts || 0,
+          errors: riskFeedMetrics.errors || 0,
+          coalescedRequests: riskFeedMetrics.coalescedRequests || 0,
+          uptimeMs: riskFeedMetrics.uptimeMs || 0,
+        },
+        entitlements: {
+          totalRequests: entitlementSnapshotMetrics.totalRequests || 0,
+          cacheHits: entitlementSnapshotMetrics.cacheHits || 0,
+          cacheMisses: entitlementSnapshotMetrics.cacheMisses || 0,
+          cacheHitRate: entitlementSnapshotMetrics.cacheHitRate || 0,
+          firestoreLookups: entitlementSnapshotMetrics.firestoreLookups || 0,
+          timeouts: entitlementSnapshotMetrics.timeouts || 0,
+          errors: entitlementSnapshotMetrics.errors || 0,
+          coalescedRequests: entitlementSnapshotMetrics.coalescedRequests || 0,
+          uptimeMs: entitlementSnapshotMetrics.uptimeMs || 0,
+        },
+        providers: Array.isArray(providerMetrics) ? providerMetrics : [],
+      },
+      requestMetrics,
+      cache: cacheStatus,
+      safeMode: safeModeStatus,
+      system: {
+        nodeEnv: process.env.NODE_ENV || 'production',
+        uptimeMs: process.uptime() * 1000,
+        memoryUsage: process.memoryUsage
+          ? {
+              heapUsed: process.memoryUsage().heapUsed,
+              heapTotal: process.memoryUsage().heapTotal,
+              rss: process.memoryUsage().rss,
+            }
+          : undefined,
+      },
+    });
+  } catch (error) {
+    console.error('[metrics] critical error', error);
+    return res.status(500).json({
+      ok: false,
+      error: 'metrics_internal_error',
+      message: 'Failed to collect metrics',
+      generatedAt: new Date().toISOString(),
+    });
+  }
+};
+
+// Endpoint /metrics
+app.get('/metrics', handleMetricsEndpoint);
+
+// Endpoint /v1/ops/metrics (alias para /metrics)
+app.get('/v1/ops/metrics', handleMetricsEndpoint);
+
+// Warmup endpoint para pré-aquecer caches (safe mode only)
+app.post('/v1/ops/warmup', async (req, res) => {
+  // Apenas permitir em safe mode ou ambiente de desenvolvimento
+  if (
+    process.env.ALERT_LOAD_TEST_SAFE_MODE !== 'true' &&
+    process.env.NODE_ENV !== 'development'
+  ) {
+    return res.status(403).json({
+      error: 'warmup_only_in_safe_mode',
+      message: 'Warmup endpoint is only available in safe mode or development.',
+    });
+  }
+
+  const {coordinates = []} = req.body || {};
+  const warmupResults = [];
+
+  // Coordenadas padrão para warmup (São Paulo)
+  const defaultCoords = [
+    {lat: -23.5505, lon: -46.6333},
+    {lat: -23.5595, lon: -46.6333},
+    {lat: -23.5505, lon: -46.6433},
+  ];
+
+  const coordsToWarm = coordinates.length > 0 ? coordinates : defaultCoords;
+
+  // Importar getRiskFeed para warmup
+  const {getRiskFeed} = require('./src/services/RiskFeedService');
+
+  // Fazer warmup para cada coordenada
+  for (const coord of coordsToWarm) {
+    const startTime = Date.now();
+    try {
+      const result = await getRiskFeed(
+        {
+          latitude: coord.lat,
+          longitude: coord.lon,
+          radiusKm: 35,
+          limit: 10,
+          riskScore: 0,
+          sosPublicOptIn: false,
+        },
+        {db},
+      );
+      warmupResults.push({
+        lat: coord.lat,
+        lon: coord.lon,
+        status: 'success',
+        latencyMs: Date.now() - startTime,
+        alertsCount: result?.alerts?.length || 0,
+        safeMode: result?.meta?.safeMode || false,
+      });
+    } catch (error) {
+      warmupResults.push({
+        lat: coord.lat,
+        lon: coord.lon,
+        status: 'error',
+        latencyMs: Date.now() - startTime,
+        error: error?.message || 'unknown',
+      });
+    }
+  }
+
+  return res.status(200).json({
+    ok: true,
+    generatedAt: new Date().toISOString(),
+    warmupResults,
+    totalCoordinates: coordsToWarm.length,
+    successful: warmupResults.filter(r => r.status === 'success').length,
+    message: 'Risk feed cache warmed up for specified coordinates.',
+  });
+});
+
+// Warmup simples via GET para facilitar teste
+app.get('/v1/ops/warmup', async (req, res) => {
+  // Apenas permitir em safe mode ou ambiente de desenvolvimento
+  if (
+    process.env.ALERT_LOAD_TEST_SAFE_MODE !== 'true' &&
+    process.env.NODE_ENV !== 'development'
+  ) {
+    return res.status(403).json({
+      error: 'warmup_only_in_safe_mode',
+      message: 'Warmup endpoint is only available in safe mode or development.',
+    });
+  }
+
+  // Fazer warmup com coordenadas padrão
+  const {getRiskFeed} = require('./src/services/RiskFeedService');
+  const startTime = Date.now();
+
+  try {
+    await getRiskFeed(
+      {
+        latitude: -23.5505,
+        longitude: -46.6333,
+        radiusKm: 35,
+        limit: 10,
+        riskScore: 0,
+        sosPublicOptIn: false,
+      },
+      {db},
+    );
+
+    return res.status(200).json({
+      ok: true,
+      generatedAt: new Date().toISOString(),
+      latencyMs: Date.now() - startTime,
+      message: 'Risk feed cache warmed up for default coordinates (São Paulo).',
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error?.message || 'warmup_failed',
+      latencyMs: Date.now() - startTime,
+    });
+  }
 });
 
 app.use((req, res, next) => {
@@ -223,8 +511,7 @@ app.use((req, res, next) => {
     return res.status(503).json(
       buildServiceUnavailablePayload({
         code: 'stripe_billing_unavailable',
-        message:
-          'Stripe billing is temporarily unavailable on this service.',
+        message: 'Stripe billing is temporarily unavailable on this service.',
         reason: firebaseState.reason || 'stripe_billing_routes_unavailable',
       }),
     );
@@ -237,8 +524,7 @@ app.use((req, res, next) => {
     return res.status(503).json(
       buildServiceUnavailablePayload({
         code: 'apple_billing_unavailable',
-        message:
-          'Apple billing is temporarily unavailable on this service.',
+        message: 'Apple billing is temporarily unavailable on this service.',
         reason: firebaseState.reason || 'apple_billing_routes_unavailable',
       }),
     );
@@ -280,6 +566,15 @@ registerEntitlementRoutes(app, {
   db,
   config: runtimeConfig,
   logger: console,
+  entitlementMetrics,
+  markRequestMetric,
+  getReleaseControls: async identity => {
+    const policy = await buildReleaseSnapshot(identity);
+    return {
+      featureFlags: policy.featureFlags,
+      release: policy.client,
+    };
+  },
 });
 
 registerFeedRoutes(app, {
@@ -289,6 +584,7 @@ registerFeedRoutes(app, {
 });
 
 registerMapsRoutes(app, {
+  db,
   config: runtimeConfig,
   logger: console,
 });
@@ -318,7 +614,8 @@ try {
 } catch (error) {
   serviceAvailability.sosFanoutQueue = false;
   serviceAvailability.sosFanoutQueueDriver = 'bullmq';
-  serviceAvailability.sosFanoutQueueReason = error?.message || 'queue_bootstrap_failed';
+  serviceAvailability.sosFanoutQueueReason =
+    error?.message || 'queue_bootstrap_failed';
   console.error('[sos/fanout] external queue unavailable', error);
   if (process.env.ALERT_REQUIRE_EXTERNAL_INFRA === 'true') {
     process.exit(1);
@@ -337,12 +634,147 @@ const sosFanoutDeliveryProof = createSosFanoutDeliveryProofRunner({
 
 const relayRateWindow = new Map();
 const replayNonceWindow = new Map();
-const relayMetrics = {
-  sos: { total: 0, success: 0, failed: 0, totalLatencyMs: 0 },
-  alertsPull: { total: 0, success: 0, failed: 0, totalLatencyMs: 0 },
-  chatSend: { total: 0, success: 0, failed: 0, totalLatencyMs: 0 },
-  chatMessages: { total: 0, success: 0, failed: 0, totalLatencyMs: 0 },
+
+const RELEASE_OVERRIDE_CACHE_TTL_MS = 15_000;
+let releaseOverrideCache = {
+  loadedAtMs: 0,
+  data: null,
+  source: 'none',
+  error: null,
 };
+
+const firestoreTimeToIso = value => {
+  if (!value) return null;
+  if (typeof value === 'string') return value;
+  if (typeof value.toDate === 'function') return value.toDate().toISOString();
+  if (typeof value.seconds === 'number') {
+    return new Date(value.seconds * 1000).toISOString();
+  }
+  return null;
+};
+
+const sanitizeReleaseOverride = data => {
+  if (!data || typeof data !== 'object') return null;
+  return {
+    ...data,
+    updatedAt: firestoreTimeToIso(data.updatedAt) || data.updatedAt || null,
+  };
+};
+
+// Check if remote override should be disabled (safe mode / load test)
+const isRemoteOverrideDisabled = () => {
+  return (
+    process.env.ALERT_DISABLE_REMOTE_RELEASE_OVERRIDE === 'true' ||
+    process.env.ALERT_LOAD_TEST_SAFE_MODE === 'true'
+  );
+};
+
+// Track if we've logged the remote override disabled message
+let remoteOverrideDisabledLogged = false;
+
+const loadReleaseOverride = async () => {
+  // Check if remote override is disabled for safe mode
+  if (isRemoteOverrideDisabled()) {
+    if (!remoteOverrideDisabledLogged) {
+      console.log('[release/control] remote override disabled for safe mode');
+      remoteOverrideDisabledLogged = true;
+    }
+    return null;
+  }
+
+  if (!db) return null;
+  const nowMs = Date.now();
+  if (
+    releaseOverrideCache.data &&
+    nowMs - releaseOverrideCache.loadedAtMs < RELEASE_OVERRIDE_CACHE_TTL_MS
+  ) {
+    return releaseOverrideCache.data;
+  }
+
+  try {
+    const doc = await db.collection('ops').doc('release_control').get();
+    const data = doc.exists ? sanitizeReleaseOverride(doc.data()) : null;
+    releaseOverrideCache = {
+      loadedAtMs: nowMs,
+      data,
+      source: doc.exists ? 'firestore:ops/release_control' : 'none',
+      error: null,
+    };
+    return data;
+  } catch (error) {
+    releaseOverrideCache = {
+      ...releaseOverrideCache,
+      loadedAtMs: nowMs,
+      source: releaseOverrideCache.source || 'firestore:ops/release_control',
+      error: error?.message || 'release_override_fetch_failed',
+    };
+    console.error('[release/control] failed to load remote override', error);
+    return releaseOverrideCache.data;
+  }
+};
+
+const providerErrorRateSnapshot = () => {
+  const providers = getProviderFetchMetrics();
+  const total = providers.reduce(
+    (sum, provider) => sum + Number(provider.total || 0),
+    0,
+  );
+  const failed = providers.reduce(
+    (sum, provider) => sum + Number(provider.failure || 0),
+    0,
+  );
+  return total > 0 ? failed / total : undefined;
+};
+
+const buildObservedReleaseMetrics = () => {
+  const sos = summarizeRequestMetric(guardianSosMetrics);
+  const entitlements = summarizeRequestMetric(entitlementMetrics);
+  return {
+    sosSuccessRate: sos.total > 0 ? sos.successRate : undefined,
+    sosP95Ms: Number.isFinite(sos.p95LatencyMs) ? sos.p95LatencyMs : undefined,
+    providerErrorRate: providerErrorRateSnapshot(),
+    entitlementErrorRate:
+      entitlements.total > 0 ? entitlements.errorRate : undefined,
+  };
+};
+
+const buildReleaseSnapshot = async (identity = {}) =>
+  buildReleasePolicy({
+    env: process.env,
+    override: await loadReleaseOverride(),
+    observedMetrics: buildObservedReleaseMetrics(),
+    identity,
+  });
+
+const buildCachedReleaseSnapshot = (identity = {}) =>
+  buildReleasePolicy({
+    env: process.env,
+    override: releaseOverrideCache.data,
+    observedMetrics: buildObservedReleaseMetrics(),
+    identity,
+  });
+
+const summarizeReleasePolicy = policy => ({
+  release: policy.release,
+  canary: policy.canary,
+  killSwitch: policy.killSwitch,
+  featureFlags: policy.featureFlags,
+  slo: {
+    healthy: policy.slo.healthy,
+    missingMetrics: policy.slo.missingMetrics,
+    violations: policy.slo.violations,
+    thresholds: policy.slo.thresholds,
+    observed: policy.slo.observed,
+  },
+  cost: policy.cost,
+  rollback: policy.rollback,
+  incident: policy.incident,
+  remoteOverride: {
+    ...policy.remoteOverride,
+    source: releaseOverrideCache.source,
+    error: releaseOverrideCache.error,
+  },
+});
 
 const base64Url = value =>
   Buffer.from(value)
@@ -361,7 +793,7 @@ const signRelayToken = data =>
   base64Url(crypto.createHmac('sha256', RELAY_SECRET).update(data).digest());
 
 const createRelayToken = payload => {
-  const header = { alg: 'HS256', typ: 'JWT' };
+  const header = {alg: 'HS256', typ: 'JWT'};
   const encodedHeader = base64Url(JSON.stringify(header));
   const encodedPayload = base64Url(JSON.stringify(payload));
   const signature = signRelayToken(`${encodedHeader}.${encodedPayload}`);
@@ -402,7 +834,7 @@ const enforceRelayRateLimit = (key, maxPerMinute) => {
   const current = relayRateWindow.get(key);
 
   if (!current || now - current.windowStart > 60_000) {
-    relayRateWindow.set(key, { windowStart: now, count: 1 });
+    relayRateWindow.set(key, {windowStart: now, count: 1});
     return false;
   }
 
@@ -416,16 +848,16 @@ const consumeReplayNonce = (nonceKey, tsRaw) => {
   const timestamp = Number(tsRaw);
 
   if (!Number.isFinite(timestamp)) {
-    return { ok: false, reason: 'invalid_timestamp' };
+    return {ok: false, reason: 'invalid_timestamp'};
   }
 
   if (Math.abs(now - timestamp) > RELAY_MAX_CLOCK_SKEW_MS) {
-    return { ok: false, reason: 'clock_skew' };
+    return {ok: false, reason: 'clock_skew'};
   }
 
   const existing = replayNonceWindow.get(nonceKey);
   if (existing && existing > now) {
-    return { ok: false, reason: 'replay_detected' };
+    return {ok: false, reason: 'replay_detected'};
   }
 
   replayNonceWindow.set(nonceKey, now + RELAY_MAX_CLOCK_SKEW_MS);
@@ -437,7 +869,7 @@ const consumeReplayNonce = (nonceKey, tsRaw) => {
     }
   }
 
-  return { ok: true };
+  return {ok: true};
 };
 
 const decodeRelayPayload = rawBody => {
@@ -487,6 +919,14 @@ const normalizeRelaySosContacts = contacts =>
       return a.localeCompare(b);
     });
 
+const normalizePhoneNumber = value => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const digits = raw.replace(/[^\d+]/g, '');
+  if (!digits) return '';
+  return digits.startsWith('+') ? digits : `+${digits}`;
+};
+
 const buildRelaySosIntegritySource = payload =>
   JSON.stringify({
     id: typeof payload?.id === 'string' ? payload.id : '',
@@ -500,7 +940,8 @@ const buildRelaySosIntegritySource = payload =>
     createdAt:
       typeof payload?.createdAt === 'string' ? payload.createdAt.trim() : '',
     priority:
-      typeof payload?.priority === 'string' && payload.priority.trim().length > 0
+      typeof payload?.priority === 'string' &&
+      payload.priority.trim().length > 0
         ? payload.priority.trim()
         : 'high',
   });
@@ -514,17 +955,14 @@ const computeRelaySosIntegrityDigest = payload =>
 const markRelayMetric = (key, ok, latencyMs) => {
   const target = relayMetrics[key];
   if (!target) return;
-  target.total += 1;
-  if (ok) target.success += 1;
-  else target.failed += 1;
-  target.totalLatencyMs += Math.max(0, latencyMs);
+  markRequestMetric(target, ok, latencyMs);
 };
 
 const relayAuthMiddleware = (req, res, next) => {
   try {
     const authHeader = String(req.headers.authorization || '').trim();
     if (!authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ error: 'missing_bearer_token' });
+      return res.status(401).json({error: 'missing_bearer_token'});
     }
 
     const token = authHeader.slice('Bearer '.length).trim();
@@ -534,13 +972,13 @@ const relayAuthMiddleware = (req, res, next) => {
       req.headers['x-alert-device-id'] || '',
     ).trim();
     if (!headerDeviceId || headerDeviceId !== payload.did) {
-      return res.status(401).json({ error: 'device_binding_failed' });
+      return res.status(401).json({error: 'device_binding_failed'});
     }
 
     const nonce = String(req.headers['x-alert-nonce'] || '').trim();
     const ts = String(req.headers['x-alert-ts'] || '').trim();
     if (!nonce || !ts) {
-      return res.status(400).json({ error: 'missing_nonce_or_timestamp' });
+      return res.status(400).json({error: 'missing_nonce_or_timestamp'});
     }
 
     const replay = consumeReplayNonce(
@@ -548,7 +986,7 @@ const relayAuthMiddleware = (req, res, next) => {
       ts,
     );
     if (!replay.ok) {
-      return res.status(409).json({ error: replay.reason });
+      return res.status(409).json({error: replay.reason});
     }
 
     req.relay = {
@@ -559,7 +997,7 @@ const relayAuthMiddleware = (req, res, next) => {
 
     return next();
   } catch (error) {
-    return res.status(401).json({ error: 'relay_auth_failed' });
+    return res.status(401).json({error: 'relay_auth_failed'});
   }
 };
 
@@ -624,9 +1062,8 @@ const previewFromMessage = payload => {
 
 app.post('/api/register-token', async (req, res) => {
   try {
-    const { id, name, phone, fcmToken } = req.body || {};
-    if (!id || !fcmToken)
-      return res.status(400).json({ error: 'Missing id/token' });
+    const {id, name, phone, fcmToken} = req.body || {};
+    if (!id) return res.status(400).json({error: 'Missing id'});
     await db
       .collection('users')
       .doc(id)
@@ -638,12 +1075,12 @@ app.post('/api/register-token', async (req, res) => {
           fcmToken,
           updatedAt: nowIso(),
         },
-        { merge: true },
+        {merge: true},
       );
-    return res.json({ ok: true });
+    return res.json({ok: true});
   } catch (e) {
     console.error(e);
-    return res.status(500).json({ error: 'internal' });
+    return res.status(500).json({error: 'internal'});
   }
 });
 
@@ -676,8 +1113,8 @@ app.get('/api/chat/conversations', async (req, res) => {
             typeof data.title === 'string' && data.title.trim().length > 0
               ? data.title
               : isGuardians
-              ? 'Guardioes'
-              : doc.id,
+                ? 'Guardioes'
+                : doc.id,
           members: Array.isArray(data.members)
             ? data.members.filter(Boolean)
             : [],
@@ -719,7 +1156,7 @@ app.get('/api/chat/conversations', async (req, res) => {
     });
   } catch (error) {
     console.error('[chat/conversations]', error);
-    return res.status(500).json({ error: 'internal' });
+    return res.status(500).json({error: 'internal'});
   }
 });
 
@@ -727,7 +1164,7 @@ app.get('/api/chat/messages', async (req, res) => {
   try {
     const conversationId = String(req.query.conversationId || '').trim();
     if (!conversationId) {
-      return res.status(400).json({ error: 'missing_conversation_id' });
+      return res.status(400).json({error: 'missing_conversation_id'});
     }
     const limit = sanitizeLimit(req.query.limit, 40, 120);
     const cursorMs = parseCursorMs(req.query.cursor);
@@ -786,7 +1223,7 @@ app.get('/api/chat/messages', async (req, res) => {
     });
   } catch (error) {
     console.error('[chat/messages]', error);
-    return res.status(500).json({ error: 'internal' });
+    return res.status(500).json({error: 'internal'});
   }
 });
 
@@ -796,7 +1233,7 @@ app.post('/api/chat/send', async (req, res) => {
     const body = req.body || {};
     const conversationId = String(body.conversationId || '').trim();
     if (!conversationId) {
-      return res.status(400).json({ error: 'missing_conversation_id' });
+      return res.status(400).json({error: 'missing_conversation_id'});
     }
 
     const messageType = normalizeMessageType(body.type);
@@ -804,7 +1241,7 @@ app.post('/api/chat/send', async (req, res) => {
       typeof body.text === 'string' ? body.text.trim().slice(0, 5000) : '';
     const uri = typeof body.uri === 'string' ? body.uri.trim() : '';
     if (!text && !uri) {
-      return res.status(400).json({ error: 'empty_message' });
+      return res.status(400).json({error: 'empty_message'});
     }
 
     const clientNonce =
@@ -858,7 +1295,7 @@ app.post('/api/chat/send', async (req, res) => {
       .doc(conversationId)
       .collection('messages')
       .doc(messageId)
-      .set(messagePayload, { merge: true });
+      .set(messagePayload, {merge: true});
 
     const members = Array.isArray(body?.conversation?.members)
       ? body.conversation.members
@@ -876,14 +1313,14 @@ app.post('/api/chat/send', async (req, res) => {
         body.conversation.title.trim().length > 0
           ? body.conversation.title.trim().slice(0, 120)
           : isGuardiansConversation
-          ? 'Guardioes'
-          : conversationId,
+            ? 'Guardioes'
+            : conversationId,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       lastMessage: {
         senderId: identity.userId,
         senderName,
         type: messageType,
-        text: previewFromMessage({ type: messageType, text }),
+        text: previewFromMessage({type: messageType, text}),
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       },
     };
@@ -902,7 +1339,7 @@ app.post('/api/chat/send', async (req, res) => {
     await db
       .collection('conversations')
       .doc(conversationId)
-      .set(conversationUpdate, { merge: true });
+      .set(conversationUpdate, {merge: true});
 
     return res.json({
       ok: true,
@@ -911,7 +1348,7 @@ app.post('/api/chat/send', async (req, res) => {
     });
   } catch (error) {
     console.error('[chat/send]', error);
-    return res.status(500).json({ error: 'internal' });
+    return res.status(500).json({error: 'internal'});
   }
 });
 
@@ -923,10 +1360,10 @@ app.post('/api/chat/ack', async (req, res) => {
     const messageId = String(body.messageId || '').trim();
     const status = String(body.status || '').toLowerCase();
     if (!conversationId || !messageId) {
-      return res.status(400).json({ error: 'missing_conversation_or_message' });
+      return res.status(400).json({error: 'missing_conversation_or_message'});
     }
     if (status !== 'delivered' && status !== 'read') {
-      return res.status(400).json({ error: 'invalid_status' });
+      return res.status(400).json({error: 'invalid_status'});
     }
 
     const ackUpdate = {
@@ -947,7 +1384,7 @@ app.post('/api/chat/ack', async (req, res) => {
       .doc(conversationId)
       .collection('messages')
       .doc(messageId)
-      .set(ackUpdate, { merge: true });
+      .set(ackUpdate, {merge: true});
 
     return res.json({
       ok: true,
@@ -958,7 +1395,7 @@ app.post('/api/chat/ack', async (req, res) => {
     });
   } catch (error) {
     console.error('[chat/ack]', error);
-    return res.status(500).json({ error: 'internal' });
+    return res.status(500).json({error: 'internal'});
   }
 });
 
@@ -966,7 +1403,7 @@ app.post('/api/relay/token', async (req, res) => {
   try {
     const identity = resolveIdentity(req);
     if (!identity.userId || !identity.deviceId) {
-      return res.status(400).json({ error: 'missing_identity' });
+      return res.status(400).json({error: 'missing_identity'});
     }
 
     const nowSec = Math.floor(Date.now() / 1000);
@@ -987,7 +1424,7 @@ app.post('/api/relay/token', async (req, res) => {
     });
   } catch (error) {
     console.error('[relay/token]', error);
-    return res.status(500).json({ error: 'internal' });
+    return res.status(500).json({error: 'internal'});
   }
 });
 
@@ -1035,7 +1472,7 @@ app.post('/api/relay/sos', relayAuthMiddleware, async (req, res) => {
       errorCode: 'rate_limited',
       durationMs,
     });
-    return res.status(429).json({ error: 'rate_limited' });
+    return res.status(429).json({error: 'rate_limited'});
   }
 
   try {
@@ -1065,14 +1502,18 @@ app.post('/api/relay/sos', relayAuthMiddleware, async (req, res) => {
         errorCode: 'invalid_payload',
         durationMs,
       });
-      return res.status(400).json({ error: 'invalid_payload' });
+      return res.status(400).json({error: 'invalid_payload'});
     }
 
     let integrityRecord = null;
     if (integrity) {
-      const alg = String(integrity.alg || '').trim().toLowerCase();
+      const alg = String(integrity.alg || '')
+        .trim()
+        .toLowerCase();
       const version = Number(integrity.version || 0);
-      const digest = String(integrity.digest || '').trim().toLowerCase();
+      const digest = String(integrity.digest || '')
+        .trim()
+        .toLowerCase();
       if (alg !== 'sha256' || version !== 1 || !digest) {
         const durationMs = Date.now() - startedAt;
         markRelayMetric('sos', false, durationMs);
@@ -1087,7 +1528,7 @@ app.post('/api/relay/sos', relayAuthMiddleware, async (req, res) => {
           errorCode: 'invalid_integrity',
           durationMs,
         });
-        return res.status(400).json({ error: 'invalid_integrity' });
+        return res.status(400).json({error: 'invalid_integrity'});
       }
       const expectedDigest = computeRelaySosIntegrityDigest(payload);
       if (digest !== expectedDigest) {
@@ -1104,7 +1545,7 @@ app.post('/api/relay/sos', relayAuthMiddleware, async (req, res) => {
           errorCode: 'integrity_mismatch',
           durationMs,
         });
-        return res.status(400).json({ error: 'integrity_mismatch' });
+        return res.status(400).json({error: 'integrity_mismatch'});
       }
       integrityRecord = {
         verified: true,
@@ -1175,7 +1616,7 @@ app.post('/api/relay/sos', relayAuthMiddleware, async (req, res) => {
       errorCode: sanitizeErrorCode(error?.code || error?.message || 'internal'),
       durationMs,
     });
-    return res.status(500).json({ error: 'internal' });
+    return res.status(500).json({error: 'internal'});
   }
 });
 
@@ -1187,7 +1628,7 @@ const relayAlertsPullHandler = async (req, res) => {
 
   if (enforceRelayRateLimit(rateKey, 60)) {
     markRelayMetric('alertsPull', false, Date.now() - startedAt);
-    return res.status(429).json({ error: 'rate_limited' });
+    return res.status(429).json({error: 'rate_limited'});
   }
 
   try {
@@ -1212,7 +1653,7 @@ const relayAlertsPullHandler = async (req, res) => {
     }
 
     const snapshot = await query.get();
-    const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const items = snapshot.docs.map(doc => ({id: doc.id, ...doc.data()}));
     const nextCursor =
       items.length > 0 ? String(items[items.length - 1].createdAt || '') : null;
 
@@ -1227,7 +1668,7 @@ const relayAlertsPullHandler = async (req, res) => {
   } catch (error) {
     console.error('[relay/alerts/pull]', error);
     markRelayMetric('alertsPull', false, Date.now() - startedAt);
-    return res.status(500).json({ error: 'internal' });
+    return res.status(500).json({error: 'internal'});
   }
 };
 
@@ -1242,14 +1683,14 @@ app.post('/api/relay/chat/send', relayAuthMiddleware, async (req, res) => {
 
   if (enforceRelayRateLimit(rateKey, 90)) {
     markRelayMetric('chatSend', false, Date.now() - startedAt);
-    return res.status(429).json({ error: 'rate_limited' });
+    return res.status(429).json({error: 'rate_limited'});
   }
 
   try {
     const payload = decodeRelayPayload(req.body);
     if (!payload || !payload.conversationId || !payload.text) {
       markRelayMetric('chatSend', false, Date.now() - startedAt);
-      return res.status(400).json({ error: 'invalid_payload' });
+      return res.status(400).json({error: 'invalid_payload'});
     }
 
     const docRef = db.collection('relay_chat').doc();
@@ -1274,7 +1715,7 @@ app.post('/api/relay/chat/send', relayAuthMiddleware, async (req, res) => {
   } catch (error) {
     console.error('[relay/chat/send]', error);
     markRelayMetric('chatSend', false, Date.now() - startedAt);
-    return res.status(500).json({ error: 'internal' });
+    return res.status(500).json({error: 'internal'});
   }
 });
 
@@ -1286,7 +1727,7 @@ app.get('/api/relay/chat/messages', relayAuthMiddleware, async (req, res) => {
 
   if (enforceRelayRateLimit(rateKey, 90)) {
     markRelayMetric('chatMessages', false, Date.now() - startedAt);
-    return res.status(429).json({ error: 'rate_limited' });
+    return res.status(429).json({error: 'rate_limited'});
   }
 
   try {
@@ -1304,7 +1745,7 @@ app.get('/api/relay/chat/messages', relayAuthMiddleware, async (req, res) => {
     }
 
     const snapshot = await query.get();
-    const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const items = snapshot.docs.map(doc => ({id: doc.id, ...doc.data()}));
     const nextCursor =
       items.length > 0
         ? String(items[items.length - 1].receivedAt || '')
@@ -1320,37 +1761,21 @@ app.get('/api/relay/chat/messages', relayAuthMiddleware, async (req, res) => {
   } catch (error) {
     console.error('[relay/chat/messages]', error);
     markRelayMetric('chatMessages', false, Date.now() - startedAt);
-    return res.status(500).json({ error: 'internal' });
+    return res.status(500).json({error: 'internal'});
   }
 });
 
 app.get('/api/relay/metrics', (_req, res) => {
-  const normalize = item => ({
-    ...item,
-    deliveryRate:
-      item.total > 0 ? Number((item.success / item.total).toFixed(4)) : 0,
-    avgLatencyMs:
-      item.total > 0 ? Math.round(item.totalLatencyMs / item.total) : null,
-  });
-
   return res.json({
-    sos: normalize(relayMetrics.sos),
-    alertsPull: normalize(relayMetrics.alertsPull),
-    chatSend: normalize(relayMetrics.chatSend),
-    chatMessages: normalize(relayMetrics.chatMessages),
+    sos: summarizeRequestMetric(relayMetrics.sos),
+    alertsPull: summarizeRequestMetric(relayMetrics.alertsPull),
+    chatSend: summarizeRequestMetric(relayMetrics.chatSend),
+    chatMessages: summarizeRequestMetric(relayMetrics.chatMessages),
     generatedAt: nowIso(),
   });
 });
 
 app.get('/v1/ops/summary', (_req, res) => {
-  const normalize = item => ({
-    ...item,
-    deliveryRate:
-      item.total > 0 ? Number((item.success / item.total).toFixed(4)) : 0,
-    avgLatencyMs:
-      item.total > 0 ? Math.round(item.totalLatencyMs / item.total) : null,
-  });
-
   return res.json({
     ok: true,
     generatedAt: nowIso(),
@@ -1366,13 +1791,16 @@ app.get('/v1/ops/summary', (_req, res) => {
         sosFanoutQueueReason: serviceAvailability.sosFanoutQueueReason,
       },
     },
+    guardianSos: summarizeRequestMetric(guardianSosMetrics),
+    entitlements: summarizeRequestMetric(entitlementMetrics),
     relay: {
-      sos: normalize(relayMetrics.sos),
-      alertsPull: normalize(relayMetrics.alertsPull),
-      chatSend: normalize(relayMetrics.chatSend),
-      chatMessages: normalize(relayMetrics.chatMessages),
+      sos: summarizeRequestMetric(relayMetrics.sos),
+      alertsPull: summarizeRequestMetric(relayMetrics.alertsPull),
+      chatSend: summarizeRequestMetric(relayMetrics.chatSend),
+      chatMessages: summarizeRequestMetric(relayMetrics.chatMessages),
     },
     providers: getProviderFetchMetrics(),
+    release: summarizeReleasePolicy(buildCachedReleaseSnapshot()),
   });
 });
 
@@ -1420,11 +1848,34 @@ app.post('/v1/ops/sos-fanout-proof', async (req, res) => {
   }
 });
 
+app.get('/v1/release/status', async (req, res) => {
+  try {
+    const policy = await buildReleaseSnapshot({
+      userId: req.query?.userId,
+      deviceId: req.query?.deviceId,
+      region: req.query?.region,
+      segment: req.query?.segment,
+    });
+    return res.json({
+      ok: true,
+      generatedAt: nowIso(),
+      ...summarizeReleasePolicy(policy),
+    });
+  } catch (error) {
+    console.error('[v1/release/status]', error);
+    return res.status(500).json({
+      ok: false,
+      error: 'release_status_internal',
+      generatedAt: nowIso(),
+    });
+  }
+});
+
 app.post('/api/guardian/request', async (req, res) => {
   try {
-    const { fromId, fromName, fromPhone, toId, toPhone } = req.body || {};
+    const {fromId, fromName, fromPhone, toId, toPhone} = req.body || {};
     if (!fromId || (!toId && !toPhone)) {
-      return res.status(400).json({ error: 'Missing ids' });
+      return res.status(400).json({error: 'Missing ids'});
     }
     let resolvedTargetId = toId;
     if (!resolvedTargetId && toPhone) {
@@ -1434,12 +1885,12 @@ app.post('/api/guardian/request', async (req, res) => {
         .limit(1)
         .get();
       if (query.empty) {
-        return res.status(404).json({ error: 'not_found' });
+        return res.status(404).json({error: 'not_found'});
       }
       resolvedTargetId = query.docs[0].id;
     }
     if (!resolvedTargetId) {
-      return res.status(404).json({ error: 'not_found' });
+      return res.status(404).json({error: 'not_found'});
     }
     const requestRef = db.collection('guardian_requests').doc();
     const payload = {
@@ -1476,7 +1927,7 @@ app.post('/api/guardian/request', async (req, res) => {
         },
         apns: {
           payload: {
-            aps: { sound: 'alert_sos.wav' },
+            aps: {sound: 'alert_sos.wav'},
           },
         },
       });
@@ -1489,19 +1940,89 @@ app.post('/api/guardian/request', async (req, res) => {
     });
   } catch (e) {
     console.error(e);
-    return res.status(500).json({ error: 'internal' });
+    return res.status(500).json({error: 'internal'});
   }
 });
 
 app.post('/api/sos', async (req, res) => {
+  const startedAt = Date.now();
+  const requestId = buildGuardianSosRequestId(
+    req.headers['x-alert-request-id'] ||
+      req.headers['x-request-id'] ||
+      req.body?.requestId,
+  );
+  const route = '/api/sos';
+  const method = 'POST';
+  res.setHeader('X-Alert-Request-Id', requestId);
+
+  logGuardianSosEvent(console, 'guardian_sos_request_started', {
+    requestId,
+    route,
+    method,
+    accepted: false,
+    queued: false,
+    fallbackUsed: false,
+  });
+
   try {
-    const { fromId, fromName, message, location, targets } = req.body || {};
-    if (!fromId || !Array.isArray(targets) || targets.length === 0) {
-      return res.status(400).json({ error: 'Missing targets' });
+    const {fromId, fromName, message, location, targets, targetPhones} =
+      req.body || {};
+    const resolvedTargetIds = new Set(
+      (Array.isArray(targets) ? targets : [])
+        .map(targetId => String(targetId || '').trim())
+        .filter(Boolean),
+    );
+    const normalizedTargetPhones = Array.from(
+      new Set(
+        (Array.isArray(targetPhones) ? targetPhones : [])
+          .map(normalizePhoneNumber)
+          .filter(Boolean),
+      ),
+    );
+    let resolvedViaPhoneCount = 0;
+    let unresolvedPhoneCount = 0;
+
+    for (const phone of normalizedTargetPhones) {
+      const query = await db
+        .collection('users')
+        .where('phone', '==', phone)
+        .limit(1)
+        .get();
+      if (query.empty) {
+        unresolvedPhoneCount += 1;
+        continue;
+      }
+      const userId = query.docs[0]?.id;
+      if (!userId) {
+        unresolvedPhoneCount += 1;
+        continue;
+      }
+      if (!resolvedTargetIds.has(userId)) {
+        resolvedViaPhoneCount += 1;
+      }
+      resolvedTargetIds.add(userId);
+    }
+
+    const finalTargets = Array.from(resolvedTargetIds);
+    if (!fromId || finalTargets.length === 0) {
+      const durationMs = Date.now() - startedAt;
+      markRequestMetric(guardianSosMetrics, false, durationMs);
+      logGuardianSosEvent(console, 'guardian_sos_request_failed', {
+        requestId,
+        route,
+        method,
+        statusCode: 400,
+        accepted: false,
+        queued: false,
+        fallbackUsed: false,
+        errorCode: 'missing_targets',
+        durationMs,
+      });
+      return res.status(400).json({error: 'Missing targets'});
     }
     const now = nowIso();
     const batch = db.batch();
-    targets.forEach(targetId => {
+    finalTargets.forEach(targetId => {
       const ref = db.collection('sos_alerts').doc();
       batch.set(ref, {
         fromId,
@@ -1516,7 +2037,7 @@ app.post('/api/sos', async (req, res) => {
     await batch.commit();
 
     const tokens = [];
-    for (const targetId of targets) {
+    for (const targetId of finalTargets) {
       const doc = await db.collection('users').doc(targetId).get();
       const token = doc.data()?.fcmToken;
       if (token) tokens.push(token);
@@ -1533,34 +2054,96 @@ app.post('/api/sos', async (req, res) => {
         fromName: fromName || 'Guardiao',
         message: message || '',
         location: location || null,
-        targets,
+        targets: finalTargets,
         tokens,
         timestamp: now,
       });
     }
 
+    const queued = Boolean(fanoutResult.queued);
+    const fallbackUsed = fanoutResult.mode === 'inline_fallback';
+    const jobId = fanoutResult.jobId || null;
+    const durationMs = Date.now() - startedAt;
+    markRequestMetric(guardianSosMetrics, true, durationMs);
+
+    if (queued && jobId) {
+      logGuardianSosEvent(console, 'guardian_sos_queue_enqueued', {
+        requestId,
+        jobId,
+        route,
+        method,
+        statusCode: 202,
+        accepted: true,
+        queued: true,
+        fallbackUsed: false,
+        durationMs,
+      });
+    }
+
+    if (fallbackUsed) {
+      logGuardianSosEvent(console, 'guardian_sos_fallback_used', {
+        requestId,
+        jobId,
+        route,
+        method,
+        statusCode: 200,
+        accepted: true,
+        queued: false,
+        fallbackUsed: true,
+        durationMs,
+      });
+    }
+
+    logGuardianSosEvent(console, 'guardian_sos_request_accepted', {
+      requestId,
+      jobId,
+      route,
+      method,
+      statusCode: 200,
+      accepted: true,
+      queued,
+      fallbackUsed,
+      durationMs,
+    });
+
     return res.json({
       ok: true,
+      requestId,
       fanout: {
         mode: fanoutResult.mode,
-        queued: fanoutResult.queued,
+        queued,
         deduped: Boolean(fanoutResult.deduped),
         sentInline: fanoutResult.sentInline,
-        jobId: fanoutResult.jobId || null,
+        jobId,
         tokenCount: fanoutResult.tokenCount,
+        targetCount: finalTargets.length,
+        resolvedViaPhoneCount,
+        unresolvedPhoneCount,
       },
     });
   } catch (e) {
     console.error(e);
-    return res.status(500).json({ error: 'internal' });
+    markRequestMetric(guardianSosMetrics, false, Date.now() - startedAt);
+    logGuardianSosEvent(console, 'guardian_sos_request_failed', {
+      requestId,
+      route,
+      method,
+      statusCode: 500,
+      accepted: false,
+      queued: false,
+      fallbackUsed: false,
+      errorCode: sanitizeErrorCode(e?.code || e?.message || 'internal'),
+      durationMs: Date.now() - startedAt,
+    });
+    return res.status(500).json({error: 'internal'});
   }
 });
 
 app.post('/api/checkin', async (req, res) => {
   try {
-    const { fromId, fromName, message, city, targets } = req.body || {};
+    const {fromId, fromName, message, city, targets} = req.body || {};
     if (!fromId || !Array.isArray(targets) || targets.length === 0) {
-      return res.status(400).json({ error: 'Missing targets' });
+      return res.status(400).json({error: 'Missing targets'});
     }
     const now = nowIso();
     const safeMessage = typeof message === 'string' ? message : 'Estou saindo';
@@ -1613,16 +2196,16 @@ app.post('/api/checkin', async (req, res) => {
         },
         apns: {
           payload: {
-            aps: { sound: 'default' },
+            aps: {sound: 'default'},
           },
         },
       });
     }
 
-    return res.json({ ok: true });
+    return res.json({ok: true});
   } catch (e) {
     console.error(e);
-    return res.status(500).json({ error: 'internal' });
+    return res.status(500).json({error: 'internal'});
   }
 });
 
@@ -1858,7 +2441,7 @@ const pointFromEvent = event => {
   const lon = Number(event?.geometry?.coordinates?.[0]);
   const lat = Number(event?.geometry?.coordinates?.[1]);
   if (Number.isFinite(lat) && Number.isFinite(lon)) {
-    return { latitude: lat, longitude: lon };
+    return {latitude: lat, longitude: lon};
   }
 
   const bbox = event?.bbox;
@@ -2175,20 +2758,20 @@ const computeScoreLevelFromEvidence = ({
     sourceEvidence.summary.official > 0
       ? 4
       : sourceEvidence.summary.official_social > 0
-      ? 3
-      : sourceEvidence.summary.major_media > 0
-      ? 2
-      : sourceEvidence.summary.internal_alert > 0
-      ? 2
-      : 0;
+        ? 3
+        : sourceEvidence.summary.major_media > 0
+          ? 2
+          : sourceEvidence.summary.internal_alert > 0
+            ? 2
+            : 0;
   const stalePenalty =
     freshnessSec > 3 * 60 * 60
       ? 10
       : freshnessSec > 60 * 60
-      ? 6
-      : freshnessSec > 20 * 60
-      ? 3
-      : 0;
+        ? 6
+        : freshnessSec > 20 * 60
+          ? 3
+          : 0;
   return Math.max(
     0,
     Math.min(
@@ -2451,8 +3034,8 @@ const computeOperationalSnapshot = (payload, exposureContext) => {
             Math.min(0.18, Math.max(0, sourceCount - 1) * 0.04),
         )
       : providers.some(provider => provider?.ok)
-      ? 0.55
-      : 0.35;
+        ? 0.55
+        : 0.35;
 
   const rawScoreLevel = computeScoreLevelFromEvidence({
     exposureRows,
@@ -2535,11 +3118,11 @@ app.get('/v1/operational/snapshot', async (req, res) => {
         sosPublicOptIn: req.query?.sosPublicOptIn,
         limit: req.query?.limit || 160,
       },
-      { db },
+      {db},
     );
 
     const snapshot = computeOperationalSnapshot(payload, {
-      userLocation: hasLatLon ? { latitude: lat, longitude: lon } : null,
+      userLocation: hasLatLon ? {latitude: lat, longitude: lon} : null,
       radiusKm,
     });
     return res.json({
@@ -2574,7 +3157,7 @@ app.get('/v1/events', async (req, res) => {
         sosPublicOptIn: req.query?.sosPublicOptIn,
         limit: req.query?.limit,
       },
-      { db },
+      {db},
     );
     return res.json(payload);
   } catch (error) {
@@ -2597,7 +3180,7 @@ app.get('/v1/health/top', async (req, res) => {
         bbox: req.query?.bbox,
         country: req.query?.country,
       },
-      { db },
+      {db},
     );
     return res.json(payload);
   } catch (error) {
