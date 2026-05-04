@@ -50,6 +50,10 @@ const {
   createSosFanoutDeliveryProofRunner,
 } = require('./src/services/SosFanoutDeliveryProof');
 const {buildReleasePolicy} = require('./src/release/releasePolicy');
+const {
+  isLoadTestSafeMode,
+  getSafeModeMetrics,
+} = require('./src/config/safeMode');
 
 const runtimeConfig = (() => {
   try {
@@ -319,10 +323,13 @@ const handleMetricsEndpoint = (_req, res) => {
         entitlementSnapshotMetrics.cacheHits !== undefined,
     };
 
+    const safeModeMetrics = getSafeModeMetrics();
     const safeModeStatus = {
-      isActive: process.env.ALERT_LOAD_TEST_SAFE_MODE === 'true',
-      remoteOverrideDisabled:
-        process.env.ALERT_DISABLE_REMOTE_RELEASE_OVERRIDE === 'true',
+      isActive: safeModeMetrics.isActive,
+      hardBypassRiskFeedCount: safeModeMetrics.hardBypassRiskFeedCount,
+      hardBypassEntitlementsCount: safeModeMetrics.hardBypassEntitlementsCount,
+      hardBypassLastAt: safeModeMetrics.hardBypassLastAt,
+      remoteOverrideDisabled: safeModeMetrics.remoteOverrideDisabled,
     };
 
     return res.status(200).json({
