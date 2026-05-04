@@ -288,7 +288,7 @@ const buildSafeRequestMetrics = () => ({
 });
 
 // Endpoint de métricas para observabilidade
-const handleMetricsEndpoint = (_req, res) => {
+const handleMetricsEndpoint = async (_req, res) => {
   try {
     // Coletar métricas com tratamento de erro
     let riskFeedMetrics;
@@ -395,7 +395,7 @@ const handleMetricsEndpoint = (_req, res) => {
       economics: {
         enabled: isEconomicsGateEnabled(process.env),
         policy: readEconomicsPolicy(),
-        metrics: getEconomicsMetrics(),
+        metrics: await getEconomicsMetrics(),
       },
       requestMetrics,
       cache: cacheStatus,
@@ -1834,7 +1834,7 @@ app.get('/api/relay/metrics', (_req, res) => {
   });
 });
 
-app.get('/v1/ops/summary', (_req, res) => {
+app.get('/v1/ops/summary', async (_req, res) => {
   return res.json({
     ok: true,
     generatedAt: nowIso(),
@@ -1862,7 +1862,7 @@ app.get('/v1/ops/summary', (_req, res) => {
     economics: {
       enabled: isEconomicsGateEnabled(process.env),
       policy: readEconomicsPolicy(),
-      metrics: getEconomicsMetrics(),
+      metrics: await getEconomicsMetrics(),
     },
   });
 });
@@ -3233,6 +3233,14 @@ const port = runtimeConfig.server.port;
 const host = runtimeConfig.server.host;
 const server = app.listen(port, host, () => {
   console.log(`Alert backend running on ${host}:${port}`);
+
+  // Initialize economics Redis in background to ensure metrics are ready
+  getEconomicsMetrics().catch(error => {
+    console.error(
+      '[bootstrap/economics] failed to initialize economics Redis',
+      error,
+    );
+  });
 });
 
 server.on('error', error => {

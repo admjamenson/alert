@@ -59,7 +59,7 @@ test('economics metrics increment after tracked cost operations', async () => {
     operation: 'TEST_OP',
     tier: 'free',
   });
-  const metrics = getEconomicsMetrics();
+  const metrics = await getEconomicsMetrics();
   assert.equal(metrics.totalTrackedCostUsd, 0.05);
   assert.equal(metrics.trackedUsers, 1);
 });

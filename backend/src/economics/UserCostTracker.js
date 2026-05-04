@@ -18,6 +18,11 @@ const DEFAULT_METRICS = () => ({
   redisAvailable: false,
   memoryFallback: true,
   lastErrorType: null,
+  redisConfigured: false,
+  redisClientCreated: false,
+  redisPingOk: false,
+  redisLastErrorType: null,
+  redisLastErrorMessageSanitized: null,
 });
 
 const METRICS = DEFAULT_METRICS();
@@ -65,6 +70,11 @@ const setJsonToRedis = async (key, value, ttlMs = 0) => {
 
 const initRedisAvailability = async () => {
   if (!redis) {
+    METRICS.redisConfigured = false;
+    METRICS.redisClientCreated = false;
+    METRICS.redisPingOk = false;
+    METRICS.redisAvailable = false;
+    METRICS.memoryFallback = true;
     redisAvailable = false;
     redisInitialized = true;
     console.info('[ECONOMICS] Redis status:', {
@@ -82,10 +92,23 @@ const initRedisAvailability = async () => {
     return redisAvailable;
   }
 
+  METRICS.redisConfigured = true;
+  METRICS.redisClientCreated = true;
+
   try {
     await redis.ping();
+    METRICS.redisPingOk = true;
+    METRICS.redisAvailable = true;
+    METRICS.memoryFallback = false;
     redisAvailable = true;
   } catch (e) {
+    METRICS.redisPingOk = false;
+    METRICS.redisAvailable = false;
+    METRICS.memoryFallback = true;
+    METRICS.redisLastErrorType = String(e?.code || 'unknown');
+    METRICS.redisLastErrorMessageSanitized = String(e?.message || 'unknown')
+      .replace(/rediss?:\/\/[^@]+@/, 'rediss://[REDACTED]@')
+      .slice(0, 100);
     console.error('[ECONOMICS] Redis connection failed:', e.message);
     redisAvailable = false;
   } finally {
@@ -427,19 +450,29 @@ const recordEconomicsDecision = ({decision, estimatedCostUsd = 0} = {}) => {
   }
 };
 
-const getEconomicsMetrics = () => ({
-  totalEstimatedCostUsd: Number(METRICS.totalEstimatedCostUsd.toFixed(8)),
-  totalTrackedCostUsd: Number(METRICS.totalTrackedCostUsd.toFixed(8)),
-  trackedUsers: TRACKED_USERS.size,
-  degradedRequests: METRICS.degradedRequests,
-  blockedRequests: METRICS.blockedRequests,
-  allowedRequests: METRICS.allowedRequests,
-  bypassedRequests: METRICS.bypassedRequests,
-  redisAvailable: METRICS.redisAvailable,
-  memoryFallback: METRICS.memoryFallback,
-  lastErrorType: METRICS.lastErrorType,
-  topOperationsByCost: getTopOperationsByCost(),
-});
+const getEconomicsMetrics = async () => {
+  // Force Redis initialization before returning metrics
+  await initRedisAvailability();
+
+  return {
+    totalEstimatedCostUsd: Number(METRICS.totalEstimatedCostUsd.toFixed(8)),
+    totalTrackedCostUsd: Number(METRICS.totalTrackedCostUsd.toFixed(8)),
+    trackedUsers: TRACKED_USERS.size,
+    degradedRequests: METRICS.degradedRequests,
+    blockedRequests: METRICS.blockedRequests,
+    allowedRequests: METRICS.allowedRequests,
+    bypassedRequests: METRICS.bypassedRequests,
+    redisAvailable: METRICS.redisAvailable,
+    memoryFallback: METRICS.memoryFallback,
+    lastErrorType: METRICS.lastErrorType,
+    redisConfigured: METRICS.redisConfigured,
+    redisClientCreated: METRICS.redisClientCreated,
+    redisPingOk: METRICS.redisPingOk,
+    redisLastErrorType: METRICS.redisLastErrorType,
+    redisLastErrorMessageSanitized: METRICS.redisLastErrorMessageSanitized,
+    topOperationsByCost: getTopOperationsByCost(),
+  };
+};
 
 const getEconomicsTrackerHealth = () => ({
   driver: trackerStoreDriver,
