@@ -38,8 +38,8 @@ ENDPOINT_NAMES.forEach(name => {
   endpointError[name] = new Rate(`error_${name}`);
   endpointDuration[name] = new Trend(`duration_${name}`);
 });
-const httpReqBlocked = new Trend('http_req_blocked');
-const httpReqWaiting = new Trend('http_req_waiting');
+// Note: http_req_blocked, http_req_waiting, http_req_duration and http_req_failed
+// are native k6 metrics — read them directly from data.metrics in handleSummary.
 
 const TARGET = __ENV.ALERT_LOAD_TARGET || 'http://127.0.0.1:5005';
 const SAFE_MODE = __ENV.ALERT_LOAD_TEST_SAFE_MODE === 'true';
