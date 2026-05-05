@@ -12,7 +12,7 @@ const registerFeedRoutes = require('./src/routes/registerFeedRoutes');
 const registerMapsRoutes = require('./src/routes/registerMapsRoutes');
 const {EventHubService} = require('./src/eventHub/EventHubService');
 const {getProviderFetchMetrics} = require('./src/eventHub/fetcher');
-const {getRiskFeedMetrics} = require('./src/services/RiskFeedService');
+const {getWeatherFeedMetrics} = require('./src/services/WeatherFeedService');
 const {
   getEntitlementMetrics,
 } = require('./src/services/EntitlementSnapshotService');
@@ -291,12 +291,12 @@ const buildSafeRequestMetrics = () => ({
 const handleMetricsEndpoint = async (_req, res) => {
   try {
     // Coletar métricas com tratamento de erro
-    let riskFeedMetrics;
+    let weatherFeedMetrics;
     try {
-      riskFeedMetrics = getRiskFeedMetrics();
+      weatherFeedMetrics = getWeatherFeedMetrics();
     } catch (error) {
-      console.error('[metrics] failed to get riskFeed metrics', error);
-      riskFeedMetrics = buildSafeServiceMetrics('riskFeed', error);
+      console.error('[metrics] failed to get weatherFeed metrics', error);
+      weatherFeedMetrics = buildSafeServiceMetrics('weatherFeed', error);
     }
 
     let entitlementSnapshotMetrics;
@@ -372,11 +372,21 @@ const handleMetricsEndpoint = async (_req, res) => {
       errors: Number(entitlementSnapshotMetrics.errors || 0),
     };
 
+    const weatherFeedStatus = {
+      totalRequests: Number(weatherFeedMetrics.totalRequests || 0),
+      providerCalls: Number(weatherFeedMetrics.providerCalls || 0),
+      cacheHits: Number(weatherFeedMetrics.cacheHits || 0),
+      cacheMisses: Number(weatherFeedMetrics.cacheMisses || 0),
+      timeouts: Number(weatherFeedMetrics.timeouts || 0),
+      errors: Number(weatherFeedMetrics.errors || 0),
+    };
+
     return res.status(200).json({
       ok: true,
       generatedAt: new Date().toISOString(),
       riskFeed: riskFeedStatus,
       entitlements: entitlementStatus,
+      weatherFeed: weatherFeedStatus,
       services: {
         riskFeed: {
           ...riskFeedStatus,
@@ -389,6 +399,12 @@ const handleMetricsEndpoint = async (_req, res) => {
           cacheHitRate: entitlementSnapshotMetrics.cacheHitRate || 0,
           coalescedRequests: entitlementSnapshotMetrics.coalescedRequests || 0,
           uptimeMs: entitlementSnapshotMetrics.uptimeMs || 0,
+        },
+        weatherFeed: {
+          ...weatherFeedStatus,
+          cacheHitRate: weatherFeedMetrics.cacheHitRate || 0,
+          coalescedRequests: weatherFeedMetrics.coalescedRequests || 0,
+          uptimeMs: weatherFeedMetrics.uptimeMs || 0,
         },
         providers: Array.isArray(providerMetrics) ? providerMetrics : [],
       },
@@ -1858,8 +1874,50 @@ app.get('/api/relay/metrics', (_req, res) => {
   });
 });
 
+const OPS_SUMMARY_CACHE_TTL_MS = 30_000;
+let opsSummaryCache = {
+  snapshot: null,
+  loadedAtMs: 0,
+};
+
 app.get('/v1/ops/summary', async (_req, res) => {
-  return res.json({
+  const nowMs = Date.now();
+
+  // Return cached snapshot if still fresh
+  if (
+    opsSummaryCache.snapshot &&
+    nowMs - opsSummaryCache.loadedAtMs < OPS_SUMMARY_CACHE_TTL_MS
+  ) {
+    return res.json(opsSummaryCache.snapshot);
+  }
+
+  // Build new snapshot (getEconomicsMetrics returns from its own 30s cache — no Redis blocking)
+  let economicsMetrics;
+  try {
+    economicsMetrics = await getEconomicsMetrics();
+  } catch (error) {
+    console.error('[v1/ops/summary] failed to get economics metrics', error);
+    economicsMetrics = {
+      totalEstimatedCostUsd: 0,
+      totalTrackedCostUsd: 0,
+      trackedUsers: 0,
+      degradedRequests: 0,
+      blockedRequests: 0,
+      allowedRequests: 0,
+      bypassedRequests: 0,
+      redisAvailable: false,
+      memoryFallback: true,
+      lastErrorType: null,
+      redisConfigured: false,
+      redisClientCreated: false,
+      redisPingOk: false,
+      redisLastErrorType: null,
+      redisLastErrorMessageSanitized: null,
+      topOperationsByCost: [],
+    };
+  }
+
+  const snapshot = {
     ok: true,
     generatedAt: nowIso(),
     backend: {
@@ -1886,36 +1944,14 @@ app.get('/v1/ops/summary', async (_req, res) => {
     economics: {
       enabled: isEconomicsGateEnabled(process.env),
       policy: readEconomicsPolicy(),
-      metrics: await (async () => {
-        try {
-          return await getEconomicsMetrics();
-        } catch (error) {
-          console.error(
-            '[v1/ops/summary] failed to get economics metrics',
-            error,
-          );
-          return {
-            totalEstimatedCostUsd: 0,
-            totalTrackedCostUsd: 0,
-            trackedUsers: 0,
-            degradedRequests: 0,
-            blockedRequests: 0,
-            allowedRequests: 0,
-            bypassedRequests: 0,
-            redisAvailable: false,
-            memoryFallback: true,
-            lastErrorType: null,
-            redisConfigured: false,
-            redisClientCreated: false,
-            redisPingOk: false,
-            redisLastErrorType: null,
-            redisLastErrorMessageSanitized: null,
-            topOperationsByCost: [],
-          };
-        }
-      })(),
+      metrics: economicsMetrics,
     },
-  });
+  };
+
+  opsSummaryCache.snapshot = snapshot;
+  opsSummaryCache.loadedAtMs = nowMs;
+
+  return res.json(snapshot);
 });
 
 app.get('/v1/release/status', async (req, res) => {

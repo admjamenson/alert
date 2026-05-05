@@ -10,13 +10,28 @@ const {
 const {
   resolveLocationByCoordinates,
 } = require('../services/LocationResolverService');
-const {getWeatherFeed} = require('../services/WeatherFeedService');
+const {
+  getWeatherFeed,
+  buildUnavailableWeatherFeed,
+} = require('../services/WeatherFeedService');
 const {getRiskFeed} = require('../services/RiskFeedService');
 const {sendJsonError} = require('../http/errorContract');
 const {
   isLoadTestSafeMode,
   buildSafeModeRiskFeedPayload,
 } = require('../config/safeMode');
+const {
+  BACKEND_REQUEST_BASE,
+  WEATHER_PROVIDER,
+  GEOCODING_PROVIDER,
+  FIRESTORE_WRITE,
+  sumOperationCosts,
+} = require('../economics/CostCatalog');
+const {
+  withEconomicGate,
+  registerEconomicCost,
+} = require('../economics/EconomicGate');
+const {normalizeTier} = require('../economics/EconomicsPolicy');
 
 const parseFiniteQueryNumber = value => {
   const parsed = Number(value);
@@ -32,6 +47,47 @@ const clampByLimits = (requested, fallback, maxValue) => {
   );
 };
 
+const resolveRegionKey = req =>
+  String(
+    req.get('x-alert-region') ||
+      req.query?.region ||
+      req.query?.country ||
+      'global',
+  )
+    .trim()
+    .toLowerCase() || 'global';
+
+const resolveTierHint = (req, fallbackTier = 'free') =>
+  normalizeTier(
+    req.get('x-alert-tier') ||
+      req.query?.tier ||
+      req.query?.plan ||
+      fallbackTier,
+  );
+
+const buildEconomicsContext = (req, overrides = {}) => {
+  const identity = resolveRequestIdentity(req);
+  return {
+    identity,
+    userKey: identity.userId || identity.deviceId,
+    tier: normalizeTier(overrides.tier || resolveTierHint(req)),
+    regionKey: String(overrides.regionKey || resolveRegionKey(req)),
+    criticality: String(overrides.criticality || 'standard'),
+  };
+};
+
+const attachEconomics = (payload, decision, operation) => ({
+  ...payload,
+  economics: {
+    ...(payload?.economics || {}),
+    degraded: Boolean(decision?.degraded),
+    reason: String(decision?.reason || 'economics_not_evaluated'),
+    operation: String(operation || decision?.operation || 'UNKNOWN'),
+    fallbackMode: decision?.fallbackMode || null,
+    estimatedCostUsd: Number(decision?.estimatedCostUsd || 0),
+  },
+});
+
 const registerFeedRoutes = (app, deps = {}) => {
   const {
     db,
@@ -42,12 +98,16 @@ const registerFeedRoutes = (app, deps = {}) => {
   } = deps;
 
   const resolveEntitlements = async req => {
-    const identity = resolveRequestIdentity(req);
+    const economicsContext = buildEconomicsContext(req, {
+      criticality: 'read_critical',
+    });
     return buildEntitlementSnapshot(
       {
-        userId: identity.userId,
-        deviceId: identity.deviceId,
+        userId: economicsContext.identity.userId,
+        deviceId: economicsContext.identity.deviceId,
         platform: req.query?.platform,
+        regionKey: economicsContext.regionKey,
+        tier: economicsContext.tier,
       },
       {db, config},
     );
@@ -131,28 +191,103 @@ const registerFeedRoutes = (app, deps = {}) => {
   app.get('/v1/epidemic/feed', handleEpidemicFeed);
   app.get('/api/v1/epidemic/feed', handleEpidemicFeed);
 
+  app.get('/api/v1/weather/feed', (req, res, next) => {
+    // HARD BYPASS em safe mode — responde imediatamente sem providers externos
+    if (isLoadTestSafeMode()) {
+      return res.status(200).json({
+        available: true,
+        source: 'safe_mode_hard_bypass',
+        latitude: parseFiniteQueryNumber(req.query?.lat),
+        longitude: parseFiniteQueryNumber(req.query?.lon),
+        weather: {
+          temperature: {value: 22, unit: 'C'},
+          condition: 'clear',
+          humidity: {value: 60, unit: '%'},
+          windSpeed: {value: 5, unit: 'km/h'},
+          windDirection: 'N',
+          visibility: {value: 10, unit: 'km'},
+          uvIndex: 3,
+          pressure: {value: 1015, unit: 'hPa'},
+          dewPoint: {value: 12, unit: 'C'},
+          feelsLike: {value: 21, unit: 'C'},
+        },
+        forecast: [
+          {day: 0, condition: 'clear', tempHigh: 24, tempLow: 18},
+          {day: 1, condition: 'partly_cloudy', tempHigh: 23, tempLow: 17},
+        ],
+        alerts: [],
+        providerCalls: 0,
+        firestoreLookups: 0,
+        economics: {
+          degraded: false,
+          reason: 'safe_mode_hard_bypass',
+          operation: 'WEATHER_PROVIDER',
+          fallbackMode: null,
+          estimatedCostUsd: 0,
+        },
+        generatedAt: new Date().toISOString(),
+      });
+    }
+    return next();
+  });
+
   app.get('/api/v1/weather/feed', async (req, res) => {
     try {
       const latitude = parseFiniteQueryNumber(req.query?.lat);
       const longitude = parseFiniteQueryNumber(req.query?.lon);
-      const payload = await getWeatherFeedFn(
+      const economicsContext = buildEconomicsContext(req);
+      const estimatedWeatherCostUsd = sumOperationCosts([
+        BACKEND_REQUEST_BASE,
+        WEATHER_PROVIDER,
+        GEOCODING_PROVIDER,
+      ]);
+      const payload = await withEconomicGate(
         {
-          latitude,
-          longitude,
-          locale: req.query?.locale,
+          userKey: economicsContext.userKey,
+          tier: economicsContext.tier,
+          operation: WEATHER_PROVIDER,
+          estimatedCostUsd: estimatedWeatherCostUsd,
+          actualCostUsd: estimatedWeatherCostUsd,
+          fallbackCostUsd: sumOperationCosts([BACKEND_REQUEST_BASE]),
+          regionKey: economicsContext.regionKey,
+          criticality: 'standard',
         },
-        {config},
+        async decision => {
+          const responsePayload = await getWeatherFeedFn(
+            {
+              latitude,
+              longitude,
+              locale: req.query?.locale,
+            },
+            {config},
+          );
+          if (responsePayload?.available) {
+            await recordWeatherUsageFn({
+              db,
+              identity: economicsContext.identity,
+            }).catch(error => {
+              logger.warn('[weather/feed] usage_tracking_failed', {
+                error: error?.message || 'unknown',
+              });
+            });
+            await registerEconomicCost({
+              userKey: economicsContext.userKey,
+              tier: economicsContext.tier,
+              operation: FIRESTORE_WRITE,
+              actualCostUsd: sumOperationCosts([FIRESTORE_WRITE]),
+              regionKey: economicsContext.regionKey,
+              criticality: 'standard',
+            });
+          }
+          return attachEconomics(responsePayload, decision, WEATHER_PROVIDER);
+        },
+        async decision =>
+          attachEconomics(
+            buildUnavailableWeatherFeed(latitude, longitude),
+            decision,
+            WEATHER_PROVIDER,
+          ),
       );
-      if (payload?.available) {
-        await recordWeatherUsageFn({
-          db,
-          identity: resolveRequestIdentity(req),
-        }).catch(error => {
-          logger.warn('[weather/feed] usage_tracking_failed', {
-            error: error?.message || 'unknown',
-          });
-        });
-      }
       return res.json(payload);
     } catch (error) {
       logger.error('[weather/feed]', error);
@@ -192,7 +327,15 @@ const registerFeedRoutes = (app, deps = {}) => {
             req.query?.sosPublicOptIn === '1' ||
             String(req.query?.sosPublicOptIn || '').toLowerCase() === 'true',
         },
-        {db},
+        {
+          db,
+          economicsContext: {
+            userKey: resolveRequestIdentity(req).userId,
+            tier: entitlementSnapshot?.plan || 'free',
+            regionKey: resolveRegionKey(req),
+            criticality: 'standard',
+          },
+        },
       );
       return res.json(payload);
     } catch (error) {

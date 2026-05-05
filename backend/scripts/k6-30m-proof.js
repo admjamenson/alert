@@ -18,9 +18,47 @@ const p99Latency = new Trend('p99_latency');
 const errorRate = new Rate('error_rate');
 const rpsMetric = new Counter('rps');
 
+// Per-endpoint metrics
+const endpointP95 = {};
+const endpointP99 = {};
+const endpointCount = {};
+const endpointError = {};
+const endpointDuration = {};
+const ENDPOINT_NAMES = [
+  'ops_summary',
+  'weather_feed',
+  'risk_feed',
+  'entitlements',
+  'healthz',
+];
+ENDPOINT_NAMES.forEach(name => {
+  endpointP95[name] = new Trend(`p95_${name}`);
+  endpointP99[name] = new Trend(`p99_${name}`);
+  endpointCount[name] = new Counter(`count_${name}`);
+  endpointError[name] = new Rate(`error_${name}`);
+  endpointDuration[name] = new Trend(`duration_${name}`);
+});
+const httpReqBlocked = new Trend('http_req_blocked');
+const httpReqWaiting = new Trend('http_req_waiting');
+
 const TARGET = __ENV.ALERT_LOAD_TARGET || 'http://127.0.0.1:5005';
 const SAFE_MODE = __ENV.ALERT_LOAD_TEST_SAFE_MODE === 'true';
 const SELECTED_PHASE = __ENV.ALERT_K6_PHASE || 'all';
+const REQUIRE_EXTERNAL = __ENV.ALERT_LOAD_REQUIRE_EXTERNAL === 'true';
+const REQUIRE_HTTPS = __ENV.ALERT_LOAD_REQUIRE_HTTPS === 'true';
+
+// Validation: Abort if external required but target is localhost
+if (REQUIRE_EXTERNAL && TARGET.includes('127.0.0.1')) {
+  console.error(
+    'ABORT: ALERT_LOAD_REQUIRE_EXTERNAL=true but target is localhost',
+  );
+  process.exit(1);
+}
+
+if (REQUIRE_HTTPS && !TARGET.startsWith('https://')) {
+  console.error('ABORT: ALERT_LOAD_REQUIRE_HTTPS=true but target is not HTTPS');
+  process.exit(1);
+}
 
 const TEST_LAT = -23.5505;
 const TEST_LON = -46.6333;
@@ -55,56 +93,114 @@ const ENDPOINTS = [
 ];
 
 const PHASE_CONFIGS = {
-  500: {rps: 500, duration: '10m', vus: 50, exec: 'runScenario1'},
-  1000: {rps: 1000, duration: '10m', vus: 100, exec: 'runScenario2'},
-  2500: {rps: 2500, duration: '20m', vus: 250, exec: 'runScenario3'},
-  5000: {rps: 5000, duration: '30m', vus: 500, exec: 'runScenario4'},
+  50: {
+    rps: 50,
+    duration: '5m',
+    preAllocatedVUs: 30,
+    maxVUs: 60,
+    exec: 'runCheapScenario',
+  },
+  100: {
+    rps: 100,
+    duration: '10m',
+    preAllocatedVUs: 60,
+    maxVUs: 120,
+    exec: 'runCheapScenario',
+  },
+  150: {
+    rps: 150,
+    duration: '10m',
+    preAllocatedVUs: 90,
+    maxVUs: 180,
+    exec: 'runCheapScenario',
+  },
+  200: {
+    rps: 200,
+    duration: '10m',
+    preAllocatedVUs: 120,
+    maxVUs: 240,
+    exec: 'runCheapScenario',
+  },
+  500: {
+    rps: 500,
+    duration: '10m',
+    preAllocatedVUs: 300,
+    maxVUs: 600,
+    exec: 'runScenario1',
+  },
+  1000: {
+    rps: 1000,
+    duration: '10m',
+    preAllocatedVUs: 100,
+    maxVUs: 200,
+    exec: 'runScenario2',
+  },
+  2500: {
+    rps: 2500,
+    duration: '20m',
+    preAllocatedVUs: 250,
+    maxVUs: 500,
+    exec: 'runScenario3',
+  },
+  5000: {
+    rps: 5000,
+    duration: '30m',
+    preAllocatedVUs: 500,
+    maxVUs: 1000,
+    exec: 'runScenario4',
+  },
 };
 
 function buildOptions() {
   const scenarios = {};
 
   if (SELECTED_PHASE === 'all') {
-    scenarios.rps_500 = {
+    // For Standard plan proof, run 50→100→150→200 RPS phases
+    scenarios.rps_50 = {
       executor: 'ramping-arrival-rate',
-      preAllocatedVUs: 50,
+      preAllocatedVUs: 30,
+      maxVUs: 60,
       timeUnit: '1s',
-      startRate: 500,
-      stages: [{target: 500, duration: '10m'}],
-      exec: 'runScenario1',
+      startRate: 50,
+      stages: [{target: 50, duration: '5m'}],
+      exec: 'runCheapScenario',
     };
-    scenarios.rps_1000 = {
+    scenarios.rps_100 = {
       executor: 'ramping-arrival-rate',
-      preAllocatedVUs: 100,
+      preAllocatedVUs: 60,
+      maxVUs: 120,
       timeUnit: '1s',
-      startRate: 1000,
-      stages: [{target: 1000, duration: '10m'}],
-      startTime: '10m',
-      exec: 'runScenario2',
+      startRate: 100,
+      stages: [{target: 100, duration: '10m'}],
+      startTime: '5m',
+      exec: 'runCheapScenario',
     };
-    scenarios.rps_2500 = {
+    scenarios.rps_150 = {
       executor: 'ramping-arrival-rate',
-      preAllocatedVUs: 250,
+      preAllocatedVUs: 90,
+      maxVUs: 180,
       timeUnit: '1s',
-      startRate: 2500,
-      stages: [{target: 2500, duration: '20m'}],
-      startTime: '20m',
-      exec: 'runScenario3',
+      startRate: 150,
+      stages: [{target: 150, duration: '10m'}],
+      startTime: '15m',
+      exec: 'runCheapScenario',
     };
-    scenarios.rps_5000 = {
+    scenarios.rps_200 = {
       executor: 'ramping-arrival-rate',
-      preAllocatedVUs: 500,
+      preAllocatedVUs: 120,
+      maxVUs: 240,
       timeUnit: '1s',
-      startRate: 5000,
-      stages: [{target: 5000, duration: '30m'}],
-      startTime: '40m',
-      exec: 'runScenario4',
+      startRate: 200,
+      stages: [{target: 200, duration: '10m'}],
+      startTime: '25m',
+      exec: 'runCheapScenario',
     };
   } else if (PHASE_CONFIGS[SELECTED_PHASE]) {
     const config = PHASE_CONFIGS[SELECTED_PHASE];
     scenarios[`rps_${SELECTED_PHASE}`] = {
       executor: 'ramping-arrival-rate',
-      preAllocatedVUs: config.vus,
+      preAllocatedVUs: config.preAllocatedVUs,
+      maxVUs: config.maxVUs,
       timeUnit: '1s',
       startRate: config.rps,
       stages: [{target: config.rps, duration: config.duration}],
@@ -112,7 +208,7 @@ function buildOptions() {
     };
   } else {
     throw new Error(
-      `Invalid phase: ${SELECTED_PHASE}. Use 500, 1000, 2500, 5000, or all.`,
+      `Invalid phase: ${SELECTED_PHASE}. Use 50, 100, 150, 200, 500, 1000, 2500, 5000, or all.`,
     );
   }
 
@@ -160,6 +256,16 @@ function makeRequest(endpoint) {
   };
 }
 
+function resolveEndpointName(endpoint) {
+  const path = endpoint.path;
+  if (path.includes('/v1/ops/summary')) return 'ops_summary';
+  if (path.includes('/weather/feed')) return 'weather_feed';
+  if (path.includes('/risk/feed')) return 'risk_feed';
+  if (path.includes('/entitlements')) return 'entitlements';
+  if (path.includes('/healthz')) return 'healthz';
+  return 'other';
+}
+
 function runLoadTest(scenarioName, targetRps) {
   console.log(`${scenarioName} - target ${targetRps} RPS`);
 
@@ -174,6 +280,17 @@ function runLoadTest(scenarioName, targetRps) {
   errorRate.add(!success ? 1 : 0);
   p95Latency.add(result.duration);
   p99Latency.add(result.duration);
+
+  // Per-endpoint metrics
+  const epName = resolveEndpointName(endpoint);
+  if (endpointP95[epName]) {
+    endpointP95[epName].add(result.duration);
+    endpointP99[epName].add(result.duration);
+    endpointCount[epName].add(1);
+    endpointError[epName].add(!success ? 1 : 0);
+    endpointDuration[epName].add(result.duration);
+  }
+
   sleep(0.01);
 }
 
@@ -193,6 +310,14 @@ export function runScenario4() {
   runLoadTest('5000 RPS', 5000);
 }
 
+export function runCheapScenario() {
+  const selectedConfig = PHASE_CONFIGS[SELECTED_PHASE];
+  if (!selectedConfig) {
+    throw new Error(`No scenario defined for phase ${SELECTED_PHASE}`);
+  }
+  runLoadTest(`${selectedConfig.rps} RPS`, selectedConfig.rps);
+}
+
 const formatLatency = value => {
   if (value == null || value === 0) return 'N/A';
   return `${Math.round(value)}ms`;
@@ -210,8 +335,15 @@ const buildPhaseVerdict = ({allPassed}) => {
 
   if (SELECTED_PHASE === 'all') {
     return allPassed
-      ? 'Fases executadas sem violacao dos guardrails configurados'
-      : 'Uma ou mais fases violaram os guardrails configurados';
+      ? 'Fases Standard (50→200 RPS) executadas sem violacao dos guardrails'
+      : 'Uma ou mais fases Standard violaram os guardrails';
+  }
+
+  const phaseNum = Number(SELECTED_PHASE);
+  if ([50, 100, 150, 200].includes(phaseNum)) {
+    return allPassed
+      ? `${SELECTED_PHASE} RPS PROVADO - Standard plan capaz`
+      : `${SELECTED_PHASE} RPS FALHOU - otimizacao necessaria`;
   }
 
   return allPassed
@@ -230,11 +362,45 @@ export function handleSummary(data) {
   const avgRps = data?.metrics?.rps ? data.metrics.rps.values.rate : 0;
   const httpReqDuration = data?.metrics?.http_req_duration?.values;
   const httpReqFailed = data?.metrics?.http_req_failed?.values;
+  const droppedIterations =
+    data?.metrics?.dropped_iterations?.values?.count ?? 0;
   const selectedPhaseConfig = readPhaseSummary();
 
   const p95 = httpReqDuration?.['p(95)'] ?? null;
   const p99 = httpReqDuration?.['p(99)'] ?? null;
   const errorR = httpReqFailed?.rate ?? null;
+  const httpBlockedVal = data?.metrics?.http_req_blocked?.values;
+  const httpWaitingVal = data?.metrics?.http_req_waiting?.values;
+  const httpBlockedAvg = httpBlockedVal?.avg ?? null;
+  const httpWaitingAvg = httpWaitingVal?.avg ?? null;
+  const httpBlockedP95 = httpBlockedVal?.['p(95)'] ?? null;
+  const httpWaitingP95 = httpWaitingVal?.['p(95)'] ?? null;
+
+  // Per-endpoint breakdown
+  const endpointRows = [];
+  let slowestEndpoint = {name: 'N/A', p95: 0};
+  for (const name of ENDPOINT_NAMES) {
+    const epP95 = data?.metrics?.[`p95_${name}`]?.values?.['p(95)'];
+    const epP99 = data?.metrics?.[`p99_${name}`]?.values?.['p(99)'];
+    const epCount = data?.metrics?.[`count_${name}`]?.values?.count ?? 0;
+    const epError = data?.metrics?.[`error_${name}`]?.values?.rate ?? null;
+    const epP95Display = formatLatency(epP95);
+    const epP99Display = formatLatency(epP99);
+    const epErrorDisplay =
+      epError != null ? (epError * 100).toFixed(2) + '%' : 'N/A';
+    const epLabel = name.replace(/_/g, ' ');
+    endpointRows.push(
+      `| ${epLabel} | ${epCount} | ${epP95Display} | ${epP99Display} | ${epErrorDisplay} |`,
+    );
+    if (epP95 != null && epP95 > slowestEndpoint.p95) {
+      slowestEndpoint = {name: epLabel, p95: epP95};
+    }
+  }
+  const endpointTable = endpointRows.join('\n');
+  const slowestEndpointDisplay =
+    slowestEndpoint.name !== 'N/A'
+      ? `${slowestEndpoint.name} (${formatLatency(slowestEndpoint.p95)})`
+      : 'N/A';
   const targetRps = selectedPhaseConfig?.rps || null;
   const minimumExpectedRps = targetRps ? targetRps * 0.9 : null;
   const rpsPassed = minimumExpectedRps == null || avgRps >= minimumExpectedRps;
@@ -264,20 +430,28 @@ export function handleSummary(data) {
 
   const scenarioRows = [];
   if (SELECTED_PHASE === 'all') {
-    scenarioRows.push('| 1 | 500 | 10 min | Executado |');
-    scenarioRows.push('| 2 | 1000 | 10 min | Executado |');
-    scenarioRows.push('| 3 | 2500 | 20 min | Executado |');
-    scenarioRows.push('| 4 | 5000 | 30 min | Executado |');
-  } else if (selectedPhaseConfig) {
+    scenarioRows.push('| 1 | 50 | 30 | 60 | 5 min | Executado |');
+    scenarioRows.push('| 2 | 100 | 60 | 120 | 10 min | Executado |');
+    scenarioRows.push('| 3 | 150 | 90 | 180 | 10 min | Executado |');
+    scenarioRows.push('| 4 | 200 | 120 | 240 | 10 min | Executado |');
+  } else if (PHASE_CONFIGS[SELECTED_PHASE]) {
+    const cfg = PHASE_CONFIGS[SELECTED_PHASE];
     scenarioRows.push(
-      `| ${SELECTED_PHASE} | ${SELECTED_PHASE} | ${selectedPhaseConfig.duration} | Executado |`,
+      `| ${SELECTED_PHASE} | ${SELECTED_PHASE} | ${cfg.preAllocatedVUs} | ${cfg.maxVUs} | ${cfg.duration} | Executado |`,
     );
   }
   const scenarioTable = scenarioRows.join('\n');
   const phaseVerdict = buildPhaseVerdict({allPassed});
   const thirtyMStatus = buildThirtyMStatus({allPassed});
 
-  const report = `# Alert k6 Load Test - Final 30M Proof
+  const observations = [];
+  if (SELECTED_PHASE === 'all' || SELECTED_PHASE === '50') {
+    observations.push(
+      '- Fase anterior de 50 RPS foi inconclusiva porque o k6 estava limitado por VUs insuficientes. Agora preAllocatedVUs=30 / maxVUs=60 para garantir throughput real. Fase de 50 RPS com VUs adequados precisa ser reexecutada para validacao.',
+    );
+  }
+
+  const report = `# Alert k6 Load Test - Render Standard Plan Proof
 
 ## Resumo Executivo
 
@@ -287,9 +461,12 @@ export function handleSummary(data) {
 - **Fase Executada**: ${phaseDescription}
 - **Total Requests**: ${totalRequests.toLocaleString()}
 - **RPS Medio**: ${avgRps.toFixed(1)}
+- **Dropped Iterations**: ${droppedIterations.toLocaleString()}
 
 ## Cenarios Executados
 
+| # | RPS | preAllocatedVUs | maxVUs | Duracao | Status |
+|---|-----|-----------------|--------|---------|--------|
 ${scenarioTable}
 
 ## Metricas de Performance
@@ -300,6 +477,7 @@ ${scenarioTable}
 | p99 Latency | ${p99Display} | < 1500ms | ${p99Status} |
 | Error Rate | ${errorR != null ? (errorR * 100).toFixed(2) + '%' : 'N/A'} | < 1% | ${errorStatus} |
 | RPS Medio | ${avgRps.toFixed(1)} | ${minimumExpectedRps != null ? `>= ${minimumExpectedRps.toFixed(1)}` : 'N/A'} | ${rpsStatus} |
+| Dropped Iterations | ${droppedIterations.toLocaleString()} | 0 (ideal) | ${droppedIterations > 0 ? 'ATENCAO' : 'OK'} |
 
 ## Guardrails
 
@@ -310,16 +488,35 @@ ${scenarioTable}
 | Error Rate | < 1% | ${errorR != null ? (errorR * 100).toFixed(2) + '%' : 'N/A'} | ${errorStatus} |
 | RPS real | ${minimumExpectedRps != null ? `>= ${minimumExpectedRps.toFixed(1)}` : 'N/A'} | ${avgRps.toFixed(1)} | ${rpsStatus} |
 
+## Performance por Endpoint
+
+| Endpoint | Requests | p95 | p99 | Error Rate |
+|----------|----------|-----|-----|------------|
+${endpointTable}
+
+**Endpoint mais lento:** ${slowestEndpointDisplay}
+
+## Metricas de Rede
+
+| Metrica | Media | p95 |
+|---------|-------|-----|
+| http_req_blocked | ${httpBlockedAvg != null ? (httpBlockedAvg * 1000).toFixed(2) + 'ms' : 'N/A'} | ${httpBlockedP95 != null ? (httpBlockedP95 * 1000).toFixed(2) + 'ms' : 'N/A'} |
+| http_req_waiting (TTFB) | ${httpWaitingAvg != null ? httpWaitingAvg.toFixed(1) + 'ms' : 'N/A'} | ${httpWaitingP95 != null ? httpWaitingP95.toFixed(1) + 'ms' : 'N/A'} |
+
+## Observacoes
+
+${observations.length > 0 ? observations.join('\n') : '- Nenhuma observacao adicional.'}
+
 ## Custo Estimado
 
-### Por 1M Requests
+### Por 1M Requests (Standard Plan)
 
 - **Render Hosting**: ~$7-25/mes
 - **Custo total estimado 1M requests**: validar com a fase aprovada
 
 ## Conclusao
 
-${allPassed ? 'LOAD TEST PASSED: Todos os guardrails da fase executada foram respeitados.' : 'LOAD TEST FAILED: Um ou mais guardrails foram violados.'}
+${allPassed ? 'LOAD TEST PASSED: Todos os guardrails da fase Standard foram respeitados.' : 'LOAD TEST FAILED: Um ou mais guardrails foram violados.'}
 
 ## Veredito da Fase
 
@@ -330,7 +527,7 @@ ${allPassed ? 'LOAD TEST PASSED: Todos os guardrails da fase executada foram res
 
 [ ] SUPORTA 30M
 [ ] SUPORTA COM RISCOS
-${SELECTED_PHASE === '500' && allPassed ? '[x] NAO PROVADO' : '[x] NAO SUPORTA'}
+${SELECTED_PHASE === '200' && allPassed ? '[x] STANDARD PLAN PROVADO' : '[x] NAO SUPORTA'}
 
 ---
 

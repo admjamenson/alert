@@ -27,6 +27,14 @@ const DEFAULT_METRICS = () => ({
 
 const METRICS = DEFAULT_METRICS();
 
+const ECONOMICS_METRICS_CACHE_TTL_MS = 30_000;
+
+let economicsMetricsCache = {
+  snapshot: null,
+  loadedAtMs: 0,
+  pending: null,
+};
+
 const redisPrefix = 'economics:';
 let redisClient = null;
 let redisAvailable = false;
@@ -202,216 +210,216 @@ const buildEmptyBucket = ({
   subjectKey,
   monthKey,
   totalCostUsd: 0,
-  operations: {},
-  updatedAt: nowIso(),
+  operationCount: 0,
+  reportCount: 0,
+  reportTotalCostUsd: 0,
+  lastOperationAt: null,
 });
 
-const getTopOperationsByCost = () =>
-  Array.from(OPERATION_TOTALS.entries())
-    .sort((left, right) => right[1].totalCostUsd - left[1].totalCostUsd)
-    .slice(0, 10)
-    .map(([operation, row]) => ({
-      operation,
-      totalCostUsd: Number(row.totalCostUsd.toFixed(8)),
-      count: row.count,
-    }));
-
-const rememberOperationCost = (operation, amountUsd) => {
-  const normalizedOperation = String(operation || 'UNKNOWN')
-    .trim()
-    .toUpperCase();
-  const current = OPERATION_TOTALS.get(normalizedOperation) || {
-    totalCostUsd: 0,
-    count: 0,
+const bucketFromRedisValue = value => {
+  if (!value || typeof value !== 'object') return null;
+  return {
+    subjectType: String(value.subjectType || ''),
+    subjectKey: String(value.subjectKey || ''),
+    monthKey: String(value.monthKey || monthKeyForDate()),
+    totalCostUsd: nonNegative(value.totalCostUsd),
+    operationCount: nonNegative(value.operationCount),
+    reportCount: nonNegative(value.reportCount),
+    reportTotalCostUsd: nonNegative(value.reportTotalCostUsd),
+    lastOperationAt: value.lastOperationAt || null,
   };
-  current.totalCostUsd += nonNegative(amountUsd);
-  current.count += 1;
-  OPERATION_TOTALS.set(normalizedOperation, current);
-};
-
-const shouldUseRedis = (env = process.env) => hasRedisUrl(env);
-
-const createRedisStore = () => ({
-  getJson: async key => getJsonFromRedis(key),
-  setJson: async (key, value, ttlMs = 0) => setJsonToRedis(key, value, ttlMs),
-});
-
-const resolveTrackerStore = async () => {
-  if (trackerStoreResolved) {
-    return trackerStore;
-  }
-
-  trackerStoreResolved = true;
-
-  if (!shouldUseRedis(process.env)) {
-    trackerStoreDriver = 'memory';
-    METRICS.memoryFallback = true;
-    METRICS.redisAvailable = false;
-    return null;
-  }
-
-  if (typeof trackerStoreFactory === 'function') {
-    try {
-      trackerStore = trackerStoreFactory();
-      trackerStoreDriver = 'redis';
-      METRICS.memoryFallback = false;
-      return trackerStore;
-    } catch (error) {
-      noteTrackerError(error);
-      trackerStore = null;
-      trackerStoreDriver = 'memory';
-      METRICS.memoryFallback = true;
-      METRICS.redisAvailable = false;
-      console.warn(
-        '[economics/tracker] redis unavailable, using memory fallback',
-        error?.message || 'unknown',
-      );
-      return null;
-    }
-  }
-
-  const redisIsReady = await initRedisAvailability();
-  if (!redisIsReady) {
-    trackerStore = null;
-    trackerStoreDriver = 'memory';
-    METRICS.memoryFallback = true;
-    METRICS.redisAvailable = false;
-    return null;
-  }
-
-  trackerStore = createRedisStore();
-  trackerStoreDriver = 'redis';
-  METRICS.memoryFallback = false;
-  METRICS.redisAvailable = true;
-  return trackerStore;
 };
 
 const readBucket = async ({storageKey, memoryMap, subjectType, subjectKey}) => {
-  const store = await resolveTrackerStore();
-  if (store && trackerStoreDriver === 'redis') {
-    try {
-      const stored = await store.getJson(storageKey);
-      METRICS.redisAvailable = true;
-      METRICS.memoryFallback = false;
-      if (stored && typeof stored === 'object') {
-        memoryMap.set(storageKey, stored);
-        return stored;
-      }
-    } catch (error) {
-      noteTrackerError(error);
-      METRICS.redisAvailable = false;
-      METRICS.memoryFallback = true;
-      console.warn(
-        '[economics/tracker] redis read failed, using memory fallback',
-        error?.message || 'unknown',
-      );
-    }
+  // Try memory first
+  if (memoryMap && memoryMap.has(storageKey)) {
+    return {...memoryMap.get(storageKey)};
   }
 
-  return (
-    memoryMap.get(storageKey) ||
-    buildEmptyBucket({
-      subjectType,
-      subjectKey,
-    })
-  );
+  // Try Redis
+  try {
+    if (redisAvailable || !redisInitialized) {
+      await initRedisAvailability();
+    }
+    if (redisAvailable) {
+      const redisValue = await getJsonFromRedis(storageKey);
+      if (redisValue) {
+        const bucket = bucketFromRedisValue(redisValue);
+        if (bucket) {
+          if (memoryMap) memoryMap.set(storageKey, {...bucket});
+          return bucket;
+        }
+      }
+    }
+  } catch (e) {
+    noteTrackerError(e);
+  }
+
+  const fallbackBucket = buildEmptyBucket({subjectType, subjectKey});
+  if (memoryMap) memoryMap.set(storageKey, {...fallbackBucket});
+  return fallbackBucket;
 };
 
-const writeBucket = async ({storageKey, memoryMap, bucket}) => {
-  memoryMap.set(storageKey, bucket);
-  const store = await resolveTrackerStore();
-  if (store && trackerStoreDriver === 'redis') {
-    try {
-      await store.setJson(storageKey, bucket, ttlUntilNextMonthMs());
-      METRICS.redisAvailable = true;
-      METRICS.memoryFallback = false;
-      return bucket;
-    } catch (error) {
-      noteTrackerError(error);
-      METRICS.redisAvailable = false;
-      METRICS.memoryFallback = true;
-      console.warn(
-        '[economics/tracker] redis write failed, using memory fallback',
-        error?.message || 'unknown',
-      );
+const writeBucket = async ({
+  storageKey,
+  memoryMap,
+  bucket,
+  costPerOp = 0,
+  subjectKey,
+  monthKey,
+}) => {
+  // Always update memory
+  if (memoryMap) {
+    memoryMap.set(storageKey, {...bucket});
+  }
+
+  // Update aggregated metrics
+  METRICS.totalTrackedCostUsd = Number(
+    (METRICS.totalTrackedCostUsd + nonNegative(costPerOp)).toFixed(8),
+  );
+
+  // Async write to Redis (never block)
+  try {
+    if (redisAvailable || !redisInitialized) {
+      initRedisAvailability().catch(() => {});
     }
+    if (redisAvailable) {
+      // Invalidate metrics cache when Redis state changes
+      economicsMetricsCache.loadedAtMs = 0;
+      setJsonToRedis(
+        storageKey,
+        {
+          ...bucket,
+          totalCostUsd: Number(bucket.totalCostUsd.toFixed(8)),
+        },
+        ttlUntilNextMonthMs(),
+      ).catch(() => {});
+    }
+  } catch (e) {
+    // Silently degrade — memory has the data
+  }
+};
+
+const mutateBucket = (bucket, amountUsd, metadata = {}) => {
+  const safeAmount = nonNegative(amountUsd);
+  bucket.totalCostUsd = Number((bucket.totalCostUsd + safeAmount).toFixed(8));
+  bucket.operationCount += 1;
+  bucket.lastOperationAt = nowIso();
+  if (metadata.reportCostUsd) {
+    bucket.reportCount += 1;
+    bucket.reportTotalCostUsd = Number(
+      (bucket.reportTotalCostUsd + nonNegative(metadata.reportCostUsd)).toFixed(
+        8,
+      ),
+    );
   }
   return bucket;
 };
 
-const mutateBucket = (bucket, amountUsd, metadata = {}) => {
-  const safeAmountUsd = nonNegative(amountUsd);
-  const normalizedOperation = String(metadata.operation || 'UNKNOWN')
-    .trim()
-    .toUpperCase();
-  const next = {
-    ...bucket,
-    totalCostUsd: Number((bucket.totalCostUsd + safeAmountUsd).toFixed(8)),
-    updatedAt: nowIso(),
-    operations: {
-      ...(bucket.operations || {}),
-      [normalizedOperation]: {
-        totalCostUsd: Number(
-          (
-            Number(
-              bucket.operations?.[normalizedOperation]?.totalCostUsd || 0,
-            ) + safeAmountUsd
-          ).toFixed(8),
-        ),
-        count: Number(bucket.operations?.[normalizedOperation]?.count || 0) + 1,
-        lastTier: metadata.tier ? String(metadata.tier) : null,
-        lastCriticality: metadata.criticality
-          ? String(metadata.criticality)
-          : null,
-        updatedAt: nowIso(),
-      },
-    },
-  };
+const getTopOperationsByCost = (limit = 10) => {
+  const entries = Array.from(OPERATION_TOTALS.entries())
+    .map(([name, cost]) => ({
+      operation: String(name || 'unknown'),
+      totalCostUsd: Number((cost || 0).toFixed(8)),
+    }))
+    .sort((a, b) => b.totalCostUsd - a.totalCostUsd)
+    .slice(0, Math.max(1, Number.isFinite(Number(limit)) ? Number(limit) : 10));
+  return entries;
+};
 
-  METRICS.totalTrackedCostUsd = Number(
-    (METRICS.totalTrackedCostUsd + safeAmountUsd).toFixed(8),
+const recordOperationCost = (operation, costUsd) => {
+  const opKey = String(operation || 'unknown').trim();
+  const current = OPERATION_TOTALS.get(opKey) || 0;
+  OPERATION_TOTALS.set(
+    opKey,
+    Number((current + nonNegative(costUsd)).toFixed(8)),
   );
-  rememberOperationCost(normalizedOperation, safeAmountUsd);
-
-  return next;
 };
 
-const getUserMonthlyCost = async userIdOrKey => {
-  const keyHash = sanitizeUserKey(userIdOrKey);
-  TRACKED_USERS.add(keyHash);
-  return readBucket({
-    storageKey: buildUserStorageKey(userIdOrKey),
-    memoryMap: USER_COSTS,
-    subjectType: 'user',
-    subjectKey: keyHash,
-  });
+const resolveTrackerStore = async () => {
+  if (trackerStoreResolved && trackerStore) return trackerStore;
+
+  if (trackerStoreFactory) {
+    trackerStore = trackerStoreFactory();
+    trackerStoreResolved = true;
+    return trackerStore;
+  }
+
+  await initRedisAvailability();
+
+  const redisUrl =
+    process.env.ALERT_REDIS_URL || process.env.ALERT_CACHE_REDIS_URL || '';
+
+  const useRedis =
+    redisUrl.length > 0 &&
+    !process.env.ALERT_ECONOMICS_MEMORY_ONLY &&
+    redisAvailable;
+
+  if (useRedis) {
+    trackerStoreDriver = 'redis';
+    trackerStore = {
+      type: 'redis',
+      client: redis,
+      prefix: redisPrefix,
+    };
+  } else {
+    trackerStoreDriver = 'memory';
+    trackerStore = {
+      type: 'memory',
+      userCosts: USER_COSTS,
+      regionCosts: REGION_COSTS,
+    };
+  }
+
+  trackerStoreResolved = true;
+  return trackerStore;
 };
 
-const addUserMonthlyCost = async (userIdOrKey, amountUsd, metadata = {}) => {
-  const keyHash = sanitizeUserKey(userIdOrKey);
-  TRACKED_USERS.add(keyHash);
-  const storageKey = buildUserStorageKey(userIdOrKey);
+const getUserMonthlyCost = async (userKey, metadata = {}) => {
+  const safeKey = sanitizeUserKey(userKey);
+  const storageKey = buildUserStorageKey(safeKey);
   const bucket = await readBucket({
     storageKey,
     memoryMap: USER_COSTS,
     subjectType: 'user',
-    subjectKey: keyHash,
+    subjectKey: safeKey,
   });
-  return writeBucket({
-    storageKey,
-    memoryMap: USER_COSTS,
-    bucket: mutateBucket(bucket, amountUsd, metadata),
-  });
+  return bucket;
 };
 
-const getRegionMonthlyCost = async regionKey => {
+const addUserMonthlyCost = async (userKey, amountUsd, metadata = {}) => {
+  const safeKey = sanitizeUserKey(userKey);
+  const storageKey = buildUserStorageKey(safeKey);
+  const bucket = await readBucket({
+    storageKey,
+    memoryMap: USER_COSTS,
+    subjectType: 'user',
+    subjectKey: safeKey,
+  });
+  const updatedBucket = mutateBucket(bucket, amountUsd, metadata);
+  TRACKED_USERS.add(safeKey);
+  // Write async — never block the caller
+  writeBucket({
+    storageKey,
+    memoryMap: USER_COSTS,
+    bucket: updatedBucket,
+    costPerOp: amountUsd,
+    subjectKey: safeKey,
+    monthKey: monthKeyForDate(),
+  }).catch(() => {});
+  return updatedBucket;
+};
+
+const getRegionMonthlyCost = async (regionKey, metadata = {}) => {
   const safeRegionKey = sanitizeRegionKey(regionKey);
-  return readBucket({
-    storageKey: buildRegionStorageKey(safeRegionKey),
+  const storageKey = buildRegionStorageKey(safeRegionKey);
+  const bucket = await readBucket({
+    storageKey,
     memoryMap: REGION_COSTS,
     subjectType: 'region',
     subjectKey: safeRegionKey,
   });
+  return bucket;
 };
 
 const addRegionMonthlyCost = async (regionKey, amountUsd, metadata = {}) => {
@@ -450,42 +458,67 @@ const recordEconomicsDecision = ({decision, estimatedCostUsd = 0} = {}) => {
   }
 };
 
+/**
+ * Build economics metrics from in-memory data only — no Redis round-trip.
+ * Caches the snapshot for ECONOMICS_METRICS_CACHE_TTL_MS to avoid
+ * blocking hot-path endpoints like /v1/ops/summary and /metrics.
+ */
+const buildEconomicsMetricsSnapshot = () => ({
+  totalEstimatedCostUsd: Number(METRICS.totalEstimatedCostUsd.toFixed(8)),
+  totalTrackedCostUsd: Number(METRICS.totalTrackedCostUsd.toFixed(8)),
+  trackedUsers: TRACKED_USERS.size,
+  degradedRequests: METRICS.degradedRequests,
+  blockedRequests: METRICS.blockedRequests,
+  allowedRequests: METRICS.allowedRequests,
+  bypassedRequests: METRICS.bypassedRequests,
+  redisAvailable: METRICS.redisAvailable,
+  memoryFallback: METRICS.memoryFallback,
+  lastErrorType: METRICS.lastErrorType,
+  redisConfigured: METRICS.redisConfigured,
+  redisClientCreated: METRICS.redisClientCreated,
+  redisPingOk: METRICS.redisPingOk,
+  redisLastErrorType: METRICS.redisLastErrorType,
+  redisLastErrorMessageSanitized: METRICS.redisLastErrorMessageSanitized,
+  topOperationsByCost: getTopOperationsByCost(),
+});
+
 const getEconomicsMetrics = async () => {
-  // Force Redis initialization before returning metrics
-  try {
-    await initRedisAvailability();
-  } catch (error) {
-    console.error('[ECONOMICS] Failed to initialize Redis availability', error);
-    // Ensure metrics are set to safe defaults
-    METRICS.redisConfigured = false;
-    METRICS.redisClientCreated = false;
-    METRICS.redisPingOk = false;
-    METRICS.redisAvailable = false;
-    METRICS.memoryFallback = true;
-    METRICS.redisLastErrorType = String(error?.code || 'unknown');
-    METRICS.redisLastErrorMessageSanitized = String(error?.message || 'unknown')
-      .replace(/rediss?:\/\/[^@]+@/, 'rediss://[REDACTED]@')
-      .slice(0, 100);
+  const nowMs = Date.now();
+
+  // Return cached snapshot if still fresh
+  if (
+    economicsMetricsCache.snapshot &&
+    nowMs - economicsMetricsCache.loadedAtMs < ECONOMICS_METRICS_CACHE_TTL_MS
+  ) {
+    return economicsMetricsCache.snapshot;
   }
 
-  return {
-    totalEstimatedCostUsd: Number(METRICS.totalEstimatedCostUsd.toFixed(8)),
-    totalTrackedCostUsd: Number(METRICS.totalTrackedCostUsd.toFixed(8)),
-    trackedUsers: TRACKED_USERS.size,
-    degradedRequests: METRICS.degradedRequests,
-    blockedRequests: METRICS.blockedRequests,
-    allowedRequests: METRICS.allowedRequests,
-    bypassedRequests: METRICS.bypassedRequests,
-    redisAvailable: METRICS.redisAvailable,
-    memoryFallback: METRICS.memoryFallback,
-    lastErrorType: METRICS.lastErrorType,
-    redisConfigured: METRICS.redisConfigured,
-    redisClientCreated: METRICS.redisClientCreated,
-    redisPingOk: METRICS.redisPingOk,
-    redisLastErrorType: METRICS.redisLastErrorType,
-    redisLastErrorMessageSanitized: METRICS.redisLastErrorMessageSanitized,
-    topOperationsByCost: getTopOperationsByCost(),
-  };
+  // Deduplicate concurrent calls: if a refresh is already in-flight, wait for it
+  if (economicsMetricsCache.pending) {
+    return economicsMetricsCache.pending;
+  }
+
+  // Start async refresh — build from memory immediately, refresh Redis in background
+  const snapshot = buildEconomicsMetricsSnapshot();
+  economicsMetricsCache.snapshot = snapshot;
+  economicsMetricsCache.loadedAtMs = nowMs;
+
+  // Background Redis refresh (never blocks the caller)
+  economicsMetricsCache.pending = (async () => {
+    try {
+      await initRedisAvailability();
+      // Update cache with any new Redis-derived state
+      economicsMetricsCache.snapshot = buildEconomicsMetricsSnapshot();
+      economicsMetricsCache.loadedAtMs = Date.now();
+    } catch (error) {
+      console.error('[ECONOMICS] Background Redis refresh failed', error);
+      // Snapshot from memory remains valid
+    } finally {
+      economicsMetricsCache.pending = null;
+    }
+  })();
+
+  return snapshot;
 };
 
 const getEconomicsTrackerHealth = () => ({
@@ -507,6 +540,9 @@ const __dangerousResetEconomicsTrackerForTests = () => {
   trackerStoreResolved = false;
   trackerStoreDriver = 'memory';
   trackerStoreFactory = null;
+  economicsMetricsCache.snapshot = null;
+  economicsMetricsCache.loadedAtMs = 0;
+  economicsMetricsCache.pending = null;
 };
 
 const __dangerousSetTrackerStoreFactoryForTests = factory => {
