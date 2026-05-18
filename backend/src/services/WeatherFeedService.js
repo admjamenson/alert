@@ -702,11 +702,22 @@ const buildUnavailableWeatherFeed = (lat, lon) => ({
 });
 
 // Safe mode: retorna payload sintético determinístico
+const isLikelyBrazilianCoordinate = (lat, lon) =>
+  lat >= -34 && lat <= 6 && lon >= -74 && lon <= -34;
+
+const buildSafeModeTemperatureC = (lat, lon, seed) => {
+  if (isLikelyBrazilianCoordinate(lat, lon)) {
+    const latitudeCooling = Math.min(4, Math.abs(lat) * 0.08);
+    return Math.round(clamp(28 - latitudeCooling + (seed % 5) - 2, 22, 32));
+  }
+  return Math.round(clamp(20 + (seed % 20) - 10, 12, 30));
+};
+
 const buildSafeModeWeatherFeed = ({lat, lon, locale}) => {
   // Gera dados sintéticos baseados na localização (determinístico)
   const seed = Math.abs(Math.floor(lat * 1000 + lon * 100)) % 100;
-  const tempC = 20 + (seed % 20) - 10; // 10-30°C
-  const weatherCode = [0, 1, 2, 3, 45, 51, 61, 71, 95][seed % 9];
+  const tempC = buildSafeModeTemperatureC(lat, lon, seed);
+  const weatherCode = [0, 1, 2, 3, 45, 51, 61, 80][seed % 8];
   const forecastCodes = [1, 2, 3, 61, 1, 2, 3, 0];
   const isDay = true;
   const forecastDays = Array.from({length: 8}, (_, index) => {
@@ -726,7 +737,7 @@ const buildSafeModeWeatherFeed = ({lat, lon, locale}) => {
   return {
     available: true,
     location: {
-      city: `Safe City ${seed}`,
+      city: '',
       latitude: lat,
       longitude: lon,
       timezone: 'UTC',
@@ -780,7 +791,11 @@ const buildSafeModeWeatherFeed = ({lat, lon, locale}) => {
   };
 };
 
-const isSafeMode = () => process.env.ALERT_LOAD_TEST_SAFE_MODE === 'true';
+const isWeatherFeedSafeMode = () =>
+  process.env.ALERT_WEATHER_LOAD_TEST_SAFE_MODE === 'true' ||
+  process.env.ALERT_WEATHER_SAFE_MODE_HARD_BYPASS === 'true';
+
+const isSafeMode = isWeatherFeedSafeMode;
 
 const getWeatherFeed = async (
   {latitude, longitude, locale},
@@ -1185,6 +1200,8 @@ const getWeatherFeed = async (
 
       const result = {
         available: true,
+        source: 'open_meteo',
+        provider: 'open_meteo',
         location: {
           city,
           latitude: lat,
@@ -1231,6 +1248,13 @@ const getWeatherFeed = async (
           sunset: typeof daily?.sunset?.[0] === 'string' ? daily.sunset[0] : '',
           forecastDays,
         },
+        forecast: forecastDays.map((day, index) => ({
+          day: index,
+          condition: mapWmoToLegacyCondition(day.weatherCode),
+          tempHigh: day.maxTempC,
+          tempLow: day.minTempC,
+        })),
+        debugBuild: buildWeatherFeedDebugBuild(),
         intelligenceSignal: buildIntelligenceSignal(weatherData),
         freshness: {
           fetchedAt: nowIso(),
@@ -1284,6 +1308,7 @@ module.exports = {
   getWeatherFeed,
   buildUnavailableWeatherFeed,
   buildSafeModeWeatherFeed,
+  isWeatherFeedSafeMode,
   buildWeatherFeedDebugBuild,
   mapWmoToIcon,
   getWeatherFeedMetrics,

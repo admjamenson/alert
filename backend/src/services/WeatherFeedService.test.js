@@ -6,6 +6,7 @@ const {
   __countUsableBackendForecastDaysForTests,
   __hasUsableBackendForecastForMobileForTests,
   buildSafeModeWeatherFeed,
+  isWeatherFeedSafeMode,
 } = require('./WeatherFeedService');
 
 test('weather feed daily forecast keeps the available daily range for the app carousel', () => {
@@ -65,6 +66,66 @@ test('safe mode weather feed keeps enough forecast days for the app carousel', (
   );
   assert.equal(payload.debugBuild.weatherFeedContract, 'forecast_8_days_v2');
   assert.equal(__hasUsableBackendForecastForMobileForTests(payload), true);
+});
+
+test('safe mode weather feed does not expose fake city or snow for Brazilian fallback', () => {
+  const payloads = [
+    buildSafeModeWeatherFeed({
+      lat: -16.64944,
+      lon: -49.48889,
+      locale: 'pt-BR',
+    }),
+    buildSafeModeWeatherFeed({
+      lat: -3.7319,
+      lon: -38.5267,
+      locale: 'pt-BR',
+    }),
+  ];
+
+  for (const payload of payloads) {
+    assert.equal(payload.location.city, '');
+    assert.notEqual(payload.current.weatherCode, 71);
+    assert.notEqual(payload.current.labelKey, 'weather_snow');
+    assert.notEqual(payload.weather.condition, 'snow');
+    assert.equal(
+      payload.forecast.some(day => day.condition === 'snow'),
+      false,
+    );
+  }
+});
+
+test('weather safe mode is controlled by weather-specific runtime flags', t => {
+  const previousGlobalSafeMode = process.env.ALERT_LOAD_TEST_SAFE_MODE;
+  const previousWeatherSafeMode = process.env.ALERT_WEATHER_LOAD_TEST_SAFE_MODE;
+  const previousWeatherHardBypass =
+    process.env.ALERT_WEATHER_SAFE_MODE_HARD_BYPASS;
+  t.after(() => {
+    if (typeof previousGlobalSafeMode === 'string') {
+      process.env.ALERT_LOAD_TEST_SAFE_MODE = previousGlobalSafeMode;
+    } else {
+      delete process.env.ALERT_LOAD_TEST_SAFE_MODE;
+    }
+    if (typeof previousWeatherSafeMode === 'string') {
+      process.env.ALERT_WEATHER_LOAD_TEST_SAFE_MODE =
+        previousWeatherSafeMode;
+    } else {
+      delete process.env.ALERT_WEATHER_LOAD_TEST_SAFE_MODE;
+    }
+    if (typeof previousWeatherHardBypass === 'string') {
+      process.env.ALERT_WEATHER_SAFE_MODE_HARD_BYPASS =
+        previousWeatherHardBypass;
+    } else {
+      delete process.env.ALERT_WEATHER_SAFE_MODE_HARD_BYPASS;
+    }
+  });
+
+  process.env.ALERT_LOAD_TEST_SAFE_MODE = 'true';
+  delete process.env.ALERT_WEATHER_LOAD_TEST_SAFE_MODE;
+  delete process.env.ALERT_WEATHER_SAFE_MODE_HARD_BYPASS;
+  assert.equal(isWeatherFeedSafeMode(), false);
+
+  process.env.ALERT_WEATHER_LOAD_TEST_SAFE_MODE = 'true';
+  assert.equal(isWeatherFeedSafeMode(), true);
 });
 
 test('weather feed cache rejects one-day forecasts before the mobile carousel', () => {

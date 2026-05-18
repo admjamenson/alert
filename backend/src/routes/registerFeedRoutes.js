@@ -14,6 +14,7 @@ const {
   getWeatherFeed,
   buildUnavailableWeatherFeed,
   buildSafeModeWeatherFeed,
+  isWeatherFeedSafeMode,
 } = require('../services/WeatherFeedService');
 const {getRiskFeed} = require('../services/RiskFeedService');
 const {sendJsonError} = require('../http/errorContract');
@@ -213,7 +214,7 @@ const registerFeedRoutes = (app, deps = {}) => {
 
   app.get('/api/v1/weather/feed', (req, res, next) => {
     // HARD BYPASS em safe mode — responde imediatamente sem providers externos
-    if (isLoadTestSafeMode()) {
+    if (isWeatherFeedSafeMode()) {
       const latitude = parseFiniteQueryNumber(req.query?.lat) ?? 0;
       const longitude = parseFiniteQueryNumber(req.query?.lon) ?? 0;
       const safePayload = buildSafeModeWeatherFeed({

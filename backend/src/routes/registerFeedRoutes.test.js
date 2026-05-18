@@ -31,12 +31,19 @@ const createResponseStub = () => ({
 
 test('weather safe mode bypass keeps the canonical mobile weather contract', async t => {
   const previousSafeMode = process.env.ALERT_LOAD_TEST_SAFE_MODE;
+  const previousWeatherSafeMode = process.env.ALERT_WEATHER_LOAD_TEST_SAFE_MODE;
   process.env.ALERT_LOAD_TEST_SAFE_MODE = 'true';
+  process.env.ALERT_WEATHER_LOAD_TEST_SAFE_MODE = 'true';
   t.after(() => {
     if (typeof previousSafeMode === 'string') {
       process.env.ALERT_LOAD_TEST_SAFE_MODE = previousSafeMode;
     } else {
       delete process.env.ALERT_LOAD_TEST_SAFE_MODE;
+    }
+    if (typeof previousWeatherSafeMode === 'string') {
+      process.env.ALERT_WEATHER_LOAD_TEST_SAFE_MODE = previousWeatherSafeMode;
+    } else {
+      delete process.env.ALERT_WEATHER_LOAD_TEST_SAFE_MODE;
     }
   });
 
@@ -73,8 +80,10 @@ test('weather safe mode bypass keeps the canonical mobile weather contract', asy
   assert.equal(response.statusCode, 200);
   assert.equal(response.body.available, true);
   assert.equal(response.body.source, 'safe_mode_hard_bypass');
+  assert.equal(response.body.location?.city, '');
   assert.equal(typeof response.body.current?.tempC, 'number');
   assert.equal(typeof response.body.current?.labelKey, 'string');
+  assert.notEqual(response.body.current?.labelKey, 'weather_snow');
   assert.equal(typeof response.body.daily?.maxTempC, 'number');
   assert.equal(Array.isArray(response.body.daily?.forecastDays), true);
   assert.ok(response.body.daily.forecastDays.length >= 6);

@@ -38,6 +38,7 @@ test('backend index weather route serves the safe-mode 8-day contract', async t 
       NODE_ENV: 'staging',
       ALERT_ENV: 'staging',
       ALERT_LOAD_TEST_SAFE_MODE: 'true',
+      ALERT_WEATHER_LOAD_TEST_SAFE_MODE: 'true',
       ALERT_ALLOW_PUBLIC_PROVIDER_DEFAULTS: 'true',
       RELAY_HMAC_SECRET: 'runtime-test-relay-secret',
       RENDER_GIT_COMMIT: 'index-runtime-test',
