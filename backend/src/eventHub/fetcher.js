@@ -139,6 +139,20 @@ const sleep = ms =>
     setTimeout(resolve, ms);
   });
 
+const buildRequestHeaders = headers => {
+  const requestHeaders = {
+    'User-Agent': DEFAULT_USER_AGENT,
+    Accept: 'application/json',
+  };
+  for (const [key, value] of Object.entries(headers || {})) {
+    if (value === undefined || value === null || value === '') {
+      continue;
+    }
+    requestHeaders[key] = String(value);
+  }
+  return requestHeaders;
+};
+
 const fetchJsonWithRetry = async (
   url,
   options = {},
@@ -208,11 +222,7 @@ const fetchJsonWithRetry = async (
       try {
         const response = await fetch(url, {
           method,
-          headers: {
-            'User-Agent': DEFAULT_USER_AGENT,
-            Accept: 'application/json',
-            ...headers,
-          },
+          headers: buildRequestHeaders(headers),
           body,
           signal: controller?.signal,
         });
