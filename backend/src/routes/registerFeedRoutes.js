@@ -13,6 +13,7 @@ const {
 const {
   getWeatherFeed,
   buildUnavailableWeatherFeed,
+  buildSafeModeWeatherFeed,
 } = require('../services/WeatherFeedService');
 const {getRiskFeed} = require('../services/RiskFeedService');
 const {sendJsonError} = require('../http/errorContract');
@@ -47,9 +48,28 @@ const clampByLimits = (requested, fallback, maxValue) => {
   );
 };
 
+const readHeader = (req, name) => {
+  if (typeof req?.get === 'function') {
+    const value = req.get(name);
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  const stableName = String(name || '')
+    .trim()
+    .toLowerCase();
+  const headerValue =
+    req?.headers?.[stableName] ??
+    req?.headers?.[name];
+  return typeof headerValue === 'string' && headerValue.trim()
+    ? headerValue.trim()
+    : '';
+};
+
 const resolveRegionKey = req =>
   String(
-    req.get('x-alert-region') ||
+    readHeader(req, 'x-alert-region') ||
       req.query?.region ||
       req.query?.country ||
       'global',
@@ -59,7 +79,7 @@ const resolveRegionKey = req =>
 
 const resolveTierHint = (req, fallbackTier = 'free') =>
   normalizeTier(
-    req.get('x-alert-tier') ||
+    readHeader(req, 'x-alert-tier') ||
       req.query?.tier ||
       req.query?.plan ||
       fallbackTier,
@@ -194,30 +214,16 @@ const registerFeedRoutes = (app, deps = {}) => {
   app.get('/api/v1/weather/feed', (req, res, next) => {
     // HARD BYPASS em safe mode — responde imediatamente sem providers externos
     if (isLoadTestSafeMode()) {
+      const latitude = parseFiniteQueryNumber(req.query?.lat) ?? 0;
+      const longitude = parseFiniteQueryNumber(req.query?.lon) ?? 0;
+      const safePayload = buildSafeModeWeatherFeed({
+        lat: latitude,
+        lon: longitude,
+        locale: req.query?.locale,
+      });
       return res.status(200).json({
-        available: true,
+        ...safePayload,
         source: 'safe_mode_hard_bypass',
-        latitude: parseFiniteQueryNumber(req.query?.lat),
-        longitude: parseFiniteQueryNumber(req.query?.lon),
-        weather: {
-          temperature: {value: 22, unit: 'C'},
-          condition: 'clear',
-          humidity: {value: 60, unit: '%'},
-          windSpeed: {value: 5, unit: 'km/h'},
-          windDirection: 'N',
-          visibility: {value: 10, unit: 'km'},
-          uvIndex: 3,
-          pressure: {value: 1015, unit: 'hPa'},
-          dewPoint: {value: 12, unit: 'C'},
-          feelsLike: {value: 21, unit: 'C'},
-        },
-        forecast: [
-          {day: 0, condition: 'clear', tempHigh: 24, tempLow: 18},
-          {day: 1, condition: 'partly_cloudy', tempHigh: 23, tempLow: 17},
-        ],
-        alerts: [],
-        providerCalls: 0,
-        firestoreLookups: 0,
         economics: {
           degraded: false,
           reason: 'safe_mode_hard_bypass',
@@ -225,7 +231,6 @@ const registerFeedRoutes = (app, deps = {}) => {
           fallbackMode: null,
           estimatedCostUsd: 0,
         },
-        generatedAt: new Date().toISOString(),
       });
     }
     return next();

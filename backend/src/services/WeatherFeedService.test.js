@@ -63,6 +63,7 @@ test('safe mode weather feed keeps enough forecast days for the app carousel', (
     payload.forecast.map(day => day.day),
     [0, 1, 2, 3, 4, 5, 6, 7],
   );
+  assert.equal(payload.debugBuild.weatherFeedContract, 'forecast_8_days_v2');
   assert.equal(__hasUsableBackendForecastForMobileForTests(payload), true);
 });
 

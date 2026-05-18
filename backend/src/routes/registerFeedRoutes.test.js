@@ -80,5 +80,9 @@ test('weather safe mode bypass keeps the canonical mobile weather contract', asy
   assert.ok(response.body.daily.forecastDays.length >= 6);
   assert.equal(Array.isArray(response.body.forecast), true);
   assert.ok(response.body.forecast.length >= 6);
+  assert.equal(
+    response.body.debugBuild?.weatherFeedContract,
+    'forecast_8_days_v2',
+  );
   assert.equal(typeof response.body.freshness?.fetchedAt, 'string');
 });

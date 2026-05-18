@@ -22,6 +22,18 @@ const MAX_WEATHER_FEED_CACHE_ENTRIES = Math.max(
   Number(process.env.ALERT_WEATHER_FEED_CACHE_MAX_ENTRIES || 250),
 );
 const MIN_BACKEND_FORECAST_DAYS_FOR_MOBILE = 6;
+const WEATHER_FEED_CONTRACT = 'forecast_8_days_v2';
+
+const buildWeatherFeedDebugBuild = () => ({
+  commit: String(
+    process.env.RENDER_GIT_COMMIT ||
+      process.env.RENDER_DEPLOY_COMMIT ||
+      process.env.ALERT_RELEASE_VERSION ||
+      process.env.GIT_COMMIT ||
+      'local',
+  ).slice(0, 40),
+  weatherFeedContract: WEATHER_FEED_CONTRACT,
+});
 
 // Circuit breaker para evitar avalanche de requests
 const WEATHER_CB_CONFIG = {
@@ -758,6 +770,7 @@ const buildSafeModeWeatherFeed = ({lat, lon, locale}) => {
       sunset: '18:00',
       forecastDays,
     },
+    debugBuild: buildWeatherFeedDebugBuild(),
     intelligenceSignal: null,
     freshness: {
       fetchedAt: nowIso(),
@@ -1271,6 +1284,7 @@ module.exports = {
   getWeatherFeed,
   buildUnavailableWeatherFeed,
   buildSafeModeWeatherFeed,
+  buildWeatherFeedDebugBuild,
   mapWmoToIcon,
   getWeatherFeedMetrics,
   resetWeatherFeedMetrics,
