@@ -73,8 +73,8 @@ test('weather feed keeps forecast available when reverse geocoding times out', a
   try {
     const result = await fetchWeatherFeedOpenMeteo(
       {
-        latitude: -23.55,
-        longitude: -46.63,
+        latitude: -22.9,
+        longitude: -43.2,
         locale: 'pt-BR',
       },
       { userAgent: 'AlertBackend/Tests' },
@@ -135,6 +135,10 @@ test('weather feed reverse geocoding targets the BigDataCloud reverse endpoint',
     assert.equal(result.reverseResult.ok, true);
     assert.equal(
       seenUrls.some(url => url.startsWith('https://api-bdc.io/data/reverse-geocode-client?')),
+      true,
+    );
+    assert.equal(
+      seenUrls.some(url => url.includes('/forecast') && url.includes('forecast_days=8')),
       true,
     );
   } finally {
