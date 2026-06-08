@@ -14,7 +14,11 @@ import {WeatherResult} from '../../../services/WeatherService';
 import {getTypographyStyle} from '../../../theme/typography';
 import type {TemperatureUnit} from '../../../utils/measurementUnits';
 import {CinematicWeatherHero} from '../../weather/CinematicWeatherHero';
-import {WeatherHeroIcon, mapConditionToHeroIcon} from './WeatherHeroIcon';
+import {
+  WeatherHeroIcon,
+  mapConditionToHeroIcon,
+  resolveWeatherIconLayout,
+} from './WeatherHeroIcon';
 
 // MoonPhaseVisualBadge is rendered by CinematicWeatherHero for lunar decisions.
 const signalText = (weatherResult: WeatherResult | null, fallback: string) =>
@@ -52,6 +56,9 @@ const inferPrecipitationType = (
   }
   return 'none';
 };
+
+const isVisualDayPhase = (phase: string) =>
+  phase !== 'night' && phase !== 'midnight' && phase !== 'predawn';
 
 interface WeatherCompactCardProps {
   tempDisplay: string;
@@ -126,11 +133,12 @@ export const WeatherCompactCard = memo<WeatherCompactCardProps>(
           weatherResult?.label ||
           conditionDisplay ||
           null,
-        isDay: weatherResult?.isDay ?? timeOfDayPhase !== 'night',
+        isDay: weatherResult?.isDay ?? isVisualDayPhase(timeOfDayPhase),
         localTime:
           weatherResult?.updatedAt || weatherResult?.timestamp || Date.now(),
         sunriseTime: weatherResult?.sunrise,
         sunsetTime: weatherResult?.sunset,
+        timeZone: weatherResult?.timeZone || null,
         precipitationType: inferPrecipitationType(
           weatherResult,
           conditionDisplay,
@@ -180,6 +188,19 @@ export const WeatherCompactCard = memo<WeatherCompactCardProps>(
     const visualTheme = visualDecision.visualTheme;
     const chipBackgroundColor = visualTheme.chipBackgroundColor;
     const riskStatus = visualTheme.riskStatus;
+    const cardWidth = Math.max(0, screenWidth - ThemeTokens.spacing.lg * 2);
+    const iconLayout = useMemo(
+      () =>
+        resolveWeatherIconLayout({
+          condition: heroIconCondition,
+          timeOfDay: timeOfDayPhase,
+          cardWidth,
+          cardHeight: isCompact ? 114 : 122,
+          compact: isCompact,
+          riskLevel: riskStatus.level,
+        }),
+      [cardWidth, heroIconCondition, isCompact, riskStatus.level, timeOfDayPhase],
+    );
     const conditionCityDisplay =
       conditionDisplay && cityDisplay
         ? t('weather_condition_in_city', {
@@ -214,8 +235,13 @@ export const WeatherCompactCard = memo<WeatherCompactCardProps>(
         accessibilityLabel={weatherAccessibilityLabel}
         accessibilityHint={t('home_bar_tap_details')}>
         <CinematicWeatherHero decision={visualDecision} compact>
-          <View style={styles.mainRow}>
-            <View style={styles.tempSection}>
+          <View
+            style={[styles.mainRow, {minHeight: iconLayout.blockMinHeight}]}>
+            <View
+              style={[
+                styles.tempSection,
+                {paddingRight: iconLayout.reserveWidth},
+              ]}>
               <View style={styles.tempRow}>
                 <Text
                   style={[
@@ -256,10 +282,24 @@ export const WeatherCompactCard = memo<WeatherCompactCardProps>(
               </View>
             </View>
 
-            <View style={styles.visualSection}>
+            <View
+              testID="weather-hero-icon-anchor"
+              pointerEvents="none"
+              style={[
+                styles.visualSection,
+                {
+                  top: iconLayout.top,
+                  right: iconLayout.right,
+                  width: iconLayout.size,
+                  height: iconLayout.size,
+                  opacity: iconLayout.opacity,
+                  transform: iconLayout.transform,
+                  zIndex: iconLayout.zIndex,
+                },
+              ]}>
               <WeatherHeroIcon
                 condition={heroIconCondition}
-                size={ThemeTokens.WeatherIcon.sizes.home}
+                size={iconLayout.size}
                 isDark={isDark}
                 primaryColor={visualTheme.iconPrimaryColor}
                 secondaryColor={visualTheme.iconSecondaryColor}
@@ -335,13 +375,12 @@ const styles = StyleSheet.create({
     minHeight: 114,
   },
   mainRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    position: 'relative',
+    justifyContent: 'center',
   },
   tempSection: {
-    flex: 1,
-    marginRight: ThemeTokens.spacing.sm,
+    width: '100%',
+    minWidth: 0,
   },
   tempRow: {
     flexDirection: 'row',
@@ -356,10 +395,9 @@ const styles = StyleSheet.create({
     opacity: 0.9,
   },
   visualSection: {
+    position: 'absolute',
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: 96,
-    maxWidth: 136,
   },
   cityRow: {
     marginTop: 4,

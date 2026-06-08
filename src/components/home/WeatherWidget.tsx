@@ -125,6 +125,9 @@ const inferWeatherWidgetPrecipitationType = (
   return 'none';
 };
 
+const isVisualDayPhase = (phase: string) =>
+  phase !== 'night' && phase !== 'midnight' && phase !== 'predawn';
+
 const getWeatherConditionLabelKey = (
   conditionCode: WeatherResult['conditionCode'] | null | undefined,
 ): string => {
@@ -603,11 +606,12 @@ export const WeatherWidget = React.memo(
           weatherResult?.icon ||
           weatherResult?.label ||
           null,
-        isDay: weatherResult?.isDay ?? timeOfDayPhase !== 'night',
+        isDay: weatherResult?.isDay ?? isVisualDayPhase(timeOfDayPhase),
         localTime:
           weatherResult?.updatedAt || weatherResult?.timestamp || Date.now(),
         sunriseTime: weatherResult?.sunrise,
         sunsetTime: weatherResult?.sunset,
+        timeZone: weatherResult?.timeZone || null,
         precipitationType: inferWeatherWidgetPrecipitationType(weatherResult),
         thunderstormRisk: includesAnyWeatherTerm(text, [
           'thunder',
@@ -763,7 +767,8 @@ export const WeatherWidget = React.memo(
     // so the neon icon always renders even when weatherResult is null
     const iconConditionCode =
       weatherResult?.conditionCode || weatherResult?.icon || null;
-    const iconIsDay = weatherResult?.isDay ?? true;
+    const iconIsDay =
+      weatherResult?.isDay ?? isVisualDayPhase(timeOfDayPhase);
     const rangeDisplay = formatRangeLabel(
       weatherResult,
       temperatureLocale,

@@ -265,6 +265,10 @@ export const selectWeatherVisual = (
   const asset = findWeatherVisualAsset(chosen.assetId);
   const visualTheme = resolveWeatherVisualTheme({
     condition: chosen.condition,
+    date: context.localTime,
+    sunrise: context.sunriseTime,
+    sunset: context.sunsetTime,
+    timezone: context.timeZone,
     isDay: context.isDay,
     timeOfDay: periodFromContext(context),
     temperature: context.temperature,

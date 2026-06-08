@@ -112,13 +112,22 @@ describe('WeatherCompactCard visual climate palette', () => {
     const buttonStyle = StyleSheet.flatten(button.props.style);
     const hero = tree.root.findByProps({testID: 'mock-cinematic-weather-hero'});
 
-    expect(buttonStyle.backgroundColor).toBe('#26365A');
+    expect(buttonStyle.backgroundColor).toBe('#12233F');
     expect(hero.props.decision.visualTheme.backgroundGradient).toEqual(
-      expect.arrayContaining(['#26365A', '#101B34', '#060812']),
+      expect.arrayContaining(['#4DA8FF', '#2E5EAA', '#12233F']),
     );
     expect(hero.props.decision.visualTheme.textPrimaryColor).toBe('#FFFFFF');
     expect(hero.props.decision.visualTheme.accentColor).toBe('#FFD166');
     expect(hero.props.decision.visualTheme.riskStatus.level).toBe('safe');
+    const iconAnchor = tree.root.findByProps({
+      testID: 'weather-hero-icon-anchor',
+    });
+    const iconStyle = StyleSheet.flatten(iconAnchor.props.style);
+    expect(iconStyle.position).toBe('absolute');
+    expect(iconStyle.right).toBeGreaterThanOrEqual(6);
+    expect(iconStyle.right).toBeLessThanOrEqual(14);
+    expect(iconStyle.width).toBeGreaterThanOrEqual(76);
+    expect(iconStyle.width).toBeLessThanOrEqual(92);
     expect(
       tree.root.findAllByProps({children: 'Safe within 1 km'}).length,
     ).toBeGreaterThan(0);
@@ -138,11 +147,44 @@ describe('WeatherCompactCard visual climate palette', () => {
     const buttonStyle = StyleSheet.flatten(button.props.style);
     const hero = tree.root.findByProps({testID: 'mock-cinematic-weather-hero'});
 
-    expect(buttonStyle.backgroundColor).toBe('#281B4D');
+    expect(buttonStyle.backgroundColor).toBe('#12233F');
     expect(buttonStyle.backgroundColor).not.toBe('#FFFFFF');
     expect(hero.props.decision.visualTheme.backgroundGradient).toEqual(
-      expect.arrayContaining(['#281B4D', '#101527', '#05070F']),
+      expect.arrayContaining(['#4DA8FF', '#2E5EAA', '#12233F']),
     );
     expect(hero.props.decision.visualTheme.riskStatus.level).toBe('danger');
+    const iconAnchor = tree.root.findByProps({
+      testID: 'weather-hero-icon-anchor',
+    });
+    const iconStyle = StyleSheet.flatten(iconAnchor.props.style);
+    expect(iconStyle.top).toBeLessThanOrEqual(10);
+    expect(iconStyle.width).toBeLessThanOrEqual(86);
+  });
+
+  it('keeps cloudy icons right aligned and away from text content', () => {
+    const tree = renderCard(
+      makeWeatherResult({
+        conditionCode: 'cloudy',
+        conditionLabel: 'Cloudy',
+      }),
+      false,
+    );
+    const iconAnchor = tree.root.findByProps({
+      testID: 'weather-hero-icon-anchor',
+    });
+    const iconStyle = StyleSheet.flatten(iconAnchor.props.style);
+    const tempSection = tree.root.findAll(
+      node =>
+        Array.isArray(node.props.style) &&
+        node.props.style.some(
+          (style: Record<string, unknown>) =>
+            typeof style?.paddingRight === 'number',
+        ),
+    )[0];
+    const tempSectionStyle = StyleSheet.flatten(tempSection.props.style);
+
+    expect(iconStyle.right).toBeLessThanOrEqual(10);
+    expect(iconStyle.width).toBeGreaterThanOrEqual(82);
+    expect(tempSectionStyle.paddingRight).toBeGreaterThan(iconStyle.width);
   });
 });

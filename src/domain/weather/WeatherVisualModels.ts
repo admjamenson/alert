@@ -40,6 +40,14 @@ export type WeatherSafetyLevel =
   | 'watch'
   | 'danger'
   | 'severe';
+export type WeatherDayPhase =
+  | 'morning'
+  | 'noon'
+  | 'afternoon'
+  | 'sunset'
+  | 'night'
+  | 'midnight'
+  | 'predawn';
 
 export type WeatherSafetyStatus = {
   level: WeatherSafetyLevel;
@@ -111,16 +119,21 @@ export type WeatherVisualContext = {
   riskLevel?: WeatherVisualRiskLevel | null;
   timeOfDay?:
     | 'preDawn'
+    | 'predawn'
     | 'sunrise'
     | 'morning'
+    | 'noon'
     | 'midday'
+    | 'afternoon'
     | 'goldenHour'
     | 'sunset'
     | 'dusk'
     | 'night'
+    | 'midnight'
     | 'dawn'
     | 'day'
     | null;
+  timeZone?: string | null;
   systemColorScheme?: WeatherSystemColorScheme;
   freshness?: WeatherVisualFreshness | null;
   sourceConfidence?: number | null;
